@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gensoulkyo
+      POSTGRES_USER: phantasm
+      POSTGRES_PASSWORD: phantasm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phantasm -d gensoulkyo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../../migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/000001_initial_schema.sql:ro
+
+  runtime-builder:
+    build:
+      context: ../..
+      dockerfile: deployments/local/runtime-builder.Dockerfile
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - cp /runtime-artifacts/gensoulkyo.so /out/gensoulkyo.so
+    volumes:
+      - runtime-modules:/out
+
+  nakama:
+    image: heroiclabs/nakama:3.39.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime-builder:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - >
+        /nakama/nakama migrate up --database.address phantasm:phantasm@postgres:5432/gensoulkyo &&
+        exec /nakama/nakama --config /nakama/data/config/nakama.yml --database.address phantasm:phantasm@postgres:5432/gensoulkyo
+    ports:
+      - "7350:7350"
+      - "7351:7351"
+    volumes:
+      - ../../configs:/nakama/data/config:ro
+      - runtime-modules:/nakama/data/modules:ro
+
+volumes:
+  postgres-data:
+  runtime-modules:
