@@ -98,3 +98,172 @@ func TestBattleModeActionFixtureContract(t *testing.T) {
 		t.Fatalf("wire action payload_json string must parse as JSON: %v", err)
 	}
 }
+
+func TestBattleSnapshotFixtureContract(t *testing.T) {
+	snapshot := struct {
+		Version      int                `json:"version"`
+		MatchID      string             `json:"match_id"`
+		SnapshotTick int                `json:"snapshot_tick"`
+		SnapshotKind string             `json:"snapshot_kind"`
+		StateHash    string             `json:"state_hash"`
+		Players      []battlePlayerWire `json:"players"`
+		BulletsDelta []battleBulletWire `json:"bullets_delta"`
+		ModeState    map[string]any     `json:"mode_state"`
+		EventCursor  int                `json:"event_cursor"`
+	}{
+		Version:      phkv1.ProtocolVersion,
+		MatchID:      phkv1.BattleSnapshotMatchID,
+		SnapshotTick: phkv1.BattleSnapshotSnapshotTick,
+		SnapshotKind: phkv1.BattleSnapshotSnapshotKind,
+		StateHash:    phkv1.BattleSnapshotStateHash,
+		Players: []battlePlayerWire{
+			{PlayerID: "p1", XMilli: 120000, YMilli: 300000, Connected: true, HandSize: 4},
+		},
+		BulletsDelta: []battleBulletWire{
+			{BulletID: "b-001", Op: "spawn", XMilli: 120000, YMilli: 300000, VXMilli: 0, VYMilli: -350, RadiusMilli: 5000, PatternID: "opening_fan", Color: "blue"},
+		},
+		ModeState: map[string]any{
+			"boss_hp_preview": 42,
+			"duel_status":     "running",
+		},
+		EventCursor: phkv1.BattleSnapshotEventCursor,
+	}
+	if snapshot.MatchID == "" || snapshot.StateHash == "" || snapshot.SnapshotKind == "" {
+		t.Fatalf("battle snapshot fixture missing identity fields: %+v", snapshot)
+	}
+	if snapshot.SnapshotTick <= 0 || snapshot.EventCursor <= 0 {
+		t.Fatalf("battle snapshot fixture must carry positive tick/cursor: %+v", snapshot)
+	}
+	if len(snapshot.Players) == 0 || len(snapshot.BulletsDelta) == 0 || len(snapshot.ModeState) == 0 {
+		t.Fatalf("battle snapshot fixture missing projected state: %+v", snapshot)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal battle snapshot fixture: %v", err)
+	}
+	roundTrip := assertWireFieldsMatchManifest(t, "BattleSnapshot", encoded)
+	if _, ok := roundTrip["players"].([]any); !ok {
+		t.Fatalf("wire snapshot players must be an array, got %#v", roundTrip["players"])
+	}
+	if _, ok := roundTrip["bullets_delta"].([]any); !ok {
+		t.Fatalf("wire snapshot bullets_delta must be an array, got %#v", roundTrip["bullets_delta"])
+	}
+	if _, ok := roundTrip["mode_state"].(map[string]any); !ok {
+		t.Fatalf("wire snapshot mode_state must be an object, got %#v", roundTrip["mode_state"])
+	}
+	assertWireFieldsMatchManifest(t, "BattlePlayerSnapshot", mustMarshalJSON(t, snapshot.Players[0]))
+	assertWireFieldsMatchManifest(t, "BattleBulletDelta", mustMarshalJSON(t, snapshot.BulletsDelta[0]))
+}
+
+func TestBattleEventFixtureContract(t *testing.T) {
+	event := struct {
+		Version             int    `json:"version"`
+		MatchID             string `json:"match_id"`
+		Cursor              int    `json:"cursor"`
+		Tick                int    `json:"tick"`
+		Type                string `json:"type"`
+		PlayerID            string `json:"player_id"`
+		PayloadJSON         string `json:"payload_json"`
+		ServerAuthoritative bool   `json:"server_authoritative"`
+	}{
+		Version:             phkv1.ProtocolVersion,
+		MatchID:             phkv1.BattleEventMatchID,
+		Cursor:              phkv1.BattleEventCursor,
+		Tick:                phkv1.BattleEventTick,
+		Type:                phkv1.BattleEventType,
+		PlayerID:            "p1",
+		PayloadJSON:         `{"bullet_id":"b-001","pattern_id":"opening_fan"}`,
+		ServerAuthoritative: phkv1.BattleEventServerAuthoritative,
+	}
+	if event.MatchID == "" || event.Type == "" || event.PlayerID == "" {
+		t.Fatalf("battle event fixture missing identity fields: %+v", event)
+	}
+	if event.Cursor <= 0 || event.Tick <= 0 {
+		t.Fatalf("battle event fixture must carry positive cursor/tick: %+v", event)
+	}
+	if !event.ServerAuthoritative {
+		t.Fatalf("battle event fixture must be server authoritative: %+v", event)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil {
+		t.Fatalf("battle event payload_json must be parseable JSON: %v", err)
+	}
+	if payload["bullet_id"] == "" || payload["pattern_id"] == "" {
+		t.Fatalf("battle event payload missing bullet audit fields: %+v", payload)
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal battle event fixture: %v", err)
+	}
+	roundTrip := assertWireFieldsMatchManifest(t, "BattleEvent", encoded)
+	payloadJSON, ok := roundTrip["payload_json"].(string)
+	if !ok {
+		t.Fatalf("wire event payload_json must be a JSON string field, got %#v", roundTrip["payload_json"])
+	}
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		t.Fatalf("wire event payload_json string must parse as JSON: %v", err)
+	}
+	if got, ok := roundTrip["server_authoritative"].(bool); !ok || !got {
+		t.Fatalf("wire event must include server_authoritative=true, got %#v", roundTrip["server_authoritative"])
+	}
+}
+
+type battlePlayerWire struct {
+	PlayerID  string `json:"player_id"`
+	XMilli    int    `json:"x_milli"`
+	YMilli    int    `json:"y_milli"`
+	Connected bool   `json:"connected"`
+	HandSize  int    `json:"hand_size"`
+}
+
+type battleBulletWire struct {
+	BulletID    string `json:"bullet_id"`
+	Op          string `json:"op"`
+	XMilli      int    `json:"x_milli"`
+	YMilli      int    `json:"y_milli"`
+	VXMilli     int    `json:"vx_milli"`
+	VYMilli     int    `json:"vy_milli"`
+	RadiusMilli int    `json:"radius_milli"`
+	PatternID   string `json:"pattern_id"`
+	Color       string `json:"color"`
+}
+
+func assertWireFieldsMatchManifest(t *testing.T, messageName string, encoded []byte) map[string]any {
+	t.Helper()
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("round-trip %s fixture: %v", messageName, err)
+	}
+	required := phkv1.RequiredMessageFields(messageName)
+	if len(roundTrip) != len(required) {
+		t.Fatalf("%s wire field count drift: got %d keys=%v want %d fields=%v", messageName, len(roundTrip), mapKeys(roundTrip), len(required), required)
+	}
+	for _, field := range required {
+		if _, ok := roundTrip[field]; !ok {
+			t.Fatalf("%s wire fixture missing manifest field %q; keys=%v", messageName, field, mapKeys(roundTrip))
+		}
+	}
+	for field := range roundTrip {
+		if !phkv1.HasMessageField(messageName, field) {
+			t.Fatalf("%s wire fixture has field outside manifest %q; manifest=%v", messageName, field, required)
+		}
+	}
+	return roundTrip
+}
+
+func mustMarshalJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	return encoded
+}
+
+func mapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}

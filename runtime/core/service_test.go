@@ -1686,6 +1686,19 @@ func TestServerValidatesModeActions(t *testing.T) {
 	if !hasEventType(events.Events, "mode_action_accepted") || !hasEventType(events.Events, "mode_action_rejected") {
 		t.Fatalf("mode action events missing: %+v", events.Events)
 	}
+	if !strings.HasPrefix(phkv1.BattleSnapshotStateHash, "sha256:") || phkv1.BattleSnapshotEventCursor != phkv1.BattleEventCursor {
+		t.Fatalf("shared snapshot/event fixture drift: state=%s snapshot_cursor=%d event_cursor=%d", phkv1.BattleSnapshotStateHash, phkv1.BattleSnapshotEventCursor, phkv1.BattleEventCursor)
+	}
+	if phkv1.BattleEventType == "" || !phkv1.BattleEventServerAuthoritative {
+		t.Fatalf("shared battle event fixture must remain authoritative: type=%s authoritative=%v", phkv1.BattleEventType, phkv1.BattleEventServerAuthoritative)
+	}
+	snapshot, err := service.Snapshot(players[0].SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("mode snapshot: %v", err)
+	}
+	if snapshot.StateHash == "" || snapshot.Tick < 0 || snapshot.Events == nil {
+		t.Fatalf("runtime snapshot missing protocol-shaped state: %+v", snapshot)
+	}
 }
 
 func TestServerValidatesBossTransferModeAction(t *testing.T) {
