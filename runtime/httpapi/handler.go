@@ -1,0 +1,644 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"gensoulkyo/runtime/core"
+	"gensoulkyo/runtime/security"
+)
+
+type Handler struct {
+	service       *core.Service
+	envelopeGuard *security.BusinessEnvelopeGuard
+}
+
+type Option func(*Handler)
+
+func New(service *core.Service) http.Handler {
+	handler := &Handler{
+		service:       service,
+		envelopeGuard: security.NewBusinessEnvelopeGuard(),
+	}
+	return handler
+}
+
+func NewWithOptions(service *core.Service, options ...Option) http.Handler {
+	handler := &Handler{
+		service:       service,
+		envelopeGuard: security.NewBusinessEnvelopeGuard(),
+	}
+	for _, option := range options {
+		option(handler)
+	}
+	if handler.envelopeGuard == nil {
+		handler.envelopeGuard = security.NewBusinessEnvelopeGuard()
+	}
+	return handler
+}
+
+func WithBusinessEnvelopeGuard(guard *security.BusinessEnvelopeGuard) Option {
+	return func(handler *Handler) {
+		if guard != nil {
+			handler.envelopeGuard = guard
+		}
+	}
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	path := strings.Trim(r.URL.Path, "/")
+	segments := []string{}
+	if path != "" {
+		segments = strings.Split(path, "/")
+	}
+	if r.Method == http.MethodGet && path == "health" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "server_version": core.ServerVersion})
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "auth" && segments[2] == "anonymous" && r.Method == http.MethodPost {
+		h.loginAnonymous(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "business-envelope" && r.Method == http.MethodGet {
+		h.businessEnvelopeStatus(w, r)
+		return
+	}
+	if routeUsesBusinessEnvelope(r.Method, segments) {
+		if status, code, message := h.validateBusinessEnvelopeHeaders(r); code != "" {
+			writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
+			return
+		}
+	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "bootstrap" && r.Method == http.MethodGet {
+		h.bootstrap(w, r)
+		return
+	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "inventory" && r.Method == http.MethodGet {
+		h.inventory(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "cards" && segments[2] == "upgrade" && r.Method == http.MethodPost {
+		h.upgradeCard(w, r)
+		return
+	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "decks" && r.Method == http.MethodGet {
+		h.decks(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "decks" && segments[2] == "save" && r.Method == http.MethodPost {
+		h.saveDeck(w, r)
+		return
+	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "chests" && r.Method == http.MethodGet {
+		h.chests(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "chests" && segments[2] == "open" && r.Method == http.MethodPost {
+		h.openChest(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "presence" && segments[2] == "heartbeat" && r.Method == http.MethodPost {
+		h.heartbeat(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "matchmaking" && segments[2] == "join" && r.Method == http.MethodPost {
+		h.joinQueue(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "matchmaking" && segments[2] == "tickets" && r.Method == http.MethodGet {
+		h.queueTicket(w, r, segments[3])
+		return
+	}
+	if len(segments) == 5 && segments[0] == "v1" && segments[1] == "matchmaking" && segments[2] == "tickets" && segments[4] == "cancel" && r.Method == http.MethodPost {
+		h.cancelTicket(w, r, segments[3])
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "rooms" && segments[2] == "create" && r.Method == http.MethodPost {
+		h.createRoom(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "join" && r.Method == http.MethodPost {
+		h.joinRoom(w, r, segments[2])
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "activity" && segments[2] == "claim" && r.Method == http.MethodPost {
+		h.claimActivity(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "servers" && r.Method == http.MethodGet {
+		h.battleServers(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "servers" && segments[3] == "register" && r.Method == http.MethodPost {
+		h.registerBattleServer(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "servers" && segments[3] == "heartbeat" && r.Method == http.MethodPost {
+		h.battleServerHeartbeat(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "results" && segments[3] == "submit" && r.Method == http.MethodPost {
+		h.submitBattleResult(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "replays" && r.Method == http.MethodGet {
+		h.replay(w, r, segments[2])
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "matches" {
+		matchID := segments[2]
+		switch segments[3] {
+		case "ready":
+			if r.Method == http.MethodPost {
+				h.ready(w, r, matchID)
+				return
+			}
+		case "input":
+			if r.Method == http.MethodPost {
+				h.input(w, r, matchID)
+				return
+			}
+		case "snapshot":
+			if r.Method == http.MethodGet {
+				h.snapshot(w, r, matchID)
+				return
+			}
+		case "events":
+			if r.Method == http.MethodGet {
+				h.events(w, r, matchID)
+				return
+			}
+		case "mode-action":
+			if r.Method == http.MethodPost {
+				h.modeAction(w, r, matchID)
+				return
+			}
+		case "rematch":
+			if r.Method == http.MethodPost {
+				h.rematch(w, r, matchID)
+				return
+			}
+		case "disconnect":
+			if r.Method == http.MethodPost {
+				h.disconnect(w, r, matchID)
+				return
+			}
+		case "reconnect":
+			if r.Method == http.MethodPost {
+				h.reconnect(w, r, matchID)
+				return
+			}
+		case "settle":
+			if r.Method == http.MethodPost {
+				h.settle(w, r, matchID)
+				return
+			}
+		case "battle-allocation":
+			if r.Method == http.MethodGet {
+				h.battleAllocation(w, r, matchID)
+				return
+			}
+		case "battle-ticket":
+			if r.Method == http.MethodPost {
+				h.battleTicket(w, r, matchID)
+				return
+			}
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error_code": "not_found", "message": "route not found"})
+}
+
+func (h *Handler) loginAnonymous(w http.ResponseWriter, r *http.Request) {
+	var req core.AnonymousLoginRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.LoginAnonymous(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) bootstrap(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.Bootstrap(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) inventory(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.Inventory(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) upgradeCard(w http.ResponseWriter, r *http.Request) {
+	var req core.CardUpgradeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.UpgradeCard(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) decks(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.Decks(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) saveDeck(w http.ResponseWriter, r *http.Request) {
+	var req core.SaveDeckRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.SaveDeck(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) chests(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.Chests(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) openChest(w http.ResponseWriter, r *http.Request) {
+	var req core.ChestOpenRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.OpenChest(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) heartbeat(w http.ResponseWriter, r *http.Request) {
+	var req core.PresenceHeartbeatRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.Heartbeat(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) joinQueue(w http.ResponseWriter, r *http.Request) {
+	var req core.JoinQueueRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.JoinQueue(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) queueTicket(w http.ResponseWriter, r *http.Request, ticketID string) {
+	resp, err := h.service.QueueTicket(sessionToken(r), ticketID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) cancelTicket(w http.ResponseWriter, r *http.Request, ticketID string) {
+	resp, err := h.service.CancelTicket(sessionToken(r), ticketID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
+	var req core.CreateRoomRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.CreateRoom(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request, roomCode string) {
+	var req core.JoinRoomRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.JoinRoom(sessionToken(r), roomCode, req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ready(w http.ResponseWriter, r *http.Request, matchID string) {
+	resp, err := h.service.ReadyMatch(sessionToken(r), matchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) input(w http.ResponseWriter, r *http.Request, matchID string) {
+	raw := map[string]any{}
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
+	resp, err := h.service.SubmitInput(sessionToken(r), matchID, raw)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) snapshot(w http.ResponseWriter, r *http.Request, matchID string) {
+	resp, err := h.service.Snapshot(sessionToken(r), matchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) events(w http.ResponseWriter, r *http.Request, matchID string) {
+	after := queryInt(r, "after", 0)
+	limit := queryInt(r, "limit", 64)
+	resp, err := h.service.MatchEvents(sessionToken(r), matchID, after, limit)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) modeAction(w http.ResponseWriter, r *http.Request, matchID string) {
+	raw := map[string]any{}
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
+	resp, err := h.service.SubmitModeAction(sessionToken(r), matchID, raw)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) rematch(w http.ResponseWriter, r *http.Request, matchID string) {
+	resp, err := h.service.RequestRematch(sessionToken(r), matchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) disconnect(w http.ResponseWriter, r *http.Request, matchID string) {
+	resp, err := h.service.DisconnectMatch(sessionToken(r), matchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) reconnect(w http.ResponseWriter, r *http.Request, matchID string) {
+	resp, err := h.service.ReconnectMatch(sessionToken(r), matchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) settle(w http.ResponseWriter, r *http.Request, matchID string) {
+	raw := map[string]any{}
+	if r.Body != nil && r.ContentLength != 0 {
+		if !decodeJSON(w, r, &raw) {
+			return
+		}
+	}
+	resp, err := h.service.SettleMatch(sessionToken(r), matchID, raw)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) replay(w http.ResponseWriter, r *http.Request, replayID string) {
+	resp, err := h.service.Replay(sessionToken(r), replayID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) claimActivity(w http.ResponseWriter, r *http.Request) {
+	raw := map[string]any{}
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
+	resp, err := h.service.ClaimActivity(sessionToken(r), raw)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) battleServers(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.service.BattleServers())
+}
+
+func (h *Handler) registerBattleServer(w http.ResponseWriter, r *http.Request) {
+	var req core.RegisterBattleServerRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.RegisterBattleServer(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) battleServerHeartbeat(w http.ResponseWriter, r *http.Request) {
+	var req core.BattleServerHeartbeatRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.BattleServerHeartbeat(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
+	var req core.BattleResultSubmitRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.SubmitBattleResult(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) battleAllocation(w http.ResponseWriter, r *http.Request, matchID string) {
+	resp, err := h.service.BattleAllocation(sessionToken(r), matchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) battleTicket(w http.ResponseWriter, r *http.Request, matchID string) {
+	resp, err := h.service.BattleTicket(sessionToken(r), matchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) businessEnvelopeStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": h.envelopeGuard.Snapshot(),
+	})
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return false
+	}
+	return true
+}
+
+func sessionToken(r *http.Request) string {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(header, "Bearer ") {
+		return strings.TrimPrefix(header, "Bearer ")
+	}
+	if token := strings.TrimSpace(r.Header.Get("X-Session-Token")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(r.URL.Query().Get("session_token"))
+}
+
+func queryInt(r *http.Request, key string, fallback int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func routeUsesBusinessEnvelope(method string, segments []string) bool {
+	if len(segments) == 0 || segments[0] != "v1" {
+		return false
+	}
+	if len(segments) == 3 && segments[1] == "auth" && segments[2] == "anonymous" && method == http.MethodPost {
+		return false
+	}
+	if len(segments) == 3 && segments[1] == "security" && segments[2] == "business-envelope" && method == http.MethodGet {
+		return false
+	}
+	return true
+}
+
+func (h *Handler) validateBusinessEnvelopeHeaders(r *http.Request) (int, string, string) {
+	request, ok := security.BusinessEnvelopeRequestFromHTTPHeaders(r.Header, security.BusinessEnvelopeRequestContext{
+		SessionID: sessionToken(r),
+		Transport: security.BusinessEnvelopeTransportHTTPFallback,
+		Endpoint:  strings.TrimSpace(r.URL.Path),
+	})
+	if !ok {
+		return 0, "", ""
+	}
+	result := security.ValidateBusinessEnvelopeRequest(h.envelopeGuard, request)
+	if !result.OK {
+		return result.Status, result.Code, result.Message
+	}
+	return 0, "", ""
+}
+
+func writeError(w http.ResponseWriter, err error) {
+	code := core.ErrorCode(err)
+	status := http.StatusBadRequest
+	switch code {
+	case "unauthorized":
+		status = http.StatusUnauthorized
+	case "not_found":
+		status = http.StatusNotFound
+	case "match_state_invalid", "reconnect_expired":
+		status = http.StatusConflict
+	case "forbidden_field":
+		status = http.StatusForbidden
+	case "room_unavailable":
+		status = http.StatusConflict
+	case "battle_server_unavailable":
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": err.Error()})
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
