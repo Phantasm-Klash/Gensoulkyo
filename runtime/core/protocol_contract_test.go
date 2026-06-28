@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	phkv1 "github.com/phantasm-klash/phk-protocol/gen/go/phk/v1"
@@ -206,6 +207,44 @@ func TestBattleEventFixtureContract(t *testing.T) {
 	if got, ok := roundTrip["server_authoritative"].(bool); !ok || !got {
 		t.Fatalf("wire event must include server_authoritative=true, got %#v", roundTrip["server_authoritative"])
 	}
+}
+
+func TestGoldenReplaySummaryFixtureContract(t *testing.T) {
+	summary := struct {
+		Version         int    `json:"version"`
+		ReplayID        string `json:"replay_id"`
+		MatchID         string `json:"match_id"`
+		OwnerUserID     string `json:"owner_user_id"`
+		InputCount      int    `json:"input_count"`
+		EventCount      int    `json:"event_count"`
+		InputStreamHash string `json:"input_stream_hash"`
+		EventStreamHash string `json:"event_stream_hash"`
+		FinalStateHash  string `json:"final_state_hash"`
+		FinalTick       int    `json:"final_tick"`
+	}{
+		Version:         phkv1.ProtocolVersion,
+		ReplayID:        phkv1.GoldenReplaySummaryReplayID,
+		MatchID:         phkv1.GoldenReplaySummaryMatchID,
+		OwnerUserID:     phkv1.GoldenReplaySummaryOwnerUserID,
+		InputCount:      phkv1.GoldenReplaySummaryInputCount,
+		EventCount:      phkv1.GoldenReplaySummaryEventCount,
+		InputStreamHash: phkv1.GoldenReplaySummaryInputStreamHash,
+		EventStreamHash: phkv1.GoldenReplaySummaryEventStreamHash,
+		FinalStateHash:  phkv1.GoldenReplaySummaryFinalStateHash,
+		FinalTick:       phkv1.GoldenReplaySummaryFinalTick,
+	}
+	if summary.ReplayID == "" || summary.MatchID == "" || summary.OwnerUserID == "" {
+		t.Fatalf("golden replay summary fixture missing identity fields: %+v", summary)
+	}
+	if summary.InputCount <= 0 || summary.EventCount <= 0 || summary.FinalTick <= 0 {
+		t.Fatalf("golden replay summary fixture must carry positive counts/tick: %+v", summary)
+	}
+	for _, value := range []string{summary.InputStreamHash, summary.EventStreamHash, summary.FinalStateHash} {
+		if !strings.HasPrefix(value, "sha256:") {
+			t.Fatalf("golden replay summary hash must be sha256-prefixed: %+v", summary)
+		}
+	}
+	assertWireFieldsMatchManifest(t, "ReplayInputStreamSummary", mustMarshalJSON(t, summary))
 }
 
 type battlePlayerWire struct {
