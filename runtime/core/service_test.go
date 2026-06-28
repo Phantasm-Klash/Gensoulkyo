@@ -142,15 +142,15 @@ func TestAuthoritativeMatchLifecycleSettlementAndClaims(t *testing.T) {
 		t.Fatalf("replay missing audit data: %+v", replay)
 	}
 	goldenReplaySummary := map[string]any{
-		"replay_id":          phkv1.GoldenReplaySummaryReplayID,
-		"match_id":           phkv1.GoldenReplaySummaryMatchID,
-		"owner_user_id":      phkv1.GoldenReplaySummaryOwnerUserID,
-		"input_count":        phkv1.GoldenReplaySummaryInputCount,
-		"event_count":        phkv1.GoldenReplaySummaryEventCount,
-		"input_stream_hash":  phkv1.GoldenReplaySummaryInputStreamHash,
-		"event_stream_hash":  phkv1.GoldenReplaySummaryEventStreamHash,
-		"final_state_hash":   phkv1.GoldenReplaySummaryFinalStateHash,
-		"final_tick":         phkv1.GoldenReplaySummaryFinalTick,
+		"replay_id":         phkv1.GoldenReplaySummaryReplayID,
+		"match_id":          phkv1.GoldenReplaySummaryMatchID,
+		"owner_user_id":     phkv1.GoldenReplaySummaryOwnerUserID,
+		"input_count":       phkv1.GoldenReplaySummaryInputCount,
+		"event_count":       phkv1.GoldenReplaySummaryEventCount,
+		"input_stream_hash": phkv1.GoldenReplaySummaryInputStreamHash,
+		"event_stream_hash": phkv1.GoldenReplaySummaryEventStreamHash,
+		"final_state_hash":  phkv1.GoldenReplaySummaryFinalStateHash,
+		"final_tick":        phkv1.GoldenReplaySummaryFinalTick,
 	}
 	if goldenReplaySummary["replay_id"] == "" || goldenReplaySummary["match_id"] == "" || goldenReplaySummary["owner_user_id"] == "" {
 		t.Fatalf("golden replay summary identity constants missing: %+v", goldenReplaySummary)
@@ -1305,6 +1305,7 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	host := mustLogin(t, service, "Lobby Host")
 	guest := mustLogin(t, service, "Lobby Guest")
 	replacement := mustLogin(t, service, "Lobby Replacement")
+	intruder := mustLogin(t, service, "Lobby Intruder")
 
 	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
 		ModeID:       "world_boss",
@@ -1362,6 +1363,76 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if joined.RoomStatus != "waiting" || joined.CurrentPlayers != 2 {
 		t.Fatalf("joined room invalid: %+v", joined)
+	}
+	if _, err := service.LobbyMessage(intruder.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "intruder-msg",
+		Kind:      "chat",
+		Text:      "not in this room",
+	}); ErrorCode(err) != codeUnauthorized {
+		t.Fatalf("expected non-participant chat rejection, got %v", err)
+	}
+	chat, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "guest-chat-1",
+		Kind:      "chat",
+		Text:      "ready for boss",
+		Metadata:  map[string]any{"client_locale": "en-US"},
+	})
+	if err != nil {
+		t.Fatalf("guest chat: %v", err)
+	}
+	if chat.Kind != "chat" || chat.UserID != guest.UserID || !chat.ServerAuthoritative || chat.Metadata["client_locale"] != "en-US" {
+		t.Fatalf("chat metadata invalid: %+v", chat)
+	}
+	duplicate, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "guest-chat-1",
+		Kind:      "chat",
+		Text:      "different text should not replace",
+	})
+	if err != nil {
+		t.Fatalf("duplicate guest chat: %v", err)
+	}
+	if !duplicate.Duplicate || duplicate.Text != "ready for boss" {
+		t.Fatalf("duplicate chat should return original metadata: %+v", duplicate)
+	}
+	if _, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "guest-announcement",
+		Kind:      "announcement",
+		Text:      "guest cannot pin",
+	}); ErrorCode(err) != codeUnauthorized {
+		t.Fatalf("expected guest announcement rejection, got %v", err)
+	}
+	announcement, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "host-announcement-1",
+		Kind:      "announcement",
+		Text:      "boss route locked",
+		Metadata:  map[string]any{"cta": "ready"},
+	})
+	if err != nil {
+		t.Fatalf("host announcement: %v", err)
+	}
+	if announcement.Kind != "announcement" || announcement.UserID != host.UserID || announcement.ModeID != "world_boss" {
+		t.Fatalf("announcement invalid: %+v", announcement)
+	}
+	if _, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "bad-authority-message",
+		Kind:      "chat",
+		Text:      "bad",
+		Metadata:  map[string]any{"reward": "client-authored"},
+	}); ErrorCode(err) != codeForbiddenField {
+		t.Fatalf("expected authority metadata rejection, got %v", err)
+	}
+	afterMessages, err := service.Room(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("room after messages: %v", err)
+	}
+	if len(afterMessages.Messages) != 2 || afterMessages.Messages[0].MessageID != "guest-chat-1" || afterMessages.Messages[1].Kind != "announcement" {
+		t.Fatalf("room should expose lobby messages: %+v", afterMessages.Messages)
 	}
 	left, err := service.LeaveRoom(guest.SessionToken, created.RoomCode)
 	if err != nil {

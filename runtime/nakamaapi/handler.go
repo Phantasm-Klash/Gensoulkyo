@@ -173,6 +173,15 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(request.SessionID, roomCode) })
+	case "rooms.message", "rooms.chat", "rooms.announcement":
+		req, response := lobbyMessageRequest(body, rpcID)
+		if !response.OK {
+			return response
+		}
+		return handler.call(func() (any, error) { return handler.service.LobbyMessage(request.SessionID, req) })
+	case "match.ready", "matches.ready":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.ReadyMatch(request.SessionID, matchID) })
 	case "activity.claim":
 		return handler.call(func() (any, error) { return handler.service.ClaimActivity(request.SessionID, body) })
 	case "battle.servers":
@@ -246,6 +255,15 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(message.SessionID, roomCode) })
+	case "rooms.message", "rooms.chat", "rooms.announcement":
+		req, response := lobbyMessageRequest(body, name)
+		if !response.OK {
+			return response
+		}
+		return handler.call(func() (any, error) { return handler.service.LobbyMessage(message.SessionID, req) })
+	case "match.ready", "matches.ready":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.ReadyMatch(message.SessionID, matchID) })
 	default:
 		return errorResponse(http.StatusNotFound, "not_found", fmt.Sprintf("wss message %q is not registered", message.Name))
 	}
@@ -441,4 +459,19 @@ func fieldString(body map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func lobbyMessageRequest(body map[string]any, name string) (core.LobbyMessageRequest, Response) {
+	var req core.LobbyMessageRequest
+	if err := decodeBody(body, &req); err != nil {
+		return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+	}
+	normalized := normalizeName(name)
+	switch normalized {
+	case "rooms.chat":
+		req.Kind = "chat"
+	case "rooms.announcement":
+		req.Kind = "announcement"
+	}
+	return req, successResponse(nil)
 }

@@ -34,10 +34,15 @@ var rpcIDs = []string{
 	"rooms.rules",
 	"rooms.join",
 	"rooms.leave",
+	"rooms.message",
+	"rooms.chat",
+	"rooms.announcement",
+	"match.ready",
 	"activity.claim",
 	"battle.servers",
 	"battle.allocation",
 	"battle.ticket",
+	"battle.result.submit",
 }
 
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {

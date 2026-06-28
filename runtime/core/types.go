@@ -498,6 +498,28 @@ type RoomParticipantSnapshot struct {
 	LastSeenAt       time.Time     `json:"last_seen_at"`
 }
 
+type LobbyMessageRequest struct {
+	RoomCode  string         `json:"room_code"`
+	MessageID string         `json:"message_id"`
+	Kind      string         `json:"kind"`
+	Text      string         `json:"text"`
+	Metadata  map[string]any `json:"metadata"`
+}
+
+type LobbyMessage struct {
+	MessageID           string         `json:"message_id"`
+	RoomCode            string         `json:"room_code"`
+	ModeID              string         `json:"mode_id"`
+	Kind                string         `json:"kind"`
+	UserID              string         `json:"user_id"`
+	DisplayName         string         `json:"display_name"`
+	Text                string         `json:"text"`
+	Metadata            map[string]any `json:"metadata,omitempty"`
+	CreatedAt           time.Time      `json:"created_at"`
+	Duplicate           bool           `json:"duplicate"`
+	ServerAuthoritative bool           `json:"server_authoritative"`
+}
+
 type RoomSnapshot struct {
 	OK                  bool                      `json:"ok"`
 	RoomCode            string                    `json:"room_code"`
@@ -514,6 +536,7 @@ type RoomSnapshot struct {
 	ModeConfigHash      string                    `json:"mode_config_hash"`
 	ModeParams          map[string]any            `json:"mode_params,omitempty"`
 	Participants        []RoomParticipantSnapshot `json:"participants"`
+	Messages            []LobbyMessage            `json:"messages,omitempty"`
 	CreatedAt           time.Time                 `json:"created_at"`
 	ServerTime          time.Time                 `json:"server_time"`
 	ServerAuthoritative bool                      `json:"server_authoritative"`

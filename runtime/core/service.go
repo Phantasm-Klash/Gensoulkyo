@@ -173,6 +173,7 @@ type roomState struct {
 	Status     string
 	StageID    string
 	ModeParams map[string]any
+	Messages   []LobbyMessage
 }
 
 type matchParticipantSpec struct {
@@ -1103,6 +1104,72 @@ func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueRespons
 	}
 	s.cancelRoomTicketLocked(ticket, user.UserID)
 	return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), nil), nil
+}
+
+func (s *Service) LobbyMessage(sessionToken string, req LobbyMessageRequest) (*LobbyMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	room, err := s.roomByCodeLocked(req.RoomCode)
+	if err != nil {
+		return nil, err
+	}
+	if room.Status != "waiting" {
+		return nil, newError(codeRoomUnavailable, "room is %s", room.Status)
+	}
+	if !s.roomHasUserLocked(room, user.UserID) {
+		return nil, newError(codeUnauthorized, "user is not in room")
+	}
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = "chat"
+	}
+	if kind != "chat" && kind != "announcement" {
+		return nil, newError(codeInvalidRequest, "message kind must be chat or announcement")
+	}
+	if kind == "announcement" && room.HostUserID != user.UserID {
+		return nil, newError(codeUnauthorized, "only room host can publish announcements")
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return nil, newError(codeInvalidRequest, "message_id is required")
+	}
+	if existing := roomMessageByID(room, messageID); existing != nil {
+		duplicate := copyLobbyMessage(*existing)
+		duplicate.Duplicate = true
+		return &duplicate, nil
+	}
+	if field := firstForbiddenField(req.Metadata); field != "" {
+		return nil, newError(codeForbiddenField, "client cannot author %s", field)
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" && kind == "chat" {
+		return nil, newError(codeInvalidRequest, "chat text is required")
+	}
+	if len(text) > 240 {
+		text = text[:240]
+	}
+	message := LobbyMessage{
+		MessageID:           messageID,
+		RoomCode:            room.RoomCode,
+		ModeID:              room.ModeID,
+		Kind:                kind,
+		UserID:              user.UserID,
+		DisplayName:         user.DisplayName,
+		Text:                text,
+		Metadata:            sanitizedLobbyMetadata(req.Metadata),
+		CreatedAt:           s.clock(),
+		ServerAuthoritative: true,
+	}
+	room.Messages = append(room.Messages, message)
+	if len(room.Messages) > 32 {
+		room.Messages = append([]LobbyMessage{}, room.Messages[len(room.Messages)-32:]...)
+	}
+	return &message, nil
 }
 
 func (s *Service) QueueTicket(sessionToken string, ticketID string) (*QueueResponse, error) {
@@ -2104,10 +2171,36 @@ func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapsho
 		ModeConfigHash:      modeConfigHash(room.ModeID),
 		ModeParams:          copyAnyMap(room.ModeParams),
 		Participants:        participants,
+		Messages:            copyLobbyMessages(room.Messages),
 		CreatedAt:           room.CreatedAt,
 		ServerTime:          now,
 		ServerAuthoritative: true,
 	}
+}
+
+func (s *Service) roomHasUserLocked(room *roomState, userID string) bool {
+	if room == nil {
+		return false
+	}
+	for _, ticketID := range room.TicketIDs {
+		ticket := s.tickets[ticketID]
+		if ticket != nil && ticket.UserID == userID && ticket.Status == "queued" {
+			return true
+		}
+	}
+	return false
+}
+
+func roomMessageByID(room *roomState, messageID string) *LobbyMessage {
+	if room == nil || messageID == "" {
+		return nil
+	}
+	for index := range room.Messages {
+		if room.Messages[index].MessageID == messageID {
+			return &room.Messages[index]
+		}
+	}
+	return nil
 }
 
 func (s *Service) ticketDepthLocked(ticket *queueTicket) int {
@@ -3639,6 +3732,32 @@ func firstForbiddenField(raw map[string]any) string {
 	return ""
 }
 
+func sanitizedLobbyMetadata(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for key, value := range raw {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, forbidden := forbiddenClientFields[key]; forbidden {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			out[key] = strings.TrimSpace(typed)
+		case bool, int, int32, int64, float64:
+			out[key] = typed
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func claimEligibility(user *userState, req ActivityClaimRequest) error {
 	switch req.ClaimKind {
 	case "task":
@@ -4464,6 +4583,20 @@ func copyAnyMap(source map[string]any) map[string]any {
 	out := make(map[string]any, len(source))
 	for key, value := range source {
 		out[key] = value
+	}
+	return out
+}
+
+func copyLobbyMessage(source LobbyMessage) LobbyMessage {
+	out := source
+	out.Metadata = copyAnyMap(source.Metadata)
+	return out
+}
+
+func copyLobbyMessages(source []LobbyMessage) []LobbyMessage {
+	out := make([]LobbyMessage, len(source))
+	for index, message := range source {
+		out[index] = copyLobbyMessage(message)
 	}
 	return out
 }

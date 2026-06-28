@@ -25,7 +25,12 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"rooms.list",
 		"rooms.rules",
 		"rooms.leave",
+		"rooms.message",
+		"rooms.chat",
+		"rooms.announcement",
+		"match.ready",
 		"battle.ticket",
+		"battle.result.submit",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("Nakama binding source missing %q", expected)

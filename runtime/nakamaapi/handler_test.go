@@ -113,6 +113,34 @@ func TestNakamaWSSUsesSharedEnvelopeGuardForPresenceHeartbeat(t *testing.T) {
 	}
 }
 
+func TestNakamaWSSRejectsStaleBusinessEnvelope(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	login := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-wss-stale", "display_name": "WSS Stale"},
+	})
+	if !login.OK {
+		t.Fatalf("login failed: %+v", login)
+	}
+	session := login.Payload.(*core.AuthSession)
+
+	stale := handler.HandleWSSMessage(WSSMessage{
+		Name:      "presence.heartbeat",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload: envelopePayloadAt(1, time.Now().Add(-10*time.Minute), "nonce-wss-stale", "presence_heartbeat", map[string]any{
+			"client_tick": 1,
+		}),
+	})
+	if stale.OK || stale.Status != 409 || stale.ErrorCode != security.CodeBusinessEnvelopeReplay {
+		t.Fatalf("expected stale envelope replay rejection, got %+v", stale)
+	}
+	snapshot := handler.EnvelopeSnapshot()
+	if snapshot.Rejected != 1 || snapshot.Audits[0].Reason != security.ReasonTimestampStale {
+		t.Fatalf("expected stale audit, got %+v", snapshot)
+	}
+}
+
 func TestNakamaRPCDispatchesBusinessMutationsWithEnvelopeBody(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	login := handler.HandleRPC(RPCRequest{
@@ -239,11 +267,77 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		t.Fatalf("join room payload invalid: %+v", joinPayload)
 	}
 
+	chat := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.message",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(4, "nonce-room-chat", "rooms_message", map[string]any{
+			"room_code":  createPayload.RoomCode,
+			"message_id": "guest-chat-rpc-1",
+			"kind":       "chat",
+			"text":       "ready when party fills",
+			"metadata":   map[string]any{"client_locale": "en-US"},
+		}),
+	})
+	if !chat.OK || chat.Status != 200 {
+		t.Fatalf("room chat failed: %+v", chat)
+	}
+	chatPayload := chat.Payload.(*core.LobbyMessage)
+	if chatPayload.Kind != "chat" || chatPayload.UserID != guest.UserID || chatPayload.Metadata["client_locale"] != "en-US" || !chatPayload.ServerAuthoritative {
+		t.Fatalf("room chat payload invalid: %+v", chatPayload)
+	}
+
+	duplicateChat := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.message",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(5, "nonce-room-chat-duplicate", "rooms_message", map[string]any{
+			"room_code":  createPayload.RoomCode,
+			"message_id": "guest-chat-rpc-1",
+			"kind":       "chat",
+			"text":       "should not replace original",
+		}),
+	})
+	if !duplicateChat.OK || !duplicateChat.Payload.(*core.LobbyMessage).Duplicate {
+		t.Fatalf("expected idempotent duplicate chat response, got %+v", duplicateChat)
+	}
+
+	badAuthorityChat := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.message",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(6, "nonce-room-chat-authority", "rooms_message", map[string]any{
+			"room_code":  createPayload.RoomCode,
+			"message_id": "guest-chat-bad",
+			"kind":       "chat",
+			"text":       "bad",
+			"metadata":   map[string]any{"score": 1000000},
+		}),
+	})
+	if badAuthorityChat.OK || badAuthorityChat.Status != 403 || badAuthorityChat.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden metadata rejection, got %+v", badAuthorityChat)
+	}
+
+	announcement := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.announcement",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(2, "nonce-room-announcement", "rooms_announcement", map[string]any{
+			"room_code":  createPayload.RoomCode,
+			"message_id": "host-announcement-rpc-1",
+			"text":       "boss route locked",
+			"metadata":   map[string]any{"cta": "ready"},
+		}),
+	})
+	if !announcement.OK || announcement.Payload.(*core.LobbyMessage).Kind != "announcement" {
+		t.Fatalf("host announcement failed: %+v", announcement)
+	}
+
 	left := handler.HandleWSSMessage(WSSMessage{
 		Name:      "rooms.leave",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(4, "nonce-room-leave", "rooms_leave", map[string]any{
+		Payload: envelopePayload(7, "nonce-room-leave", "rooms_leave", map[string]any{
 			"room_code": createPayload.RoomCode,
 		}),
 	})
@@ -259,7 +353,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		ID:        "rooms.create",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(5, "nonce-room-forbidden", "rooms_create", map[string]any{
+		Payload: envelopePayload(8, "nonce-room-forbidden", "rooms_create", map[string]any{
 			"mode_id":        "world_boss",
 			"active_deck_id": "bad_lobby_deck",
 			"deck_snapshot":  deckPayload("bad_lobby_deck"),
@@ -271,12 +365,104 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	}
 }
 
+func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	hostSession := "nakama-room-host-session"
+	hostUser := "nakama-room-host-user"
+	guestSession := "nakama-room-guest-session"
+	guestUser := "nakama-room-guest-user"
+
+	created := handler.HandleRPC(RPCRequest{
+		ID:          "rooms.create",
+		SessionID:   hostSession,
+		UserID:      hostUser,
+		DisplayName: "External Host",
+		Payload: envelopePayload(1, "nonce-external-room-create", "rooms_create", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "external_host_deck",
+			"deck_snapshot":  deckPayload("external_host_deck"),
+			"mode_params":    map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
+		}),
+	})
+	if !created.OK || created.Status != 200 {
+		t.Fatalf("external room create failed: %+v", created)
+	}
+	room := created.Payload.(*core.QueueResponse)
+
+	mismatched := handler.HandleWSSMessage(WSSMessage{
+		Name:        "rooms.join",
+		SessionID:   guestSession,
+		UserID:      guestUser,
+		DisplayName: "External Guest",
+		Payload: envelopePayload(1, "nonce-external-room-mismatch", "rooms_join", map[string]any{
+			"room_code":      room.RoomCode,
+			"mode_id":        "certification",
+			"active_deck_id": "external_guest_deck_bad",
+			"deck_snapshot":  deckPayload("external_guest_deck_bad"),
+		}),
+	})
+	if mismatched.OK || mismatched.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected room mode binding rejection, got %+v", mismatched)
+	}
+
+	joined := handler.HandleWSSMessage(WSSMessage{
+		Name:        "rooms.join",
+		SessionID:   guestSession,
+		UserID:      guestUser,
+		DisplayName: "External Guest",
+		Payload: envelopePayload(2, "nonce-external-room-join", "rooms_join", map[string]any{
+			"room_code":      room.RoomCode,
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "external_guest_deck",
+			"deck_snapshot":  deckPayload("external_guest_deck"),
+		}),
+	})
+	if !joined.OK || joined.Status != 200 {
+		t.Fatalf("external room join failed: %+v", joined)
+	}
+	found := joined.Payload.(*core.QueueResponse)
+	if found.MatchID == "" || found.ModeID != "pvp_duel" || found.RoomStatus != "found" {
+		t.Fatalf("joined room should bind pvp duel match: %+v", found)
+	}
+
+	hostReady := handler.HandleRPC(RPCRequest{
+		ID:        "match.ready",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(2, "nonce-external-host-ready", "match_ready", map[string]any{
+			"match_id": found.MatchID,
+		}),
+	})
+	if !hostReady.OK || hostReady.Payload.(*core.ReadyResponse).ReadyStatus != "loading" {
+		t.Fatalf("host ready invalid: %+v", hostReady)
+	}
+	guestReady := handler.HandleWSSMessage(WSSMessage{
+		Name:      "match.ready",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(3, "nonce-external-guest-ready", "match_ready", map[string]any{
+			"match_id": found.MatchID,
+		}),
+	})
+	if !guestReady.OK || guestReady.Payload.(*core.ReadyResponse).MatchStart == nil {
+		t.Fatalf("guest ready should start match: %+v", guestReady)
+	}
+	start := guestReady.Payload.(*core.ReadyResponse).MatchStart
+	if start.ModeID != "pvp_duel" || start.ModeRulesetVersion != "pvp-duel-s0" || start.BattleAllocation == nil {
+		t.Fatalf("ready dispatch missing mode-bound allocation: %+v", start)
+	}
+}
+
 func envelopePayload(seq int64, nonce string, op string, body map[string]any) map[string]any {
+	return envelopePayloadAt(seq, time.Now(), nonce, op, body)
+}
+
+func envelopePayloadAt(seq int64, timestamp time.Time, nonce string, op string, body map[string]any) map[string]any {
 	return map[string]any{
 		security.BusinessEnvelopePayloadKey: map[string]any{
 			"version":         security.BusinessEnvelopeVersion,
 			"seq":             seq,
-			"timestamp_ms":    time.Now().UnixMilli(),
+			"timestamp_ms":    timestamp.UnixMilli(),
 			"nonce":           nonce,
 			"op_code":         op,
 			"key_id":          "client-dev-key",
