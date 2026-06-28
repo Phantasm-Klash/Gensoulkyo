@@ -70,6 +70,13 @@ func TestAuthoritativeMatchLifecycleSettlementAndClaims(t *testing.T) {
 	if readyBob.MatchStart.StageID != "starlit_lanes" || len(readyBob.MatchStart.Players) != 2 || readyBob.MatchStart.Players[0].Loadout.StageID == "" {
 		t.Fatalf("match start missing server loadout: %+v", readyBob.MatchStart)
 	}
+	duplicateReadyAlice, err := service.ReadyMatch(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("duplicate ready alice: %v", err)
+	}
+	if duplicateReadyAlice.ReadyStatus != "running" || duplicateReadyAlice.ReadyCount != 2 || duplicateReadyAlice.MatchStart == nil || duplicateReadyAlice.BattleTicket == nil {
+		t.Fatalf("duplicate ready should be idempotent with running state: %+v", duplicateReadyAlice)
+	}
 
 	for i := 1; i <= 6; i++ {
 		resp, err := service.SubmitInput(alice.SessionToken, matchID, map[string]any{
@@ -1083,8 +1090,8 @@ func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
 		ModeID:       "certification",
 		ActiveDeckID: "cancel_guest_deck",
 		DeckSnapshot: validDeck("cancel_guest_deck"),
-	}); ErrorCode(err) != codeRoomUnavailable {
-		t.Fatalf("cancelled room should reject join, got %v", err)
+	}); ErrorCode(err) != codeNotFound {
+		t.Fatalf("empty room should be cleaned up, got %v", err)
 	}
 
 	largerRoom, err := service.CreateRoom(guestHost.SessionToken, CreateRoomRequest{
@@ -1319,6 +1326,18 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if created.RoomCode == "" || created.RoomStatus != "waiting" || created.RequiredPlayers != 4 || created.CurrentPlayers != 1 {
 		t.Fatalf("created room response invalid: %+v", created)
 	}
+	duplicateCreate, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "host_room_deck",
+		DeckSnapshot: validDeck("host_room_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("duplicate create room: %v", err)
+	}
+	if duplicateCreate.RoomCode != created.RoomCode || duplicateCreate.TicketID != created.TicketID || duplicateCreate.CurrentPlayers != 1 {
+		t.Fatalf("duplicate room create should return existing room ticket: first=%+v duplicate=%+v", created, duplicateCreate)
+	}
 	if _, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
 		ModeID:       "world_boss",
 		ActiveDeckID: "bad_authority",
@@ -1363,6 +1382,17 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if joined.RoomStatus != "waiting" || joined.CurrentPlayers != 2 {
 		t.Fatalf("joined room invalid: %+v", joined)
+	}
+	duplicateJoin, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "guest_room_deck",
+		DeckSnapshot: validDeck("guest_room_deck"),
+	})
+	if err != nil {
+		t.Fatalf("duplicate join room: %v", err)
+	}
+	if duplicateJoin.TicketID != joined.TicketID || duplicateJoin.CurrentPlayers != 2 || duplicateJoin.RoomStatus != "waiting" {
+		t.Fatalf("duplicate join should return existing participant ticket: first=%+v duplicate=%+v", joined, duplicateJoin)
 	}
 	if _, err := service.LobbyMessage(intruder.SessionToken, LobbyMessageRequest{
 		RoomCode:  created.RoomCode,
@@ -1427,6 +1457,15 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}); ErrorCode(err) != codeForbiddenField {
 		t.Fatalf("expected authority metadata rejection, got %v", err)
 	}
+	if _, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "bad-nested-authority-message",
+		Kind:      "chat",
+		Text:      "bad",
+		Metadata:  map[string]any{"nested": map[string]any{"server_authoritative": false}},
+	}); ErrorCode(err) != codeForbiddenField {
+		t.Fatalf("expected nested authority metadata rejection, got %v", err)
+	}
 	afterMessages, err := service.Room(guest.SessionToken, created.RoomCode)
 	if err != nil {
 		t.Fatalf("room after messages: %v", err)
@@ -1463,15 +1502,63 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host leave: %v", err)
 	}
-	if hostLeft.QueueStatus != "cancelled" || hostLeft.RoomStatus != "cancelled" || hostLeft.CurrentPlayers != 0 {
-		t.Fatalf("host leave should cancel room: %+v", hostLeft)
+	if hostLeft.QueueStatus != "cancelled" || hostLeft.RoomStatus != "cancelled" || hostLeft.CurrentPlayers != 1 {
+		t.Fatalf("host leave should keep replacement room waiting: %+v", hostLeft)
+	}
+	afterHostLeave, err := service.Room(replacement.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("room after host leave: %v", err)
+	}
+	if afterHostLeave.HostUserID != replacement.UserID || afterHostLeave.RoomStatus != "waiting" || afterHostLeave.CurrentPlayers != 1 {
+		t.Fatalf("host leave should transfer host to replacement: %+v", afterHostLeave)
+	}
+	replacementAnnouncement, err := service.LobbyMessage(replacement.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "replacement-announcement-1",
+		Kind:      "announcement",
+		Text:      "new host ready",
+	})
+	if err != nil || replacementAnnouncement.UserID != replacement.UserID {
+		t.Fatalf("replacement host announcement failed: msg=%+v err=%v", replacementAnnouncement, err)
+	}
+	if _, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "former-host-announcement",
+		Kind:      "announcement",
+		Text:      "former host cannot pin",
+	}); ErrorCode(err) != codeUnauthorized {
+		t.Fatalf("expected former host announcement rejection, got %v", err)
 	}
 	if _, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
 		ModeID:       "world_boss",
 		ActiveDeckID: "guest_after_cancel",
 		DeckSnapshot: validDeck("guest_after_cancel"),
-	}); ErrorCode(err) != codeRoomUnavailable {
-		t.Fatalf("expected cancelled room unavailable, got %v", err)
+	}); err != nil {
+		t.Fatalf("guest should be able to rejoin after host transfer: %v", err)
+	}
+	guestLeftAgain, err := service.LeaveRoom(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("guest leave after rejoin: %v", err)
+	}
+	if guestLeftAgain.CurrentPlayers != 1 {
+		t.Fatalf("guest leave after rejoin should leave replacement host: %+v", guestLeftAgain)
+	}
+	replacementLeft, err := service.LeaveRoom(replacement.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("replacement final leave: %v", err)
+	}
+	if replacementLeft.QueueStatus != "cancelled" || replacementLeft.RoomStatus != "cancelled" || replacementLeft.CurrentPlayers != 0 {
+		t.Fatalf("last member leave should clean empty room: %+v", replacementLeft)
+	}
+	duplicateReplacementLeave, err := service.LeaveRoom(replacement.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("duplicate replacement leave: %v", err)
+	}
+	if duplicateReplacementLeave.TicketID != replacementLeft.TicketID || duplicateReplacementLeave.CurrentPlayers != 0 || duplicateReplacementLeave.RoomStatus != "cancelled" {
+		t.Fatalf("duplicate leave should remain cancelled after empty-room cleanup: %+v", duplicateReplacementLeave)
+	}
+	if _, err := service.Room(host.SessionToken, created.RoomCode); ErrorCode(err) != codeNotFound {
+		t.Fatalf("expected empty room cleanup, got %v", err)
 	}
 }
 

@@ -864,6 +864,10 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	if err := s.validateModeEntryLocked(user, modeID); err != nil {
 		return nil, err
 	}
+	if ticket, room := s.waitingRoomTicketForUserLocked(user.UserID); ticket != nil && room != nil {
+		existingMode := ModeConfigs[ticket.ModeID]
+		return s.queueResponseLocked(ticket, existingMode, s.ticketDepthLocked(ticket), nil), nil
+	}
 	roomCode := s.nextRoomCodeLocked()
 	ticketID := s.nextIDLocked("ticket")
 	ticket := &queueTicket{
@@ -915,6 +919,16 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		return nil, newError(codeInvalidMode, "unsupported mode %q", room.ModeID)
 	}
 	if room.Status != "waiting" {
+		for _, ticketID := range room.TicketIDs {
+			ticket := s.tickets[ticketID]
+			if ticket != nil && ticket.UserID == user.UserID {
+				var match *matchState
+				if ticket.MatchID != "" {
+					match = s.matches[ticket.MatchID]
+				}
+				return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), match), nil
+			}
+		}
 		return nil, newError(codeRoomUnavailable, "room is %s", room.Status)
 	}
 	for _, ticketID := range room.TicketIDs {
@@ -1079,6 +1093,12 @@ func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueRespons
 	}
 	room, err := s.roomByCodeLocked(roomCode)
 	if err != nil {
+		if ErrorCode(err) == codeNotFound {
+			if ticket := s.roomTicketForUserLocked(normalizeRoomCode(roomCode), user.UserID); ticket != nil && ticket.Status == "cancelled" {
+				mode := ModeConfigs[ticket.ModeID]
+				return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), nil), nil
+			}
+		}
 		return nil, err
 	}
 	mode := ModeConfigs[room.ModeID]
@@ -1143,7 +1163,7 @@ func (s *Service) LobbyMessage(sessionToken string, req LobbyMessageRequest) (*L
 		duplicate.Duplicate = true
 		return &duplicate, nil
 	}
-	if field := firstForbiddenField(req.Metadata); field != "" {
+	if field := firstForbiddenFieldDeep(req.Metadata); field != "" {
 		return nil, newError(codeForbiddenField, "client cannot author %s", field)
 	}
 	text := strings.TrimSpace(req.Text)
@@ -2191,6 +2211,34 @@ func (s *Service) roomHasUserLocked(room *roomState, userID string) bool {
 	return false
 }
 
+func (s *Service) waitingRoomTicketForUserLocked(userID string) (*queueTicket, *roomState) {
+	for _, room := range s.rooms {
+		if room == nil || room.Status != "waiting" {
+			continue
+		}
+		for _, ticketID := range room.TicketIDs {
+			ticket := s.tickets[ticketID]
+			if ticket != nil && ticket.UserID == userID && ticket.Status == "queued" && ticket.MatchID == "" {
+				return ticket, room
+			}
+		}
+	}
+	return nil, nil
+}
+
+func (s *Service) roomTicketForUserLocked(roomCode string, userID string) *queueTicket {
+	roomCode = normalizeRoomCode(roomCode)
+	if roomCode == "" {
+		return nil
+	}
+	for _, ticket := range s.tickets {
+		if ticket != nil && ticket.RoomCode == roomCode && ticket.UserID == userID {
+			return ticket
+		}
+	}
+	return nil
+}
+
 func roomMessageByID(room *roomState, messageID string) *LobbyMessage {
 	if room == nil || messageID == "" {
 		return nil
@@ -2240,19 +2288,16 @@ func (s *Service) cancelRoomTicketLocked(ticket *queueTicket, userID string) {
 		return
 	}
 	room.TicketIDs = removeString(room.TicketIDs, ticket.TicketID)
-	if room.HostUserID == userID || len(room.TicketIDs) == 0 {
-		room.Status = "cancelled"
-		for _, ticketID := range room.TicketIDs {
-			if remaining := s.tickets[ticketID]; remaining != nil && remaining.MatchID == "" && remaining.Status == "queued" {
-				remaining.Status = "cancelled"
-				remaining.RoomStatus = "cancelled"
-			}
-		}
+	if len(room.TicketIDs) == 0 {
+		delete(s.rooms, room.RoomCode)
 		room.TicketIDs = []string{}
 		return
 	}
 	for _, ticketID := range room.TicketIDs {
 		if remaining := s.tickets[ticketID]; remaining != nil && remaining.Status == "queued" {
+			if room.HostUserID == userID {
+				room.HostUserID = remaining.UserID
+			}
 			remaining.RoomStatus = room.Status
 		}
 	}
@@ -3022,7 +3067,7 @@ func validateLoadout(modeID string, modeParams map[string]any, profile Certifica
 	if modeParams == nil {
 		modeParams = map[string]any{}
 	}
-	if field := firstForbiddenField(modeParams); field != "" {
+	if field := firstForbiddenFieldDeep(modeParams); field != "" {
 		return PlayerLoadout{}, newError(codeForbiddenField, "client cannot submit %s", field)
 	}
 	stageID := strings.TrimSpace(asString(modeParams["stage_id"]))
@@ -3727,6 +3772,29 @@ func firstForbiddenField(raw map[string]any) string {
 	for key := range raw {
 		if _, ok := forbiddenClientFields[key]; ok {
 			return key
+		}
+	}
+	return ""
+}
+
+func firstForbiddenFieldDeep(raw map[string]any) string {
+	for key, value := range raw {
+		if _, ok := forbiddenClientFields[key]; ok {
+			return key
+		}
+		switch typed := value.(type) {
+		case map[string]any:
+			if nested := firstForbiddenFieldDeep(typed); nested != "" {
+				return nested
+			}
+		case []any:
+			for _, item := range typed {
+				if nestedMap, ok := item.(map[string]any); ok {
+					if nested := firstForbiddenFieldDeep(nestedMap); nested != "" {
+						return nested
+					}
+				}
+			}
 		}
 	}
 	return ""

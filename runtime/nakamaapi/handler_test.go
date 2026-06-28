@@ -451,6 +451,29 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if start.ModeID != "pvp_duel" || start.ModeRulesetVersion != "pvp-duel-s0" || start.BattleAllocation == nil {
 		t.Fatalf("ready dispatch missing mode-bound allocation: %+v", start)
 	}
+
+	duplicateHostReady := handler.HandleRPC(RPCRequest{
+		ID:        "match.ready",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(3, "nonce-external-host-ready-duplicate", "match_ready", map[string]any{
+			"match_id": found.MatchID,
+		}),
+	})
+	if !duplicateHostReady.OK || duplicateHostReady.Payload.(*core.ReadyResponse).ReadyStatus != "running" || duplicateHostReady.Payload.(*core.ReadyResponse).ReadyCount != 2 {
+		t.Fatalf("duplicate host ready should remain idempotent: %+v", duplicateHostReady)
+	}
+	heartbeat := handler.HandleWSSMessage(WSSMessage{
+		Name:      "presence.heartbeat",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(4, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
+			"match_id": found.MatchID,
+		}),
+	})
+	if !heartbeat.OK || heartbeat.Payload.(*core.PresenceHeartbeatResponse).PresenceStatus != "in_match" || heartbeat.Payload.(*core.PresenceHeartbeatResponse).ModeID != "pvp_duel" {
+		t.Fatalf("heartbeat should report authoritative running room match: %+v", heartbeat)
+	}
 }
 
 func envelopePayload(seq int64, nonce string, op string, body map[string]any) map[string]any {
