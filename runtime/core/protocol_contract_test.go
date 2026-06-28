@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"testing"
 
 	phkv1 "github.com/phantasm-klash/phk-protocol/gen/go/phk/v1"
@@ -37,5 +38,63 @@ func TestCoreDependsOnRequiredProtocolFields(t *testing.T) {
 				t.Fatalf("protocol manifest missing %s.%s", messageName, field)
 			}
 		}
+	}
+}
+
+func TestBattleModeActionFixtureContract(t *testing.T) {
+	action := struct {
+		Version                   int    `json:"version"`
+		MatchID                   string `json:"match_id"`
+		PlayerID                  string `json:"player_id"`
+		Tick                      int    `json:"tick"`
+		Seq                       int    `json:"seq"`
+		ActionID                  string `json:"action_id"`
+		ActionType                string `json:"action_type"`
+		PayloadJSON               string `json:"payload_json"`
+		ClientResultAuthoritative bool   `json:"client_result_authoritative"`
+	}{
+		Version:                   phkv1.ProtocolVersion,
+		MatchID:                   phkv1.BattleModeActionMatchID,
+		PlayerID:                  phkv1.BattleModeActionPlayerID,
+		Tick:                      phkv1.BattleModeActionTick,
+		Seq:                       phkv1.BattleModeActionSeq,
+		ActionID:                  phkv1.BattleModeActionActionID,
+		ActionType:                phkv1.BattleModeActionActionType,
+		PayloadJSON:               phkv1.BattleModeActionPayloadJSON,
+		ClientResultAuthoritative: false,
+	}
+	if action.MatchID == "" || action.PlayerID == "" || action.ActionID == "" || action.ActionType == "" {
+		t.Fatalf("battle mode action fixture missing identity fields: %+v", action)
+	}
+	if action.Tick <= 0 || action.Seq <= 0 {
+		t.Fatalf("battle mode action fixture must carry positive tick/seq: %+v", action)
+	}
+	if action.ClientResultAuthoritative {
+		t.Fatalf("battle mode action fixture must not allow client-authored results: %+v", action)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(action.PayloadJSON), &payload); err != nil {
+		t.Fatalf("battle mode action payload_json must be parseable JSON: %v", err)
+	}
+	if payload["card_id"] == "" || payload["round_index"] == nil {
+		t.Fatalf("battle mode action payload missing expected mode-action fields: %+v", payload)
+	}
+	encoded, err := json.Marshal(action)
+	if err != nil {
+		t.Fatalf("marshal battle mode action fixture: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("round-trip battle mode action fixture: %v", err)
+	}
+	if got, ok := roundTrip["client_result_authoritative"].(bool); !ok || got {
+		t.Fatalf("wire action must include client_result_authoritative=false, got %#v", roundTrip["client_result_authoritative"])
+	}
+	payloadJSON, ok := roundTrip["payload_json"].(string)
+	if !ok {
+		t.Fatalf("wire action payload_json must be a JSON string field, got %#v", roundTrip["payload_json"])
+	}
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		t.Fatalf("wire action payload_json string must parse as JSON: %v", err)
 	}
 }
