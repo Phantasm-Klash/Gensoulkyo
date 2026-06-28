@@ -22,6 +22,9 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"auth.anonymous",
 		"bootstrap",
 		"matchmaking.join",
+		"rooms.list",
+		"rooms.rules",
+		"rooms.leave",
 		"battle.ticket",
 	} {
 		if !strings.Contains(text, expected) {

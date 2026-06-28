@@ -255,6 +255,17 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 	if created.RoomCode == "" || created.RoomStatus != "waiting" || created.MatchID != "" {
 		t.Fatalf("created room invalid: %+v", created)
 	}
+	list := getJSON[core.RoomListResponse](t, server.URL+"/v1/rooms", guest.SessionToken)
+	if !list.OK || len(list.Rooms) != 1 || list.Rooms[0].RoomCode != created.RoomCode || !list.ServerAuthoritative {
+		t.Fatalf("room list invalid: %+v", list)
+	}
+	rules := getJSON[core.RoomRulesSnapshot](t, server.URL+"/v1/rooms/"+created.RoomCode+"/rules", guest.SessionToken)
+	if !rules.OK || rules.Room.RoomCode != created.RoomCode || rules.Mode.ModeID != "certification" || !rules.ServerAuthoritative {
+		t.Fatalf("room rules invalid: %+v", rules)
+	}
+	if rules.Room.Participants[0].DeckSnapshotHash == "" || len(rules.ForbiddenFields) == 0 {
+		t.Fatalf("room rules should expose hashes and forbidden fields: %+v", rules)
+	}
 
 	joined := postJSON[core.QueueResponse](t, server.URL+"/v1/rooms/"+created.RoomCode+"/join", guest.SessionToken, map[string]any{
 		"mode_id":        "certification",
@@ -268,6 +279,11 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 	hostTicket := getJSON[core.QueueResponse](t, server.URL+"/v1/matchmaking/tickets/"+created.TicketID, host.SessionToken)
 	if hostTicket.MatchID != joined.MatchID || hostTicket.RoomCode != created.RoomCode {
 		t.Fatalf("host ticket did not resolve room match: %+v", hostTicket)
+	}
+
+	leaveMatched := postRaw(t, server.URL+"/v1/rooms/"+created.RoomCode+"/leave", guest.SessionToken, map[string]any{})
+	if leaveMatched.Code != http.StatusConflict || leaveMatched.ErrorCode != "match_state_invalid" {
+		t.Fatalf("matched room leave should conflict, got %+v", leaveMatched)
 	}
 }
 

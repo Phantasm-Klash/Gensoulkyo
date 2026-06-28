@@ -972,6 +972,139 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 	return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
 }
 
+func (s *Service) ListRooms(sessionToken string) (*RoomListResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+		return nil, err
+	}
+	now := s.clock()
+	codes := make([]string, 0, len(s.rooms))
+	for roomCode, room := range s.rooms {
+		if room == nil || room.Status != "waiting" {
+			continue
+		}
+		codes = append(codes, roomCode)
+	}
+	sort.Strings(codes)
+	rooms := make([]RoomSnapshot, 0, len(codes))
+	for _, roomCode := range codes {
+		if snapshot := s.roomSnapshotLocked(s.rooms[roomCode], now); snapshot.OK {
+			rooms = append(rooms, snapshot)
+		}
+	}
+	return &RoomListResponse{
+		OK:                  true,
+		Rooms:               rooms,
+		ServerTime:          now,
+		ServerAuthoritative: true,
+	}, nil
+}
+
+func (s *Service) Room(sessionToken string, roomCode string) (*RoomSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+		return nil, err
+	}
+	room, err := s.roomByCodeLocked(roomCode)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := s.roomSnapshotLocked(room, s.clock())
+	return &snapshot, nil
+}
+
+func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+		return nil, err
+	}
+	room, err := s.roomByCodeLocked(roomCode)
+	if err != nil {
+		return nil, err
+	}
+	now := s.clock()
+	snapshot := s.roomSnapshotLocked(room, now)
+	mode := ModeConfigs[room.ModeID]
+	forbiddenFields := make([]string, 0, len(forbiddenClientFields))
+	for field := range forbiddenClientFields {
+		forbiddenFields = append(forbiddenFields, field)
+	}
+	sort.Strings(forbiddenFields)
+	return &RoomRulesSnapshot{
+		OK:              true,
+		Version:         currentVersionStamp(),
+		Room:            snapshot,
+		Mode:            mode,
+		TickRate:        TickRate,
+		InputDelayTicks: DefaultInputDelayTick,
+		BattleTicketTTL: BattleTicketTTLSeconds,
+		ClientAuthority: []string{
+			"input_packet",
+			"cast_card_request",
+			"mode_action_request",
+			"ready",
+			"reconnect_request",
+		},
+		ServerAuthority: []string{
+			"battle_ticket",
+			"deck_snapshot_hash",
+			"match_seed",
+			"state_snapshot",
+			"score",
+			"graze_count",
+			"hit_count",
+			"damage",
+			"reward",
+		},
+		ForbiddenFields:     forbiddenFields,
+		ServerTime:          now,
+		ServerAuthoritative: true,
+	}, nil
+}
+
+func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	room, err := s.roomByCodeLocked(roomCode)
+	if err != nil {
+		return nil, err
+	}
+	mode := ModeConfigs[room.ModeID]
+	var ticket *queueTicket
+	for _, ticketID := range room.TicketIDs {
+		candidate := s.tickets[ticketID]
+		if candidate != nil && candidate.UserID == user.UserID {
+			ticket = candidate
+			break
+		}
+	}
+	if ticket == nil {
+		return nil, newError(codeNotFound, "room ticket not found")
+	}
+	if ticket.MatchID != "" || room.MatchID != "" {
+		return nil, newError(codeMatchState, "room already matched")
+	}
+	if ticket.Status == "cancelled" {
+		return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), nil), nil
+	}
+	if ticket.Status != "queued" {
+		return nil, newError(codeMatchState, "ticket is %s", ticket.Status)
+	}
+	s.cancelRoomTicketLocked(ticket, user.UserID)
+	return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), nil), nil
+}
+
 func (s *Service) QueueTicket(sessionToken string, ticketID string) (*QueueResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1914,6 +2047,66 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 		OldestEventCursor:    oldestCursor,
 		ServerTime:           now,
 		ServerAuthoritative:  true,
+	}
+}
+
+func (s *Service) roomByCodeLocked(roomCode string) (*roomState, error) {
+	normalizedRoomCode := normalizeRoomCode(roomCode)
+	if normalizedRoomCode == "" {
+		return nil, newError(codeInvalidRequest, "room_code is required")
+	}
+	room, ok := s.rooms[normalizedRoomCode]
+	if !ok || room == nil {
+		return nil, newError(codeNotFound, "room not found")
+	}
+	return room, nil
+}
+
+func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapshot {
+	if room == nil {
+		return RoomSnapshot{}
+	}
+	mode := ModeConfigs[room.ModeID]
+	participants := make([]RoomParticipantSnapshot, 0, len(room.TicketIDs))
+	for _, ticketID := range room.TicketIDs {
+		ticket := s.tickets[ticketID]
+		if ticket == nil || ticket.Status != "queued" {
+			continue
+		}
+		user := s.users[ticket.UserID]
+		displayName := ""
+		if user != nil {
+			displayName = user.DisplayName
+		}
+		participants = append(participants, RoomParticipantSnapshot{
+			UserID:           ticket.UserID,
+			DisplayName:      displayName,
+			TicketID:         ticket.TicketID,
+			DeckSnapshotHash: deckSnapshotHash(ticket.DeckSnapshot),
+			Loadout:          ticket.Loadout,
+			JoinedAt:         ticket.CreatedAt,
+			LastSeenAt:       ticket.LastSeenAt,
+		})
+	}
+	return RoomSnapshot{
+		OK:                  true,
+		RoomCode:            room.RoomCode,
+		RoomStatus:          room.Status,
+		ModeID:              room.ModeID,
+		HostUserID:          room.HostUserID,
+		RequiredPlayers:     mode.MinPlayers,
+		MaxPlayers:          mode.MaxPlayers,
+		CurrentPlayers:      len(participants),
+		MatchID:             room.MatchID,
+		StageID:             room.StageID,
+		ModeRulesetVersion:  mode.ModeRulesetVersion,
+		RulesetVersion:      RulesetVersion,
+		ModeConfigHash:      modeConfigHash(room.ModeID),
+		ModeParams:          copyAnyMap(room.ModeParams),
+		Participants:        participants,
+		CreatedAt:           room.CreatedAt,
+		ServerTime:          now,
+		ServerAuthoritative: true,
 	}
 }
 

@@ -155,6 +155,14 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.CreateRoom(request.SessionID, req) })
+	case "rooms.list", "rooms":
+		return handler.call(func() (any, error) { return handler.service.ListRooms(request.SessionID) })
+	case "rooms.get":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		return handler.call(func() (any, error) { return handler.service.Room(request.SessionID, roomCode) })
+	case "rooms.rules":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		return handler.call(func() (any, error) { return handler.service.RoomRules(request.SessionID, roomCode) })
 	case "rooms.join":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		var req core.JoinRoomRequest
@@ -162,6 +170,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.JoinRoom(request.SessionID, roomCode, req) })
+	case "rooms.leave":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		return handler.call(func() (any, error) { return handler.service.LeaveRoom(request.SessionID, roomCode) })
 	case "activity.claim":
 		return handler.call(func() (any, error) { return handler.service.ClaimActivity(request.SessionID, body) })
 	case "battle.servers":
@@ -217,6 +228,14 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.CreateRoom(message.SessionID, req) })
+	case "rooms.list", "rooms":
+		return handler.call(func() (any, error) { return handler.service.ListRooms(message.SessionID) })
+	case "rooms.get":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		return handler.call(func() (any, error) { return handler.service.Room(message.SessionID, roomCode) })
+	case "rooms.rules":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		return handler.call(func() (any, error) { return handler.service.RoomRules(message.SessionID, roomCode) })
 	case "rooms.join":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		var req core.JoinRoomRequest
@@ -224,6 +243,9 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.JoinRoom(message.SessionID, roomCode, req) })
+	case "rooms.leave":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		return handler.call(func() (any, error) { return handler.service.LeaveRoom(message.SessionID, roomCode) })
 	default:
 		return errorResponse(http.StatusNotFound, "not_found", fmt.Sprintf("wss message %q is not registered", message.Name))
 	}

@@ -149,6 +149,128 @@ func TestNakamaRPCDispatchesBusinessMutationsWithEnvelopeBody(t *testing.T) {
 	}
 }
 
+func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	hostLogin := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-lobby-host", "display_name": "Lobby Host"},
+	})
+	if !hostLogin.OK {
+		t.Fatalf("host login failed: %+v", hostLogin)
+	}
+	host := hostLogin.Payload.(*core.AuthSession)
+	guestLogin := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-lobby-guest", "display_name": "Lobby Guest"},
+	})
+	if !guestLogin.OK {
+		t.Fatalf("guest login failed: %+v", guestLogin)
+	}
+	guest := guestLogin.Payload.(*core.AuthSession)
+
+	created := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.create",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(1, "nonce-room-create", "rooms_create", map[string]any{
+			"mode_id":        "world_boss",
+			"active_deck_id": "host_lobby_deck",
+			"deck_snapshot":  deckPayload("host_lobby_deck"),
+			"mode_params":    map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+		}),
+	})
+	if !created.OK || created.Status != 200 {
+		t.Fatalf("create room failed: %+v", created)
+	}
+	createPayload := created.Payload.(*core.QueueResponse)
+	if createPayload.RoomCode == "" || createPayload.RequiredPlayers != 4 {
+		t.Fatalf("create room payload invalid: %+v", createPayload)
+	}
+
+	list := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.list",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload:   envelopePayload(1, "nonce-room-list", "rooms_list", map[string]any{}),
+	})
+	if !list.OK || list.Status != 200 {
+		t.Fatalf("list rooms failed: %+v", list)
+	}
+	listPayload := list.Payload.(*core.RoomListResponse)
+	if !listPayload.OK || len(listPayload.Rooms) != 1 || listPayload.Rooms[0].RoomCode != createPayload.RoomCode {
+		t.Fatalf("list rooms payload invalid: %+v", listPayload)
+	}
+
+	rules := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.rules",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(2, "nonce-room-rules", "rooms_rules", map[string]any{
+			"room_code": createPayload.RoomCode,
+		}),
+	})
+	if !rules.OK || rules.Status != 200 {
+		t.Fatalf("room rules failed: %+v", rules)
+	}
+	rulesPayload := rules.Payload.(*core.RoomRulesSnapshot)
+	if !rulesPayload.ServerAuthoritative || rulesPayload.Room.RoomCode != createPayload.RoomCode || rulesPayload.Version.ProtocolVersion != core.ProtocolVersion {
+		t.Fatalf("room rules payload invalid: %+v", rulesPayload)
+	}
+	if len(rulesPayload.ForbiddenFields) == 0 || rulesPayload.Room.Participants[0].DeckSnapshotHash == "" {
+		t.Fatalf("room rules missing protocol fields: %+v", rulesPayload)
+	}
+
+	joined := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.join",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(3, "nonce-room-join", "rooms_join", map[string]any{
+			"room_code":      createPayload.RoomCode,
+			"mode_id":        "world_boss",
+			"active_deck_id": "guest_lobby_deck",
+			"deck_snapshot":  deckPayload("guest_lobby_deck"),
+		}),
+	})
+	if !joined.OK || joined.Status != 200 {
+		t.Fatalf("join room failed: %+v", joined)
+	}
+	joinPayload := joined.Payload.(*core.QueueResponse)
+	if joinPayload.RoomStatus != "waiting" || joinPayload.CurrentPlayers != 2 {
+		t.Fatalf("join room payload invalid: %+v", joinPayload)
+	}
+
+	left := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.leave",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(4, "nonce-room-leave", "rooms_leave", map[string]any{
+			"room_code": createPayload.RoomCode,
+		}),
+	})
+	if !left.OK || left.Status != 200 {
+		t.Fatalf("leave room failed: %+v", left)
+	}
+	leavePayload := left.Payload.(*core.QueueResponse)
+	if leavePayload.QueueStatus != "cancelled" || leavePayload.CurrentPlayers != 1 {
+		t.Fatalf("leave room payload invalid: %+v", leavePayload)
+	}
+
+	forbidden := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.create",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(5, "nonce-room-forbidden", "rooms_create", map[string]any{
+			"mode_id":        "world_boss",
+			"active_deck_id": "bad_lobby_deck",
+			"deck_snapshot":  deckPayload("bad_lobby_deck"),
+			"mode_params":    map[string]any{"score": 999999},
+		}),
+	})
+	if forbidden.OK || forbidden.Status != 403 || forbidden.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden client authority rejection, got %+v", forbidden)
+	}
+}
+
 func envelopePayload(seq int64, nonce string, op string, body map[string]any) map[string]any {
 	return map[string]any{
 		security.BusinessEnvelopePayloadKey: map[string]any{
@@ -163,5 +285,19 @@ func envelopePayload(seq int64, nonce string, op string, body map[string]any) ma
 			"body_hash":       fmt.Sprintf("body-%d", seq),
 		},
 		"body": body,
+	}
+}
+
+func deckPayload(deckID string) map[string]any {
+	return map[string]any{
+		"deck_id":         deckID,
+		"name":            deckID,
+		"ruleset_version": core.RulesetVersion,
+		"card_ids": []any{
+			"focus_lens", "hitbox_charm", "density_surge", "tempo_break", "bomb_amplifier",
+			"guard_seal", "graze_engine", "draw_sigil", "aim_baffle", "purge_charm",
+			"focus_lens", "hitbox_charm", "density_surge", "tempo_break", "bomb_amplifier",
+			"guard_seal", "graze_engine", "draw_sigil", "aim_baffle", "purge_charm",
+		},
 	}
 }

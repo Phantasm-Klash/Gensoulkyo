@@ -120,8 +120,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.createRoom(w, r)
 		return
 	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "rooms" && r.Method == http.MethodGet {
+		h.listRooms(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "rooms" && r.Method == http.MethodGet {
+		h.room(w, r, segments[2])
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "rules" && r.Method == http.MethodGet {
+		h.roomRules(w, r, segments[2])
+		return
+	}
 	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "join" && r.Method == http.MethodPost {
 		h.joinRoom(w, r, segments[2])
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "leave" && r.Method == http.MethodPost {
+		h.leaveRoom(w, r, segments[2])
 		return
 	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "activity" && segments[2] == "claim" && r.Method == http.MethodPost {
@@ -356,12 +372,48 @@ func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.ListRooms(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) room(w http.ResponseWriter, r *http.Request, roomCode string) {
+	resp, err := h.service.Room(sessionToken(r), roomCode)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) roomRules(w http.ResponseWriter, r *http.Request, roomCode string) {
+	resp, err := h.service.RoomRules(sessionToken(r), roomCode)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request, roomCode string) {
 	var req core.JoinRoomRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	resp, err := h.service.JoinRoom(sessionToken(r), roomCode, req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) leaveRoom(w http.ResponseWriter, r *http.Request, roomCode string) {
+	resp, err := h.service.LeaveRoom(sessionToken(r), roomCode)
 	if err != nil {
 		writeError(w, err)
 		return

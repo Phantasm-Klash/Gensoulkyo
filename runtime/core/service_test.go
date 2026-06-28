@@ -1276,6 +1276,110 @@ func TestRoomCodeFlowCreatesMatchAndRejectsLateJoin(t *testing.T) {
 	}
 }
 
+func TestRoomLobbyListRulesAndLeave(t *testing.T) {
+	service := NewService(Config{})
+	host := mustLogin(t, service, "Lobby Host")
+	guest := mustLogin(t, service, "Lobby Guest")
+	replacement := mustLogin(t, service, "Lobby Replacement")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "host_room_deck",
+		DeckSnapshot: validDeck("host_room_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if created.RoomCode == "" || created.RoomStatus != "waiting" || created.RequiredPlayers != 4 || created.CurrentPlayers != 1 {
+		t.Fatalf("created room response invalid: %+v", created)
+	}
+	if _, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "bad_authority",
+		DeckSnapshot: validDeck("bad_authority"),
+		ModeParams:   map[string]any{"damage": 999},
+	}); ErrorCode(err) != codeForbiddenField {
+		t.Fatalf("expected forbidden mode param rejection, got %v", err)
+	}
+
+	list, err := service.ListRooms(guest.SessionToken)
+	if err != nil {
+		t.Fatalf("list rooms: %v", err)
+	}
+	if !list.OK || len(list.Rooms) != 1 || list.Rooms[0].RoomCode != created.RoomCode || list.Rooms[0].CurrentPlayers != 1 {
+		t.Fatalf("room list invalid: %+v", list)
+	}
+	if list.Rooms[0].Participants[0].DeckSnapshotHash == "" || list.Rooms[0].Participants[0].Loadout.StageID != "lunar_maze" {
+		t.Fatalf("room participant should expose hash and server loadout only: %+v", list.Rooms[0].Participants[0])
+	}
+
+	rules, err := service.RoomRules(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("room rules: %v", err)
+	}
+	if !rules.OK || !rules.ServerAuthoritative || rules.Version.ProtocolVersion != ProtocolVersion || rules.Mode.ModeID != "world_boss" {
+		t.Fatalf("room rules protocol invalid: %+v", rules)
+	}
+	if rules.Room.ModeConfigHash == "" || rules.Room.RulesetVersion != RulesetVersion || rules.BattleTicketTTL != BattleTicketTTLSeconds {
+		t.Fatalf("room rules missing version hashes: %+v", rules)
+	}
+	if !stringSliceContains(rules.ForbiddenFields, "damage") || !stringSliceContains(rules.ServerAuthority, "state_snapshot") || !stringSliceContains(rules.ClientAuthority, "input_packet") {
+		t.Fatalf("room authority fields missing: %+v", rules)
+	}
+
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "guest_room_deck",
+		DeckSnapshot: validDeck("guest_room_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.RoomStatus != "waiting" || joined.CurrentPlayers != 2 {
+		t.Fatalf("joined room invalid: %+v", joined)
+	}
+	left, err := service.LeaveRoom(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("leave guest: %v", err)
+	}
+	if left.QueueStatus != "cancelled" || left.RoomStatus != "cancelled" || left.CurrentPlayers != 1 {
+		t.Fatalf("guest leave should keep host room waiting: %+v", left)
+	}
+	afterGuestLeave, err := service.Room(host.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("room after guest leave: %v", err)
+	}
+	if afterGuestLeave.RoomStatus != "waiting" || afterGuestLeave.CurrentPlayers != 1 {
+		t.Fatalf("room should remain joinable after guest leave: %+v", afterGuestLeave)
+	}
+	rejoined, err := service.JoinRoom(replacement.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "replacement_room_deck",
+		DeckSnapshot: validDeck("replacement_room_deck"),
+	})
+	if err != nil {
+		t.Fatalf("replacement join: %v", err)
+	}
+	if rejoined.CurrentPlayers != 2 {
+		t.Fatalf("replacement join invalid: %+v", rejoined)
+	}
+	hostLeft, err := service.LeaveRoom(host.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("host leave: %v", err)
+	}
+	if hostLeft.QueueStatus != "cancelled" || hostLeft.RoomStatus != "cancelled" || hostLeft.CurrentPlayers != 0 {
+		t.Fatalf("host leave should cancel room: %+v", hostLeft)
+	}
+	if _, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "guest_after_cancel",
+		DeckSnapshot: validDeck("guest_after_cancel"),
+	}); ErrorCode(err) != codeRoomUnavailable {
+		t.Fatalf("expected cancelled room unavailable, got %v", err)
+	}
+}
+
 func TestServerSimulationRejectsClientAuthoredCombatAndAdvancesBullets(t *testing.T) {
 	service := NewService(Config{})
 	alice := mustLogin(t, service, "Alice Sim")

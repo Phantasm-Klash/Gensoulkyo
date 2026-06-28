@@ -488,6 +488,59 @@ type JoinRoomRequest struct {
 	ModeParams   map[string]any `json:"mode_params"`
 }
 
+type RoomParticipantSnapshot struct {
+	UserID           string        `json:"user_id"`
+	DisplayName      string        `json:"display_name"`
+	TicketID         string        `json:"ticket_id"`
+	DeckSnapshotHash string        `json:"deck_snapshot_hash"`
+	Loadout          PlayerLoadout `json:"loadout"`
+	JoinedAt         time.Time     `json:"joined_at"`
+	LastSeenAt       time.Time     `json:"last_seen_at"`
+}
+
+type RoomSnapshot struct {
+	OK                  bool                      `json:"ok"`
+	RoomCode            string                    `json:"room_code"`
+	RoomStatus          string                    `json:"room_status"`
+	ModeID              string                    `json:"mode_id"`
+	HostUserID          string                    `json:"host_user_id"`
+	RequiredPlayers     int                       `json:"required_players"`
+	MaxPlayers          int                       `json:"max_players"`
+	CurrentPlayers      int                       `json:"current_players"`
+	MatchID             string                    `json:"match_id,omitempty"`
+	StageID             string                    `json:"stage_id"`
+	ModeRulesetVersion  string                    `json:"mode_ruleset_version"`
+	RulesetVersion      string                    `json:"ruleset_version"`
+	ModeConfigHash      string                    `json:"mode_config_hash"`
+	ModeParams          map[string]any            `json:"mode_params,omitempty"`
+	Participants        []RoomParticipantSnapshot `json:"participants"`
+	CreatedAt           time.Time                 `json:"created_at"`
+	ServerTime          time.Time                 `json:"server_time"`
+	ServerAuthoritative bool                      `json:"server_authoritative"`
+}
+
+type RoomListResponse struct {
+	OK                  bool           `json:"ok"`
+	Rooms               []RoomSnapshot `json:"rooms"`
+	ServerTime          time.Time      `json:"server_time"`
+	ServerAuthoritative bool           `json:"server_authoritative"`
+}
+
+type RoomRulesSnapshot struct {
+	OK                  bool         `json:"ok"`
+	Version             VersionStamp `json:"version"`
+	Room                RoomSnapshot `json:"room"`
+	Mode                ModeConfig   `json:"mode"`
+	TickRate            int          `json:"tick_rate"`
+	InputDelayTicks     int          `json:"input_delay_ticks"`
+	BattleTicketTTL     int          `json:"battle_ticket_ttl_seconds"`
+	ClientAuthority     []string     `json:"client_authority"`
+	ServerAuthority     []string     `json:"server_authority"`
+	ForbiddenFields     []string     `json:"forbidden_fields"`
+	ServerTime          time.Time    `json:"server_time"`
+	ServerAuthoritative bool         `json:"server_authoritative"`
+}
+
 type QueueResponse struct {
 	OK               bool                    `json:"ok"`
 	QueueStatus      string                  `json:"queue_status"`
