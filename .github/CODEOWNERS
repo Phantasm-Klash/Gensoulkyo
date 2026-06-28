@@ -1,0 +1,6 @@
+# Business server, lobby, security, and protocol contract changes require owner review.
+/cmd/ @Phantasm-Klash
+/runtime/ @Phantasm-Klash
+/migrations/ @Phantasm-Klash
+/go.mod @Phantasm-Klash
+/go.sum @Phantasm-Klash

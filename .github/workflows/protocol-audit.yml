@@ -1,0 +1,32 @@
+name: Server Protocol Audit
+
+on:
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "runtime/**"
+      - "migrations/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/protocol-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  server-contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Gensoulkyo
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run runtime and Nakama contract tests
+        run: go test ./runtime/... ./cmd/gensoulkyo_nakama
+      - name: Check whitespace
+        run: git diff --check HEAD
