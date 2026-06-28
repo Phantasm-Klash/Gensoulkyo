@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	phkv1 "github.com/phantasm-klash/phk-protocol/gen/go/phk/v1"
 )
 
 func TestAuthoritativeMatchLifecycleSettlementAndClaims(t *testing.T) {
@@ -1922,17 +1924,17 @@ func signedBattleResultForAllocation(allocation *BattleServerAllocation) SignedB
 			Version:              currentVersionStamp(),
 			MatchID:              allocation.MatchID,
 			ModeID:               allocation.ModeID,
-			ResultHash:           "sha256:0123456789abcdef",
-			ReplayID:             "battle_replay_" + allocation.MatchID,
+			ResultHash:           phkv1.BattleResultCallbackResultHash,
+			ReplayID:             phkv1.BattleResultCallbackReplayID,
 			PlayerIDs:            playerIDs,
-			RewardProjectionJSON: `{"source":"battle-server"}`,
-			ModeResultJSON:       `{"battle_result_owner":"cpp"}`,
-			SettledAtMS:          allocation.AllocatedAt.Add(15 * time.Second).UnixMilli(),
+			RewardProjectionJSON: phkv1.BattleResultCallbackRewardProjectionJSON,
+			ModeResultJSON:       phkv1.BattleResultCallbackModeResultJSON,
+			SettledAtMS:          phkv1.BattleResultCallbackSettledAtMS,
 		},
-		SignatureAlg:        "ED25519",
+		SignatureAlg:        phkv1.BattleResultCallbackSignatureAlg,
 		KeyID:               allocation.BattleServerID,
-		SignatureHex:        strings.Repeat("b", 128),
-		PublicKeyHex:        strings.Repeat("a", 64),
+		SignatureHex:        phkv1.BattleResultCallbackSignatureHex,
+		PublicKeyHex:        phkv1.BattleResultCallbackPublicKeyHex,
 		ServerAuthoritative: true,
 	}
 }
