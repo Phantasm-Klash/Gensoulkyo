@@ -1633,18 +1633,25 @@ func TestServerValidatesModeActions(t *testing.T) {
 	if len(candidates) != 3 {
 		t.Fatalf("expected server candidates: %+v", candidates)
 	}
+	var fixturePayload map[string]any
+	if err := json.Unmarshal([]byte(phkv1.BattleModeActionPayloadJSON), &fixturePayload); err != nil {
+		t.Fatalf("mode action fixture payload: %v", err)
+	}
+	fixtureCardID := strings.TrimSpace(asString(fixturePayload["card_id"]))
+	if fixtureCardID == "" {
+		t.Fatalf("mode action fixture missing card_id: %+v", fixturePayload)
+	}
+	candidates[0] = fixtureCardID
+	fixturePayload["card_id"] = candidates[0]
 	accepted, err := service.SubmitModeAction(players[0].SessionToken, matchID, map[string]any{
 		"mode_id":     "battle_royale",
-		"action_type": "select_round_card",
-		"payload": map[string]any{
-			"card_id":     candidates[0],
-			"round_index": 0,
-		},
+		"action_type": phkv1.BattleModeActionActionType,
+		"payload":     fixturePayload,
 	})
 	if err != nil {
 		t.Fatalf("select mode action: %v", err)
 	}
-	if !accepted.Accepted || accepted.ActionType != "select_round_card" || accepted.Event.Seq == 0 || !accepted.ServerAuthoritative || accepted.ClientResultAuthoritative {
+	if !accepted.Accepted || accepted.ActionType != phkv1.BattleModeActionActionType || accepted.Event.Seq == 0 || !accepted.ServerAuthoritative || accepted.ClientResultAuthoritative {
 		t.Fatalf("mode action response invalid: %+v", accepted)
 	}
 	if got := intFromAny(accepted.ModeState["choice_deadline_tick"]); got != TickRate*30 {
