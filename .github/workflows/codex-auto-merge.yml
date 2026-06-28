@@ -1,0 +1,36 @@
+name: Codex Auto Merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+  workflow_run:
+    workflows: ["Server Protocol Audit"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+
+jobs:
+  auto-merge:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge eligible PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --repo "$REPO" --state open --label codex-auto-merge --json number --jq '.[].number')"
+          for pr in $prs; do
+            state="$(gh pr view "$pr" --repo "$REPO" --json isDraft,mergeStateStatus,statusCheckRollup --jq 'if .isDraft then "draft" elif ([.statusCheckRollup[]? | select(.name != "auto-merge") | select(.status != "COMPLETED" or .conclusion != "SUCCESS")] | length) == 0 then .mergeStateStatus else "checks_pending" end')"
+            if [ "$state" = "CLEAN" ] || [ "$state" = "HAS_HOOKS" ] || [ "$state" = "UNKNOWN" ]; then
+              gh pr merge "$pr" --repo "$REPO" --squash --delete-branch --admin
+            else
+              echo "PR #$pr not eligible: $state"
+            fi
+          done
