@@ -8,6 +8,7 @@ on:
       - "migrations/**"
       - "go.mod"
       - "go.sum"
+      - ".github/CODEOWNERS"
       - ".github/workflows/protocol-audit.yml"
   workflow_dispatch:
 
@@ -21,12 +22,22 @@ jobs:
     steps:
       - name: Checkout Gensoulkyo
         uses: actions/checkout@v4
+        with:
+          path: Gensoulkyo
+      - name: Checkout PhK-Protocol
+        uses: actions/checkout@v4
+        with:
+          repository: Phantasm-Klash/PhK-Protocol
+          path: PhK-Protocol
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: Gensoulkyo/go.mod
           cache: true
+          cache-dependency-path: Gensoulkyo/go.sum
       - name: Run runtime and Nakama contract tests
+        working-directory: Gensoulkyo
         run: go test ./runtime/... ./cmd/gensoulkyo_nakama
       - name: Check whitespace
+        working-directory: Gensoulkyo
         run: git diff --check HEAD
