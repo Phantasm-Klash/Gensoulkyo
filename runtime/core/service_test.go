@@ -141,6 +141,28 @@ func TestAuthoritativeMatchLifecycleSettlementAndClaims(t *testing.T) {
 	if replay.StateHash == "" || replay.InputCount == 0 || replay.EventCount == 0 || len(replay.Events) == 0 || replay.Settlement.ReplayID != settlement.ReplayID {
 		t.Fatalf("replay missing audit data: %+v", replay)
 	}
+	goldenReplaySummary := map[string]any{
+		"replay_id":          phkv1.GoldenReplaySummaryReplayID,
+		"match_id":           phkv1.GoldenReplaySummaryMatchID,
+		"owner_user_id":      phkv1.GoldenReplaySummaryOwnerUserID,
+		"input_count":        phkv1.GoldenReplaySummaryInputCount,
+		"event_count":        phkv1.GoldenReplaySummaryEventCount,
+		"input_stream_hash":  phkv1.GoldenReplaySummaryInputStreamHash,
+		"event_stream_hash":  phkv1.GoldenReplaySummaryEventStreamHash,
+		"final_state_hash":   phkv1.GoldenReplaySummaryFinalStateHash,
+		"final_tick":         phkv1.GoldenReplaySummaryFinalTick,
+	}
+	if goldenReplaySummary["replay_id"] == "" || goldenReplaySummary["match_id"] == "" || goldenReplaySummary["owner_user_id"] == "" {
+		t.Fatalf("golden replay summary identity constants missing: %+v", goldenReplaySummary)
+	}
+	if phkv1.GoldenReplaySummaryInputCount <= 0 || phkv1.GoldenReplaySummaryEventCount <= 0 || phkv1.GoldenReplaySummaryFinalTick <= 0 {
+		t.Fatalf("golden replay summary count constants invalid: %+v", goldenReplaySummary)
+	}
+	for _, hashValue := range []string{phkv1.GoldenReplaySummaryInputStreamHash, phkv1.GoldenReplaySummaryEventStreamHash, phkv1.GoldenReplaySummaryFinalStateHash} {
+		if !strings.HasPrefix(hashValue, "sha256:") {
+			t.Fatalf("golden replay summary hash constant must be sha256-prefixed: %s", hashValue)
+		}
+	}
 	if _, err := service.Replay(bob.SessionToken, settlement.ReplayID); ErrorCode(err) != codeUnauthorized {
 		t.Fatalf("expected cross-user replay rejection, got %v", err)
 	}
