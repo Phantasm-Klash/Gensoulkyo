@@ -652,6 +652,36 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		t.Fatalf("room snapshot read failed: %+v", snapshot)
 	}
 
+	message := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.message",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(2, "nonce-sql-room-message", "rooms_message", map[string]any{
+			"room_code":  room.RoomCode,
+			"message_id": "sql-host-message-1",
+			"kind":       "chat",
+			"text":       "waiting for duel",
+			"metadata":   map[string]any{"client_locale": "en-US"},
+		}),
+	})
+	if !message.OK {
+		t.Fatalf("room message failed: %+v", message)
+	}
+	duplicateMessage := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.message",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(3, "nonce-sql-room-message-duplicate", "rooms_message", map[string]any{
+			"room_code":  room.RoomCode,
+			"message_id": "sql-host-message-1",
+			"kind":       "chat",
+			"text":       "duplicate should audit without replacing",
+		}),
+	})
+	if !duplicateMessage.OK || !duplicateMessage.Payload.(*core.LobbyMessage).Duplicate {
+		t.Fatalf("duplicate room message should return idempotent duplicate: %+v", duplicateMessage)
+	}
+
 	joined := handler.HandleWSSMessage(WSSMessage{
 		Name:      "rooms.join",
 		SessionID: guest.SessionToken,
@@ -675,7 +705,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:        "battle.ticket",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(2, "nonce-sql-host-ticket", "battle_ticket", map[string]any{
+		Payload: envelopePayload(4, "nonce-sql-host-ticket", "battle_ticket", map[string]any{
 			"match_id": match.MatchID,
 		}),
 	})
@@ -686,7 +716,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:        "battle.audit.status",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload:   envelopePayload(3, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(5, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
 	})
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
@@ -703,13 +733,16 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !lobbyStatus.OK {
 		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
 	}
-	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 1 {
+	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 1 || status.MessageRecords != 2 {
 		t.Fatalf("lobby audit status should reflect SQL repository writes: %+v", status)
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 6 || tableCounts["lobby_room_audits"] != 3 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 {
+	if tableCounts["business_envelope_audits"] < 8 || tableCounts["lobby_room_audits"] != 3 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
+	}
+	if !nakamaSQLHasDuplicateLobbyMessageAudit() {
+		t.Fatalf("expected duplicate lobby message audit row: calls=%+v", nakamaSQLCaptureCalls())
 	}
 }
 
@@ -784,6 +817,7 @@ func nakamaSQLTableCounts() map[string]int {
 		for _, table := range []string{
 			"business_envelope_audits",
 			"lobby_room_audits",
+			"lobby_message_audits",
 			"match_allocation_audits",
 			"battle_ticket_audits",
 		} {
@@ -793,6 +827,18 @@ func nakamaSQLTableCounts() map[string]int {
 		}
 	}
 	return counts
+}
+
+func nakamaSQLHasDuplicateLobbyMessageAudit() bool {
+	for _, call := range nakamaSQLCaptureCalls() {
+		if !strings.Contains(call.query, "INSERT INTO lobby_message_audits") || len(call.args) < 10 {
+			continue
+		}
+		if call.args[0] == "sql-host-message-1" && call.args[5] == true && call.args[9] == true {
+			return true
+		}
+	}
+	return false
 }
 
 type nakamaSQLCaptureDriver struct{}

@@ -62,3 +62,9 @@ Status date: 2026-06-28
 - Wired explicit `CancelTicket` room cancellations into the existing lobby lifecycle audit repository using the already-migrated `cancelled` action, covering both empty-room host cancellation and member cancellation from a waiting room.
 - Added a regression that queue-only cancellation remains local queue state while room-ticket cancellation emits server-authoritative lobby audit records and increments `LobbyLifecycleAuditStatus.RoomRecords`.
 - Verified `go test ./runtime/core -run TestCancelTicketRemovesQueueAndRoomWait -count=1`, `go test ./...`, `docker-compose --profile test run --rm test`, and `/root/gotouhou/docs/ops/protocol_audit_check.py`.
+
+## 2026-06-29 gensoulkyo-lobby duplicate lobby message audit update
+
+- Extended the DB-backed Nakama handler regression to send an original and duplicate `rooms.message` WSS event through `runtime/nakamaapi.NewWithDatabase`.
+- Verified duplicate lobby message idempotency now has durable SQL coverage: `lobby_message_audits` receives both rows, the duplicate row preserves the duplicate/server-authoritative flags, and `LobbyLifecycleAuditStatus.MessageRecords` increments for both writes.
+- This remains lobby/business audit coverage only; client-origin result submission is still rejected and no HTTP fallback path becomes production combat authority.
