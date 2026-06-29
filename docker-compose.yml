@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  gensoulkyo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    working_dir: /workspace/Gensoulkyo
+    environment:
+      GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    volumes:
+      - .:/workspace/Gensoulkyo
+      - ../PhK-Protocol:/workspace/PhK-Protocol:ro
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    ports:
+      - "7350:7350"
+    command: ["go", "run", "./cmd/gensoulkyo", "-addr", "0.0.0.0:7350"]
+
+  test:
+    profiles:
+      - test
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    volumes:
+      - .:/workspace/Gensoulkyo
+      - ../PhK-Protocol:/workspace/PhK-Protocol:ro
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    command: ["go", "test", "./..."]
+
+volumes:
+  go-mod-cache:
+  go-build-cache:
