@@ -154,6 +154,7 @@ func TestNakamaTagBuildComposeProfileDocumentsTemporarySDKPin(t *testing.T) {
 	for _, expected := range []string{
 		"nakama-tag-build",
 		"NAKAMA_COMMON_VERSION",
+		"GOSUMDB",
 		"v1.34.0",
 		"go mod edit -replace github.com/phantasm-klash/phk-protocol=/workspace/PhK-Protocol",
 		"go get github.com/heroiclabs/nakama-common/runtime@$${NAKAMA_COMMON_VERSION}",
@@ -166,6 +167,7 @@ func TestNakamaTagBuildComposeProfileDocumentsTemporarySDKPin(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"docker-compose --profile nakama-tag-build run --rm nakama-tag-build",
+		"-e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off",
 		"without mutating the repository's `go.mod`/`go.sum`",
 		"github.com/heroiclabs/nakama-common/runtime",
 		"`v1.34.0`",

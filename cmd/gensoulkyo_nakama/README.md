@@ -19,6 +19,12 @@ For scoped validation without mutating the repository's `go.mod`/`go.sum`, run:
 docker-compose --profile nakama-tag-build run --rm nakama-tag-build
 ```
 
+If the default Go module proxy or checksum service is unreachable from the runner, use explicit disposable-container overrides:
+
+```sh
+docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build
+```
+
 That profile copies the repository into a temporary container workspace, applies the local PhK-Protocol replace, temporarily pins `github.com/heroiclabs/nakama-common/runtime` to `NAKAMA_COMMON_VERSION` (default `v1.34.0`), runs the Nakama tag tests, and builds the Go Runtime plugin artifact at `/tmp/gensoulkyo.so`.
 
 The binding is intentionally thin: Nakama SDK context/session extraction and JSON payload wrapping happen here; security checks, audit snapshots, and business dispatch stay in `runtime/nakamaapi`.

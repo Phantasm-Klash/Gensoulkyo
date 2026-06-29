@@ -41,6 +41,7 @@ services:
       target: test
     environment:
       GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+      GOSUMDB: ${GOSUMDB:-sum.golang.org}
       NAKAMA_COMMON_VERSION: ${NAKAMA_COMMON_VERSION:-v1.34.0}
     volumes:
       - .:/workspace/Gensoulkyo:ro
