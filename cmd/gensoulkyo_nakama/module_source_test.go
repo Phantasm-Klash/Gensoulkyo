@@ -17,6 +17,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"func InitModule(",
 		"initializer.RegisterRpc",
 		"nakamaapi.New",
+		"security.NewSQLBusinessEnvelopeAuditSink",
 		"core.NewSQLBattleLifecycleAuditRepository",
 		"BattleLifecycleAuditRepo",
 		"runtime.RUNTIME_CTX_SESSION_ID",
@@ -31,6 +32,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"rooms.chat",
 		"rooms.announcement",
 		"match.ready",
+		"battle.allocation",
 		"battle.ticket",
 		"battle.result.submit",
 	} {

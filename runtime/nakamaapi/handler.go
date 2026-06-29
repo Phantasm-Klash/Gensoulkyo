@@ -264,6 +264,12 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(message.SessionID, matchID) })
+	case "battle.allocation":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.BattleAllocation(message.SessionID, matchID) })
+	case "battle.ticket":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.BattleTicket(message.SessionID, matchID) })
 	default:
 		return errorResponse(http.StatusNotFound, "not_found", fmt.Sprintf("wss message %q is not registered", message.Name))
 	}
