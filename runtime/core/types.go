@@ -83,6 +83,20 @@ type Config struct {
 	BattleLifecycleAuditRepo BattleLifecycleAuditRepository
 }
 
+type BattleLifecycleAuditStatus struct {
+	OK                  bool      `json:"ok"`
+	Configured          bool      `json:"configured"`
+	AllocationRecords   int       `json:"allocation_records"`
+	TicketRecords       int       `json:"ticket_records"`
+	ResultRecords       int       `json:"result_records"`
+	ReplayRecords       int       `json:"replay_records"`
+	RejectedRecords     int       `json:"rejected_records"`
+	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
+	LastError           string    `json:"last_error,omitempty"`
+	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
+}
+
 type BattleLifecycleAuditRepository interface {
 	RecordMatchAllocationAudit(BattleAllocationAuditRecord) error
 	RecordBattleTicketAudit(BattleTicketAuditRecord) error

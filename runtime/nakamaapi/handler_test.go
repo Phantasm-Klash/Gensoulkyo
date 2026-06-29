@@ -507,11 +507,25 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("battle ticket WSS payload should be signed and user-bound: %+v", ticket)
 	}
 
+	auditStatus := handler.HandleRPC(RPCRequest{
+		ID:        "battle.audit.status",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload:   envelopePayload(6, "nonce-external-host-audit-status", "battle_audit_status", map[string]any{}),
+	})
+	if !auditStatus.OK || auditStatus.Status != 200 {
+		t.Fatalf("battle audit status RPC read failed: %+v", auditStatus)
+	}
+	status := auditStatus.Payload.(core.BattleLifecycleAuditStatus)
+	if status.Configured || status.OK || !status.ServerAuthoritative {
+		t.Fatalf("default in-memory handler should surface missing durable audit repository: %+v", status)
+	}
+
 	wssResultSubmit := handler.HandleWSSMessage(WSSMessage{
 		Name:      "battle.result.submit",
 		SessionID: hostSession,
 		UserID:    hostUser,
-		Payload: envelopePayload(6, "nonce-external-host-result-submit", "battle_result_submit", map[string]any{
+		Payload: envelopePayload(7, "nonce-external-host-result-submit", "battle_result_submit", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})

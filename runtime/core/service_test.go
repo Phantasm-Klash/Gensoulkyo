@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -671,6 +672,29 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 			t.Fatalf("replay audit invalid: %+v", replayAudit)
 		}
 	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 {
+		t.Fatalf("audit status did not account successful lifecycle writes: %+v", status)
+	}
+}
+
+func TestBattleLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
+	repo := &captureBattleLifecycleAuditRepo{err: errors.New("audit db offline")}
+	service := NewService(Config{BattleLifecycleAuditRepo: repo})
+	alice := mustLogin(t, service, "Audit Error Alice")
+	bob := mustLogin(t, service, "Audit Error Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	if _, err := service.BattleTicket(alice.SessionToken, matchID); err != nil {
+		t.Fatalf("fallback ticket issuance should remain available while audit failure is surfaced: %v", err)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if status.OK || !status.Configured || status.RejectedRecords == 0 || status.LastErrorOperation == "" || !strings.Contains(status.LastError, "audit db offline") {
+		t.Fatalf("audit failure should be visible in status snapshot: %+v", status)
+	}
+	if !status.ServerAuthoritative {
+		t.Fatalf("audit status must stay server authoritative: %+v", status)
+	}
 }
 
 type captureBattleLifecycleAuditRepo struct {
@@ -678,24 +702,37 @@ type captureBattleLifecycleAuditRepo struct {
 	tickets     []BattleTicketAuditRecord
 	results     []BattleResultAuditRecord
 	replays     []ReplayAuditRecord
+	err         error
 }
 
 func (repo *captureBattleLifecycleAuditRepo) RecordMatchAllocationAudit(record BattleAllocationAuditRecord) error {
+	if repo.err != nil {
+		return repo.err
+	}
 	repo.allocations = append(repo.allocations, record)
 	return nil
 }
 
 func (repo *captureBattleLifecycleAuditRepo) RecordBattleTicketAudit(record BattleTicketAuditRecord) error {
+	if repo.err != nil {
+		return repo.err
+	}
 	repo.tickets = append(repo.tickets, record)
 	return nil
 }
 
 func (repo *captureBattleLifecycleAuditRepo) RecordBattleResultAudit(record BattleResultAuditRecord) error {
+	if repo.err != nil {
+		return repo.err
+	}
 	repo.results = append(repo.results, record)
 	return nil
 }
 
 func (repo *captureBattleLifecycleAuditRepo) RecordReplayAudit(record ReplayAuditRecord) error {
+	if repo.err != nil {
+		return repo.err
+	}
 	repo.replays = append(repo.replays, record)
 	return nil
 }
