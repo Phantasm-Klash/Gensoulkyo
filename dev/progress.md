@@ -81,3 +81,9 @@ Status date: 2026-06-28
 - Added server-authoritative lobby read audit records for room-backed `matchmaking.ticket` polling so Nakama RPC/WSS clients reading a waiting-room ticket leave a PostgreSQL-compatible lifecycle trace without mutating room state.
 - Extended `LobbyLifecycleAuditStatus` and the PostgreSQL `lobby_room_audits.action` constraint with `ticket_read`, keeping ticket polling counted with read visibility instead of room mutation/message/rules counters.
 - Verified `go test ./runtime/core ./runtime/nakamaapi ./cmd/gensoulkyo_nakama`, `go test ./...`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`. Direct `docker compose --profile ...` is unavailable on this host, and direct execution of the protocol audit script is blocked by file mode, so `docker-compose` and `python3` were used.
+
+## 2026-06-29 gensoulkyo-lobby Nakama payload guard update
+
+- Hardened the build-tagged Nakama RPC binding so malformed JSON payloads are reported to `runtime/nakamaapi` as explicit parse errors instead of being wrapped as fallback body data.
+- Added SDK-neutral handler coverage proving malformed binding payloads fail as `invalid_request` before login, envelope validation, or business dispatch; source-shape tests now require this guard to stay wired in the real Nakama binding.
+- Verified `go test ./runtime/nakamaapi ./cmd/gensoulkyo_nakama`; full Go, Docker Compose, and protocol audit checks are rerun for this final sample below. The real `go test -tags nakama` path remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration outside this scope's allowed paths.

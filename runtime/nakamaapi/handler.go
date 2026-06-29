@@ -26,12 +26,13 @@ type Handler struct {
 type Option func(*Handler)
 
 type RPCRequest struct {
-	ID          string
-	SessionID   string
-	UserID      string
-	DisplayName string
-	Service     bool
-	Payload     map[string]any
+	ID           string
+	SessionID    string
+	UserID       string
+	DisplayName  string
+	Service      bool
+	Payload      map[string]any
+	PayloadError string
 }
 
 type WSSMessage struct {
@@ -86,6 +87,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	rpcID := normalizeName(request.ID)
 	if rpcID == "" {
 		return errorResponse(http.StatusBadRequest, CodeInvalidRequest, "rpc id is required")
+	}
+	if response := payloadErrorResponse(request.PayloadError); !response.OK {
+		return response
 	}
 	if rpcSkipsEnvelope(rpcID) {
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
@@ -385,6 +389,14 @@ func successResponse(payload any) Response {
 
 func errorResponse(status int, code string, message string) Response {
 	return Response{OK: false, Status: status, ErrorCode: code, Message: message}
+}
+
+func payloadErrorResponse(message string) Response {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return successResponse(nil)
+	}
+	return errorResponse(http.StatusBadRequest, CodeInvalidRequest, message)
 }
 
 func envelopeErrorResponse(result security.BusinessEnvelopeRequestResult) Response {

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"gensoulkyo/runtime/nakamaapi"
 
@@ -60,11 +61,12 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		rpcID := id
 		if err := initializer.RegisterRpc(rpcID, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 			response := handler.HandleRPC(nakamaapi.RPCRequest{
-				ID:          rpcID,
-				SessionID:   runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID),
-				UserID:      runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID),
-				DisplayName: runtimeCtxString(ctx, runtime.RUNTIME_CTX_USERNAME),
-				Payload:     decodePayload(payload),
+				ID:           rpcID,
+				SessionID:    runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID),
+				UserID:       runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID),
+				DisplayName:  runtimeCtxString(ctx, runtime.RUNTIME_CTX_USERNAME),
+				Payload:      decodedPayload(payload),
+				PayloadError: payloadError(payload),
 			})
 			return encodeResponse(response)
 		}); err != nil {
@@ -86,6 +88,28 @@ func decodePayload(payload string) map[string]any {
 		return map[string]any{"body": map[string]any{"raw_payload": payload}}
 	}
 	return out
+}
+
+func decodedPayload(payload string) map[string]any {
+	if err := payloadJSONError(payload); err != nil {
+		return map[string]any{}
+	}
+	return decodePayload(payload)
+}
+
+func payloadError(payload string) string {
+	if err := payloadJSONError(payload); err != nil {
+		return "invalid JSON payload: " + err.Error()
+	}
+	return ""
+}
+
+func payloadJSONError(payload string) error {
+	if strings.TrimSpace(payload) == "" {
+		return nil
+	}
+	out := map[string]any{}
+	return json.Unmarshal([]byte(payload), &out)
 }
 
 func encodeResponse(response nakamaapi.Response) (string, error) {

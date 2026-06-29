@@ -24,6 +24,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"nakamaapi.NewWithDatabase",
 		"runtime.RUNTIME_CTX_SESSION_ID",
 		"runtime.RUNTIME_CTX_USER_ID",
+		"PayloadError: payloadError(payload)",
 		"auth.anonymous",
 		"bootstrap",
 		"matchmaking.join",
@@ -116,6 +117,9 @@ func TestNakamaBindingKeepsPublicResultSubmitFailClosed(t *testing.T) {
 	}
 	if !strings.Contains(text, "NewWithDatabase(db)") {
 		t.Fatalf("Nakama binding must wire Nakama *sql.DB through NewWithDatabase")
+	}
+	if !strings.Contains(text, "PayloadError: payloadError(payload)") || !strings.Contains(text, "json.Unmarshal([]byte(payload), &out)") {
+		t.Fatalf("Nakama binding must reject malformed JSON payloads before runtime dispatch")
 	}
 	if strings.Contains(text, "battle.result.submit") && !strings.Contains(text, "runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID)") {
 		t.Fatalf("Nakama binding must continue extracting session context for registered RPCs")

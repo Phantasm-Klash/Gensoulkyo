@@ -63,6 +63,18 @@ func TestNakamaRPCRequiresEnvelopeForAuthenticatedBusinessCalls(t *testing.T) {
 	}
 }
 
+func TestNakamaRPCRejectsMalformedBindingPayloadBeforeDispatch(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	response := handler.HandleRPC(RPCRequest{
+		ID:           "auth.anonymous",
+		Payload:      map[string]any{},
+		PayloadError: "invalid JSON payload: unexpected end of JSON input",
+	})
+	if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "invalid JSON payload") {
+		t.Fatalf("malformed binding payload should be rejected as invalid request, got %+v", response)
+	}
+}
+
 func TestNakamaRPCMapsExternalSessionBeforeBusinessDispatch(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	response := handler.HandleRPC(RPCRequest{
