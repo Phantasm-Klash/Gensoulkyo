@@ -37,3 +37,9 @@ Status date: 2026-06-28
 - Added SDK-neutral service-origin metadata to Nakama RPC requests while leaving the build-tagged public Nakama RPC binding fail-closed until a real S2S auth signal is added.
 - Rejected client-origin Nakama `battle.result.submit` calls before core dispatch while preserving an explicit service-origin path for future C++ Battle Server callback scaffolds to reach signed-result validation.
 - Updated Nakama binding docs and source-shape tests to preserve the authority split: clients can read allocation/tickets/status through business RPC/WSS, but cannot use Nakama RPC/WSS as a settlement authority path.
+
+## 2026-06-29 gensoulkyo-lobby Nakama registry verification update
+
+- Hardened `cmd/gensoulkyo_nakama` source-shape coverage so default tests parse the build-tagged `rpcIDs` registry and require the exact lobby, battle allocation/ticket, audit status, and result-submit RPC set without duplicates.
+- Added a regression guard that the public Nakama RPC binding continues to wire Nakama `*sql.DB` through `runtime/nakamaapi.NewWithDatabase` while not marking client-origin RPC calls as service-origin.
+- Verified `go test ./...`, Docker Compose test profile, and the cross-repo protocol audit. Real `go test -tags nakama` is still blocked until the module/dependency scope can add and pin `github.com/heroiclabs/nakama-common/runtime`; current latest module metadata requires a newer Go toolchain than this runner.
