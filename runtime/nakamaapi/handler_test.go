@@ -474,6 +474,50 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !heartbeat.OK || heartbeat.Payload.(*core.PresenceHeartbeatResponse).PresenceStatus != "in_match" || heartbeat.Payload.(*core.PresenceHeartbeatResponse).ModeID != "pvp_duel" {
 		t.Fatalf("heartbeat should report authoritative running room match: %+v", heartbeat)
 	}
+
+	wssAllocation := handler.HandleWSSMessage(WSSMessage{
+		Name:      "battle.allocation",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(4, "nonce-external-host-allocation", "battle_allocation", map[string]any{
+			"match_id": found.MatchID,
+		}),
+	})
+	if !wssAllocation.OK || wssAllocation.Status != 200 {
+		t.Fatalf("battle allocation WSS read failed: %+v", wssAllocation)
+	}
+	allocation := wssAllocation.Payload.(*core.BattleServerAllocation)
+	if allocation.MatchID != found.MatchID || allocation.ModeID != "pvp_duel" || !allocation.ServerAuthoritative {
+		t.Fatalf("battle allocation WSS payload should stay match-bound and authoritative: %+v", allocation)
+	}
+
+	wssTicket := handler.HandleWSSMessage(WSSMessage{
+		Name:      "battle.ticket",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(5, "nonce-external-host-ticket", "battle_ticket", map[string]any{
+			"match_id": found.MatchID,
+		}),
+	})
+	if !wssTicket.OK || wssTicket.Status != 200 {
+		t.Fatalf("battle ticket WSS read failed: %+v", wssTicket)
+	}
+	ticket := wssTicket.Payload.(*core.SignedBattleTicket)
+	if ticket.Ticket.MatchID != found.MatchID || ticket.Ticket.UserID != hostUser || ticket.Ticket.ModeID != "pvp_duel" || !ticket.Ticket.ServerAuthoritative || ticket.SignatureHex == "" {
+		t.Fatalf("battle ticket WSS payload should be signed and user-bound: %+v", ticket)
+	}
+
+	wssResultSubmit := handler.HandleWSSMessage(WSSMessage{
+		Name:      "battle.result.submit",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(6, "nonce-external-host-result-submit", "battle_result_submit", map[string]any{
+			"match_id": found.MatchID,
+		}),
+	})
+	if wssResultSubmit.OK || wssResultSubmit.Status != 404 {
+		t.Fatalf("battle result submit must stay out of client WSS dispatch: %+v", wssResultSubmit)
+	}
 }
 
 func envelopePayload(seq int64, nonce string, op string, body map[string]any) map[string]any {
