@@ -739,6 +739,22 @@ func TestNakamaRPCRejectsClientOriginBattleResultSubmit(t *testing.T) {
 	}
 }
 
+func TestNakamaRPCRejectsServiceOriginBattleResultSubmitWithPlayerContext(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	response := handler.HandleRPC(RPCRequest{
+		ID:        "battle.result.submit",
+		Service:   true,
+		SessionID: "player-session",
+		UserID:    "player-user",
+		Payload: map[string]any{
+			"signed_result": map[string]any{"match_id": "player-context"},
+		},
+	})
+	if response.OK || response.Status != 403 || response.ErrorCode != CodeServiceOriginRequired || !strings.Contains(response.Message, "must not include player session context") {
+		t.Fatalf("service-origin result submit with player context must fail closed before core dispatch, got %+v", response)
+	}
+}
+
 func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	serviceSubmit := handler.HandleRPC(RPCRequest{

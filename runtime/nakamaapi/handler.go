@@ -99,6 +99,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		if !request.Service {
 			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q requires service-to-service origin", request.ID))
 		}
+		if strings.TrimSpace(request.SessionID) != "" || strings.TrimSpace(request.UserID) != "" {
+			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q service-origin callback must not include player session context", request.ID))
+		}
 	} else {
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
 			return response

@@ -87,3 +87,9 @@ Status date: 2026-06-28
 - Hardened the build-tagged Nakama RPC binding so malformed JSON payloads are reported to `runtime/nakamaapi` as explicit parse errors instead of being wrapped as fallback body data.
 - Added SDK-neutral handler coverage proving malformed binding payloads fail as `invalid_request` before login, envelope validation, or business dispatch; source-shape tests now require this guard to stay wired in the real Nakama binding.
 - Verified `go test ./runtime/nakamaapi ./cmd/gensoulkyo_nakama`; full Go, Docker Compose, and protocol audit checks are rerun for this final sample below. The real `go test -tags nakama` path remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration outside this scope's allowed paths.
+
+## 2026-06-29 gensoulkyo-lobby service callback context guard update
+
+- Tightened SDK-neutral Nakama `battle.result.submit` handling so service-origin callbacks are rejected if they also carry player `session_id` or `user_id` context, preventing a miswired public RPC from looking like a C++ Battle Server settlement callback.
+- Added handler regression coverage for the new fail-closed path while preserving the context-free service-origin scaffold that reaches core signed-result validation, and pinned the build-tagged Nakama source-shape test to keep forwarding user context into `runtime/nakamaapi`.
+- Verified `go test ./...`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`. Direct `docker compose` is unavailable on this host; `go test -tags nakama ./cmd/gensoulkyo_nakama` remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration outside this scope's allowed paths.

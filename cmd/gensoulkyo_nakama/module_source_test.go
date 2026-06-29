@@ -124,6 +124,9 @@ func TestNakamaBindingKeepsPublicResultSubmitFailClosed(t *testing.T) {
 	if strings.Contains(text, "battle.result.submit") && !strings.Contains(text, "runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID)") {
 		t.Fatalf("Nakama binding must continue extracting session context for registered RPCs")
 	}
+	if !strings.Contains(text, "runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID)") {
+		t.Fatalf("Nakama binding must pass user context through runtime/nakamaapi so service-origin result callbacks can reject player-scoped requests")
+	}
 }
 
 func extractRPCIDs(t *testing.T, source string) []string {
