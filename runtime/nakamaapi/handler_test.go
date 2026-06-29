@@ -554,6 +554,47 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 }
 
+func TestNakamaRPCRejectsClientOriginBattleResultSubmit(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	login := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-result-client", "display_name": "Result Client"},
+	})
+	if !login.OK {
+		t.Fatalf("login failed: %+v", login)
+	}
+	session := login.Payload.(*core.AuthSession)
+
+	clientSubmit := handler.HandleRPC(RPCRequest{
+		ID:        "battle.result.submit",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload: envelopePayload(1, "nonce-client-result-submit", "battle_result_submit", map[string]any{
+			"signed_result": map[string]any{"match_id": "client-authored"},
+		}),
+	})
+	if clientSubmit.OK || clientSubmit.Status != 403 || clientSubmit.ErrorCode != CodeServiceOriginRequired {
+		t.Fatalf("client-origin battle result submit must be rejected before core dispatch: %+v", clientSubmit)
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
+		t.Fatalf("service-origin rejection should not consume envelope seq/nonce: %+v", snapshot)
+	}
+}
+
+func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	serviceSubmit := handler.HandleRPC(RPCRequest{
+		ID:      "battle.result.submit",
+		Service: true,
+		Payload: map[string]any{
+			"signed_result": map[string]any{"match_id": "service-invalid"},
+		},
+	})
+	if serviceSubmit.OK || serviceSubmit.Status != 400 || serviceSubmit.ErrorCode != "invalid_request" || strings.Contains(serviceSubmit.Message, CodeServiceOriginRequired) {
+		t.Fatalf("service-origin battle result submit should reach core validation, got %+v", serviceSubmit)
+	}
+}
+
 func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	driverName := registerNakamaSQLCaptureDriver(t)
 	db, err := sql.Open(driverName, "")

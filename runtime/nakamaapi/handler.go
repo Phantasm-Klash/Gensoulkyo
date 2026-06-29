@@ -14,6 +14,7 @@ import (
 const (
 	CodeInvalidRequest           = "invalid_request"
 	CodeBusinessEnvelopeRequired = "business_envelope_required"
+	CodeServiceOriginRequired    = "service_origin_required"
 )
 
 type Handler struct {
@@ -29,6 +30,7 @@ type RPCRequest struct {
 	SessionID   string
 	UserID      string
 	DisplayName string
+	Service     bool
 	Payload     map[string]any
 }
 
@@ -88,6 +90,10 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	if rpcSkipsEnvelope(rpcID) {
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
 			return response
+		}
+	} else if rpcRequiresServiceOrigin(rpcID) {
+		if !request.Service {
+			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q requires service-to-service origin", request.ID))
 		}
 	} else {
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
@@ -399,6 +405,10 @@ func coreErrorResponse(err error) Response {
 
 func rpcSkipsEnvelope(rpcID string) bool {
 	return rpcID == "auth.anonymous"
+}
+
+func rpcRequiresServiceOrigin(rpcID string) bool {
+	return rpcID == "battle.result.submit"
 }
 
 func normalizeName(name string) string {
