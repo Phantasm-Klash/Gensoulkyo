@@ -42,6 +42,7 @@ var rpcIDs = []string{
 	"lobby.audit.status",
 	"battle.allocation",
 	"battle.ticket",
+	"replay.get",
 	"battle.result.submit",
 }
 

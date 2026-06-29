@@ -554,6 +554,152 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 }
 
+func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	hostSession := "nakama-replay-host-session"
+	hostUser := "nakama-replay-host-user"
+	guestSession := "nakama-replay-guest-session"
+	guestUser := "nakama-replay-guest-user"
+
+	created := handler.HandleRPC(RPCRequest{
+		ID:          "rooms.create",
+		SessionID:   hostSession,
+		UserID:      hostUser,
+		DisplayName: "Replay Host",
+		Payload: envelopePayload(1, "nonce-replay-room-create", "rooms_create", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "replay_host_deck",
+			"deck_snapshot":  deckPayload("replay_host_deck"),
+		}),
+	})
+	if !created.OK || created.Status != 200 {
+		t.Fatalf("room create failed: %+v", created)
+	}
+	room := created.Payload.(*core.QueueResponse)
+
+	joined := handler.HandleWSSMessage(WSSMessage{
+		Name:        "rooms.join",
+		SessionID:   guestSession,
+		UserID:      guestUser,
+		DisplayName: "Replay Guest",
+		Payload: envelopePayload(1, "nonce-replay-room-join", "rooms_join", map[string]any{
+			"room_code":      room.RoomCode,
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "replay_guest_deck",
+			"deck_snapshot":  deckPayload("replay_guest_deck"),
+		}),
+	})
+	if !joined.OK || joined.Status != 200 {
+		t.Fatalf("room join failed: %+v", joined)
+	}
+	match := joined.Payload.(*core.QueueResponse)
+	playerIDs := []string{}
+	for _, player := range match.BattleAllocation.Players {
+		playerIDs = append(playerIDs, player.PlayerID)
+	}
+
+	resultSubmit := handler.HandleRPC(RPCRequest{
+		ID:      "battle.result.submit",
+		Service: true,
+		Payload: map[string]any{"signed_result": map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"version": map[string]any{
+					"protocol_version":     core.ProtocolVersion,
+					"business_api_version": core.BusinessAPIVersion,
+					"battle_api_version":   core.BattleAPIVersion,
+					"ruleset_version":      core.RulesetVersion,
+				},
+				"match_id":               match.MatchID,
+				"mode_id":                match.ModeID,
+				"result_hash":            "sha256:abcd1234",
+				"replay_id":              "nakama-replay-read-callback",
+				"player_ids":             playerIDs,
+				"reward_projection_json": `{"source":"battle_server"}`,
+				"mode_result_json":       `{"verified":true}`,
+				"settled_at_ms":          time.Now().UnixMilli(),
+			},
+			"signature_alg":        "ED25519",
+			"key_id":               match.BattleAllocation.BattleServerID,
+			"signature_hex":        strings.Repeat("c", 128),
+			"public_key_hex":       strings.Repeat("d", 64),
+			"server_authoritative": true,
+		}},
+	})
+	if !resultSubmit.OK {
+		t.Fatalf("service-origin result submit failed: %+v", resultSubmit)
+	}
+
+	settlement := handler.HandleRPC(RPCRequest{
+		ID:        "replay.get",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload:   envelopePayload(2, "nonce-replay-get-missing-id", "replay_get", map[string]any{}),
+	})
+	if settlement.OK || settlement.Status != 400 || settlement.ErrorCode != "invalid_request" {
+		t.Fatalf("missing replay id should be rejected after envelope validation: %+v", settlement)
+	}
+
+	hostMatchEnd := handler.HandleRPC(RPCRequest{
+		ID:        "battle.audit.status",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload:   envelopePayload(3, "nonce-replay-audit-status", "battle_audit_status", map[string]any{}),
+	})
+	if !hostMatchEnd.OK {
+		t.Fatalf("audit status read failed: %+v", hostMatchEnd)
+	}
+
+	hostSettlement, err := handler.service.SettleMatch(hostSession, match.MatchID, map[string]any{})
+	if err != nil {
+		t.Fatalf("read host settlement after service-origin result: %v", err)
+	}
+	if !hostSettlement.Duplicate || hostSettlement.ReplayID == "" {
+		t.Fatalf("expected duplicate authoritative settlement with replay id: %+v", hostSettlement)
+	}
+
+	read := handler.HandleRPC(RPCRequest{
+		ID:        "replay.get",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(4, "nonce-replay-owner-read", "replay_get", map[string]any{
+			"replay_id": "replay_" + match.MatchID + "_",
+		}),
+	})
+	if read.OK || read.Status != 404 {
+		t.Fatalf("prefix replay ids must not be accepted: %+v", read)
+	}
+
+	ownerReplayID := hostSettlement.ReplayID
+	guestRead := handler.HandleWSSMessage(WSSMessage{
+		Name:      "replay.get",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(2, "nonce-replay-guest-read", "replay_get", map[string]any{
+			"replay_id": ownerReplayID,
+		}),
+	})
+	if guestRead.OK || guestRead.Status != 401 || guestRead.ErrorCode != "unauthorized" {
+		t.Fatalf("cross-user replay read should be rejected through WSS: %+v", guestRead)
+	}
+
+	ownerRead := handler.HandleRPC(RPCRequest{
+		ID:        "replay.get",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(5, "nonce-replay-owner-read-real", "replay_get", map[string]any{
+			"replay_id": ownerReplayID,
+		}),
+	})
+	if !ownerRead.OK || ownerRead.Status != 200 {
+		t.Fatalf("owner replay read failed: %+v", ownerRead)
+	}
+	replay := ownerRead.Payload.(*core.ReplayRecord)
+	if replay.ReplayID != ownerReplayID || replay.MatchID != match.MatchID || replay.UserID != hostUser || !replay.ServerAuthoritative || replay.ModeResult["battle_result_replay_id"] != "nakama-replay-read-callback" {
+		t.Fatalf("owner replay payload invalid: %+v", replay)
+	}
+}
+
 func TestNakamaRPCRejectsClientOriginBattleResultSubmit(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	login := handler.HandleRPC(RPCRequest{

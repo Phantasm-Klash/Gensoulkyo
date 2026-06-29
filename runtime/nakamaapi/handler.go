@@ -202,6 +202,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "battle.ticket":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleTicket(request.SessionID, matchID) })
+	case "replay.get", "replay":
+		replayID := fieldString(body, "replay_id", "replayId")
+		return handler.call(func() (any, error) { return handler.service.Replay(request.SessionID, replayID) })
 	case "battle.result.submit":
 		var req core.BattleResultSubmitRequest
 		if err := decodeBody(body, &req); err != nil {
@@ -280,6 +283,9 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "battle.ticket":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleTicket(message.SessionID, matchID) })
+	case "replay.get", "replay":
+		replayID := fieldString(body, "replay_id", "replayId")
+		return handler.call(func() (any, error) { return handler.service.Replay(message.SessionID, replayID) })
 	case "battle.audit.status":
 		return successResponse(handler.service.BattleLifecycleAuditStatus())
 	case "lobby.audit.status":

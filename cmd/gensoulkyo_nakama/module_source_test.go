@@ -38,6 +38,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"lobby.audit.status",
 		"battle.allocation",
 		"battle.ticket",
+		"replay.get",
 		"battle.result.submit",
 	} {
 		if !strings.Contains(text, expected) {
@@ -81,6 +82,7 @@ func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
 		"lobby.audit.status",
 		"battle.allocation",
 		"battle.ticket",
+		"replay.get",
 		"battle.result.submit",
 	}
 	if !reflect.DeepEqual(got, want) {
