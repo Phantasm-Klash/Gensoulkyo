@@ -8,9 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/nakamaapi"
-	"gensoulkyo/runtime/security"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -48,31 +46,14 @@ var rpcIDs = []string{
 }
 
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	var battleAuditRepo core.BattleLifecycleAuditRepository
-	var lobbyAuditRepo core.LobbyLifecycleAuditRepository
-	guard := security.NewBusinessEnvelopeGuard()
+	handler := nakamaapi.New(nil)
 	if db != nil {
-		sink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
+		dbHandler, err := nakamaapi.NewWithDatabase(db)
 		if err != nil {
 			return err
 		}
-		guard = security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
-		repo, err := core.NewSQLBattleLifecycleAuditRepository(db)
-		if err != nil {
-			return err
-		}
-		battleAuditRepo = repo
-		lobbyRepo, err := core.NewSQLLobbyLifecycleAuditRepository(db)
-		if err != nil {
-			return err
-		}
-		lobbyAuditRepo = lobbyRepo
+		handler = dbHandler
 	}
-	service := core.NewService(core.Config{
-		BattleLifecycleAuditRepo: battleAuditRepo,
-		LobbyLifecycleAuditRepo:  lobbyAuditRepo,
-	})
-	handler := nakamaapi.New(service, nakamaapi.WithBusinessEnvelopeGuard(guard))
 	for _, id := range rpcIDs {
 		rpcID := id
 		if err := initializer.RegisterRpc(rpcID, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {

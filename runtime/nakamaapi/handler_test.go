@@ -1,7 +1,13 @@
 package nakamaapi
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"fmt"
+	"io"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -548,6 +554,112 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 }
 
+func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
+	driverName := registerNakamaSQLCaptureDriver(t)
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler, err := NewWithDatabase(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostLogin := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-sql-host", "display_name": "SQL Host"},
+	})
+	if !hostLogin.OK {
+		t.Fatalf("host login failed: %+v", hostLogin)
+	}
+	host := hostLogin.Payload.(*core.AuthSession)
+	guestLogin := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-sql-guest", "display_name": "SQL Guest"},
+	})
+	if !guestLogin.OK {
+		t.Fatalf("guest login failed: %+v", guestLogin)
+	}
+	guest := guestLogin.Payload.(*core.AuthSession)
+
+	created := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.create",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(1, "nonce-sql-room-create", "rooms_create", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "sql_host_deck",
+			"deck_snapshot":  deckPayload("sql_host_deck"),
+			"mode_params":    map[string]any{"stage_id": "starlit_lanes", "character_id": "balanced"},
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("room create failed: %+v", created)
+	}
+	room := created.Payload.(*core.QueueResponse)
+
+	joined := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.join",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(1, "nonce-sql-room-join", "rooms_join", map[string]any{
+			"room_code":      room.RoomCode,
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "sql_guest_deck",
+			"deck_snapshot":  deckPayload("sql_guest_deck"),
+		}),
+	})
+	if !joined.OK {
+		t.Fatalf("room join failed: %+v", joined)
+	}
+	match := joined.Payload.(*core.QueueResponse)
+	if match.MatchID == "" || match.BattleTicket == nil {
+		t.Fatalf("join should create match allocation and guest ticket: %+v", match)
+	}
+
+	ticket := handler.HandleRPC(RPCRequest{
+		ID:        "battle.ticket",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(2, "nonce-sql-host-ticket", "battle_ticket", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !ticket.OK {
+		t.Fatalf("host battle ticket failed: %+v", ticket)
+	}
+	battleStatus := handler.HandleRPC(RPCRequest{
+		ID:        "battle.audit.status",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload:   envelopePayload(3, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
+	})
+	if !battleStatus.OK {
+		t.Fatalf("battle audit status failed: %+v", battleStatus)
+	}
+	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords < 2 {
+		t.Fatalf("battle audit status should reflect SQL repository writes: %+v", status)
+	}
+	lobbyStatus := handler.HandleWSSMessage(WSSMessage{
+		Name:      "lobby.audit.status",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload:   envelopePayload(2, "nonce-sql-lobby-status", "lobby_audit_status", map[string]any{}),
+	})
+	if !lobbyStatus.OK {
+		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
+	}
+	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 {
+		t.Fatalf("lobby audit status should reflect SQL repository writes: %+v", status)
+	}
+
+	tableCounts := nakamaSQLTableCounts()
+	if tableCounts["business_envelope_audits"] < 5 || tableCounts["lobby_room_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 {
+		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
+	}
+}
+
 func envelopePayload(seq int64, nonce string, op string, body map[string]any) map[string]any {
 	return envelopePayloadAt(seq, time.Now(), nonce, op, body)
 }
@@ -581,4 +693,137 @@ func deckPayload(deckID string) map[string]any {
 			"guard_seal", "graze_engine", "draw_sigil", "aim_baffle", "purge_charm",
 		},
 	}
+}
+
+type nakamaSQLCaptureCall struct {
+	query string
+	args  []any
+}
+
+var nakamaSQLCaptureState = struct {
+	sync.Mutex
+	nextID int
+	calls  []nakamaSQLCaptureCall
+}{}
+
+func registerNakamaSQLCaptureDriver(t *testing.T) string {
+	t.Helper()
+	nakamaSQLCaptureState.Lock()
+	defer nakamaSQLCaptureState.Unlock()
+	nakamaSQLCaptureState.nextID++
+	nakamaSQLCaptureState.calls = nil
+	name := fmt.Sprintf("nakama_sql_capture_driver_%d", nakamaSQLCaptureState.nextID)
+	sql.Register(name, nakamaSQLCaptureDriver{})
+	return name
+}
+
+func nakamaSQLCaptureCalls() []nakamaSQLCaptureCall {
+	nakamaSQLCaptureState.Lock()
+	defer nakamaSQLCaptureState.Unlock()
+	calls := make([]nakamaSQLCaptureCall, len(nakamaSQLCaptureState.calls))
+	copy(calls, nakamaSQLCaptureState.calls)
+	return calls
+}
+
+func nakamaSQLTableCounts() map[string]int {
+	counts := map[string]int{}
+	for _, call := range nakamaSQLCaptureCalls() {
+		for _, table := range []string{
+			"business_envelope_audits",
+			"lobby_room_audits",
+			"match_allocation_audits",
+			"battle_ticket_audits",
+		} {
+			if strings.Contains(call.query, "INSERT INTO "+table) {
+				counts[table]++
+			}
+		}
+	}
+	return counts
+}
+
+type nakamaSQLCaptureDriver struct{}
+
+func (nakamaSQLCaptureDriver) Open(name string) (driver.Conn, error) {
+	return nakamaSQLCaptureConn{}, nil
+}
+
+type nakamaSQLCaptureConn struct{}
+
+func (nakamaSQLCaptureConn) Prepare(query string) (driver.Stmt, error) {
+	return nakamaSQLCaptureStmt{query: query}, nil
+}
+
+func (nakamaSQLCaptureConn) Close() error {
+	return nil
+}
+
+func (nakamaSQLCaptureConn) Begin() (driver.Tx, error) {
+	return nakamaSQLCaptureTx{}, nil
+}
+
+func (nakamaSQLCaptureConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	values := make([]any, len(args))
+	for i, arg := range args {
+		values[i] = arg.Value
+	}
+	nakamaSQLCaptureState.Lock()
+	nakamaSQLCaptureState.calls = append(nakamaSQLCaptureState.calls, nakamaSQLCaptureCall{query: query, args: values})
+	nakamaSQLCaptureState.Unlock()
+	return driver.RowsAffected(1), nil
+}
+
+func (nakamaSQLCaptureConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	return nakamaSQLCaptureRows{}, nil
+}
+
+type nakamaSQLCaptureStmt struct {
+	query string
+}
+
+func (stmt nakamaSQLCaptureStmt) Close() error {
+	return nil
+}
+
+func (stmt nakamaSQLCaptureStmt) NumInput() int {
+	return -1
+}
+
+func (stmt nakamaSQLCaptureStmt) Exec(args []driver.Value) (driver.Result, error) {
+	values := make([]any, len(args))
+	for i, arg := range args {
+		values[i] = arg
+	}
+	nakamaSQLCaptureState.Lock()
+	nakamaSQLCaptureState.calls = append(nakamaSQLCaptureState.calls, nakamaSQLCaptureCall{query: stmt.query, args: values})
+	nakamaSQLCaptureState.Unlock()
+	return driver.RowsAffected(1), nil
+}
+
+func (stmt nakamaSQLCaptureStmt) Query(args []driver.Value) (driver.Rows, error) {
+	return nakamaSQLCaptureRows{}, nil
+}
+
+type nakamaSQLCaptureTx struct{}
+
+func (nakamaSQLCaptureTx) Commit() error {
+	return nil
+}
+
+func (nakamaSQLCaptureTx) Rollback() error {
+	return nil
+}
+
+type nakamaSQLCaptureRows struct{}
+
+func (nakamaSQLCaptureRows) Columns() []string {
+	return nil
+}
+
+func (nakamaSQLCaptureRows) Close() error {
+	return nil
+}
+
+func (nakamaSQLCaptureRows) Next(dest []driver.Value) error {
+	return io.EOF
 }

@@ -25,3 +25,9 @@ Status date: 2026-06-28
 - Added an injected lobby lifecycle audit repository for room create/join/match/leave/rules-read and lobby message/duplicate-message events, plus a `database/sql` PostgreSQL writer and migration tables for `lobby_room_audits` and `lobby_message_audits`.
 - Wired the Nakama build-tagged module to create both battle and lobby lifecycle audit repositories from Nakama's `*sql.DB`; authenticated `lobby.audit.status` RPC/WSS now exposes whether durable lobby audit writes are configured and whether recent writes failed.
 - Preserved the authority split: room lifecycle validation, forbidden client-authored fields, host-only announcements, and battle allocation/ticket/result paths stay server-owned; audit sink failures are visible in status but do not turn HTTP fallback into production authority.
+
+## 2026-06-29 gensoulkyo-lobby Nakama DB wiring update
+
+- Added `runtime/nakamaapi.NewWithDatabase` so SDK-neutral Nakama handlers and the build-tagged Nakama module share one PostgreSQL audit wiring path for business-envelope, battle lifecycle, and lobby lifecycle audit persistence.
+- Added a handler-level SQL capture regression that drives business-envelope-protected RPC/WSS room creation, room join, battle ticket reads, and audit status reads through the DB-backed constructor, then verifies inserts reach `business_envelope_audits`, `lobby_room_audits`, `match_allocation_audits`, and `battle_ticket_audits`.
+- Kept `battle.result.submit` off client WSS; the new wiring only records business/lobby/allocation/ticket audit rows and does not add a Go HTTP production combat authority path.
