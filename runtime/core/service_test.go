@@ -412,6 +412,47 @@ func TestBattleAllocationAndSignedTicketUseRegisteredServer(t *testing.T) {
 	}
 }
 
+func TestBattleAllocationFallbackAccountsServerLoad(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Fallback Alice")
+	bob := mustLogin(t, service, "Fallback Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	if allocation.BattleServerID != DefaultBattleServerID {
+		t.Fatalf("expected default fallback allocation, got %+v", allocation)
+	}
+
+	servers := service.BattleServers()
+	var fallback BattleServerStatus
+	for _, server := range servers.Servers {
+		if server.BattleServerID == DefaultBattleServerID {
+			fallback = server
+			break
+		}
+	}
+	if fallback.BattleServerID == "" || fallback.ActiveMatches != 1 || fallback.Load <= 0 || !fallback.ServerAuthoritative {
+		t.Fatalf("fallback allocation should update server load accounting: %+v", fallback)
+	}
+
+	again, err := service.BattleAllocation(bob.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("second allocation read: %v", err)
+	}
+	if again.BattleServerID != DefaultBattleServerID {
+		t.Fatalf("second read changed allocation: %+v", again)
+	}
+	servers = service.BattleServers()
+	for _, server := range servers.Servers {
+		if server.BattleServerID == DefaultBattleServerID && server.ActiveMatches != 1 {
+			t.Fatalf("re-reading existing allocation must not double count fallback load: %+v", server)
+		}
+	}
+}
+
 func TestPvPDuelModeContractAllocationAndSettlement(t *testing.T) {
 	now := time.Date(2026, 6, 27, 11, 0, 0, 0, time.UTC)
 	service := NewService(Config{Clock: func() time.Time { return now }})

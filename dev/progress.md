@@ -49,3 +49,10 @@ Status date: 2026-06-28
 - Added server-authoritative lobby read audit records for `rooms.list` and `rooms.get`, keeping read visibility separate from room mutation, rules-read, and message counters in `LobbyLifecycleAuditStatus`.
 - Extended the PostgreSQL lobby room audit action constraint and SQL/Nakama regression coverage so DB-backed handlers record room snapshot reads through protected RPC/WSS adapters before allocation/ticket issuance.
 - Verified `go test ./...`, `docker-compose --profile test run --rm test`, and `/root/gotouhou/docs/ops/protocol_audit_check.py`; `go test -tags nakama ./cmd/gensoulkyo_nakama` remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration.
+
+## 2026-06-29 gensoulkyo-lobby allocation fallback accounting update
+
+- Fixed battle allocation accounting so the default local fallback battle server increments active-match/load counters through the same path as registered mode-capable battle servers.
+- Added a regression proving fallback allocation reports `ActiveMatches=1`, nonzero load, and does not double-count when the existing allocation is read again by another participant.
+- Probed the real Nakama SDK tag build: `github.com/heroiclabs/nakama-common@v1.34.0` is the newest tested module baseline here that still supports the repository's Go 1.20 Docker image; newer tags require Go 1.23+ or later. A temporary local module pin made `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` and `go build -tags nakama -buildmode=plugin` pass, but the durable `go.mod`/`go.sum` pin is outside this scope's allowed paths, so it was not kept in this scoped change.
+- Verified `go test ./runtime/core -run 'TestBattleAllocationFallbackAccountsServerLoad|TestBattleAllocationAndSignedTicketUseRegisteredServer|TestPvPDuelModeContractAllocationAndSettlement'`, `go test ./...`, `docker-compose --profile test run --rm test`, and `/root/gotouhou/docs/ops/protocol_audit_check.py`. Current in-scope tree still reports `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration.

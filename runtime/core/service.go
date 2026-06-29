@@ -4265,8 +4265,7 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 		}
 	}
 	if best != nil {
-		best.ActiveMatches++
-		best.Load = clamp(float64(best.ActiveMatches)/float64(max(1, best.Capacity)), best.Load, 1)
+		s.accountBattleServerAllocationLocked(best)
 		return best
 	}
 	fallback := s.battleServers[DefaultBattleServerID]
@@ -4274,7 +4273,16 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 		s.registerDefaultBattleServerLocked()
 		fallback = s.battleServers[DefaultBattleServerID]
 	}
+	s.accountBattleServerAllocationLocked(fallback)
 	return fallback
+}
+
+func (s *Service) accountBattleServerAllocationLocked(server *battleServerState) {
+	if server == nil {
+		return
+	}
+	server.ActiveMatches++
+	server.Load = clamp(float64(server.ActiveMatches)/float64(max(1, server.Capacity)), server.Load, 1)
 }
 
 func battleServerModeBreadth(server *battleServerState) int {
