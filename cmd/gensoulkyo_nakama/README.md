@@ -15,6 +15,6 @@ Local validation found `github.com/heroiclabs/nakama-common@v1.34.0` to be the n
 
 The binding is intentionally thin: Nakama SDK context/session extraction and JSON payload wrapping happen here; security checks, audit snapshots, and business dispatch stay in `runtime/nakamaapi`.
 
-When Nakama supplies a real `*sql.DB`, the module wires `security.NewSQLBusinessEnvelopeAuditSink`, `core.NewSQLBattleLifecycleAuditRepository`, and `core.NewSQLLobbyLifecycleAuditRepository`. The authenticated `battle.audit.status` and `lobby.audit.status` RPCs report whether lifecycle audit writes are durably configured and whether any repository write has failed.
+When Nakama supplies a real `*sql.DB`, the module wires `security.NewSQLBusinessEnvelopeAuditSink`, `core.NewSQLBattleLifecycleAuditRepository`, and `core.NewSQLLobbyLifecycleAuditRepository`. The authenticated `business.envelope.audit.status` RPC reports the shared envelope guard snapshot, including durable sink write errors; `battle.audit.status` and `lobby.audit.status` report whether lifecycle audit repositories are configured and whether any repository write has failed.
 
 `battle.result.submit` stays registered as a future migration path for service-to-service C++ Battle Server callbacks. This binding does not currently mark public Nakama RPC calls as service-origin, so `runtime/nakamaapi` rejects them before core result validation and players cannot use the RPC as an authority path for damage, rewards, or settlement.

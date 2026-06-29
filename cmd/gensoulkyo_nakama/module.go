@@ -38,6 +38,7 @@ var rpcIDs = []string{
 	"match.ready",
 	"activity.claim",
 	"battle.servers",
+	"business.envelope.audit.status",
 	"battle.audit.status",
 	"lobby.audit.status",
 	"battle.allocation",

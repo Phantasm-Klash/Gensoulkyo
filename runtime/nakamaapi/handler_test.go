@@ -931,6 +931,142 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 }
 
+func TestNakamaEnvelopeAuditStatusReportsSQLSinkFailures(t *testing.T) {
+	driverName := registerNakamaSQLCaptureDriver(t, "business_envelope_audits")
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler, err := NewWithDatabase(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-sql-envelope-fail", "display_name": "SQL Envelope Fail"},
+	})
+	if !login.OK {
+		t.Fatalf("login failed: %+v", login)
+	}
+	session := login.Payload.(*core.AuthSession)
+
+	bootstrap := handler.HandleRPC(RPCRequest{
+		ID:        "bootstrap",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(1, "nonce-sql-envelope-bootstrap", "bootstrap", map[string]any{}),
+	})
+	if !bootstrap.OK {
+		t.Fatalf("business dispatch should continue while envelope audit failure is surfaced: %+v", bootstrap)
+	}
+	status := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.envelope.audit.status",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(2, "nonce-sql-envelope-status", "business_envelope_audit_status", map[string]any{}),
+	})
+	if !status.OK || status.Status != 200 {
+		t.Fatalf("envelope audit status failed: %+v", status)
+	}
+	snapshot := status.Payload.(security.BusinessEnvelopeGuardSnapshot)
+	if snapshot.Accepted != 2 || snapshot.AuditErrors != 2 || snapshot.SessionCount != 1 {
+		t.Fatalf("envelope audit status should expose durable sink failures: %+v", snapshot)
+	}
+	if tableCounts := nakamaSQLTableCounts(); tableCounts["business_envelope_audits"] != 2 {
+		t.Fatalf("expected two attempted envelope audit inserts, counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
+	}
+}
+
+func TestNakamaHandlerDatabaseWiringReportsLifecycleAuditFailures(t *testing.T) {
+	driverName := registerNakamaSQLCaptureDriver(t, "lobby_room_audits", "match_allocation_audits")
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler, err := NewWithDatabase(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostLogin := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-sql-fail-host", "display_name": "SQL Fail Host"},
+	})
+	if !hostLogin.OK {
+		t.Fatalf("host login failed: %+v", hostLogin)
+	}
+	host := hostLogin.Payload.(*core.AuthSession)
+	guestLogin := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-sql-fail-guest", "display_name": "SQL Fail Guest"},
+	})
+	if !guestLogin.OK {
+		t.Fatalf("guest login failed: %+v", guestLogin)
+	}
+	guest := guestLogin.Payload.(*core.AuthSession)
+
+	created := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.create",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(1, "nonce-sql-fail-room-create", "rooms_create", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "sql_fail_host_deck",
+			"deck_snapshot":  deckPayload("sql_fail_host_deck"),
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("room create should continue while lobby audit failure is surfaced: %+v", created)
+	}
+	room := created.Payload.(*core.QueueResponse)
+
+	joined := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.join",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(1, "nonce-sql-fail-room-join", "rooms_join", map[string]any{
+			"room_code":      room.RoomCode,
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "sql_fail_guest_deck",
+			"deck_snapshot":  deckPayload("sql_fail_guest_deck"),
+		}),
+	})
+	if !joined.OK {
+		t.Fatalf("room join should continue while allocation audit failure is surfaced: %+v", joined)
+	}
+
+	lobbyStatus := handler.HandleRPC(RPCRequest{
+		ID:        "lobby.audit.status",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload:   envelopePayload(2, "nonce-sql-fail-lobby-status", "lobby_audit_status", map[string]any{}),
+	})
+	if !lobbyStatus.OK {
+		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
+	}
+	lobby := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus)
+	if lobby.OK || !lobby.Configured || lobby.RejectedRecords == 0 || lobby.LastErrorOperation != "matched" || !strings.Contains(lobby.LastError, "forced SQL failure for lobby_room_audits") {
+		t.Fatalf("lobby audit status should expose SQL repository failure: %+v", lobby)
+	}
+
+	battleStatus := handler.HandleWSSMessage(WSSMessage{
+		Name:      "battle.audit.status",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload:   envelopePayload(2, "nonce-sql-fail-battle-status", "battle_audit_status", map[string]any{}),
+	})
+	if !battleStatus.OK {
+		t.Fatalf("battle audit status failed: %+v", battleStatus)
+	}
+	battle := battleStatus.Payload.(core.BattleLifecycleAuditStatus)
+	if battle.OK || !battle.Configured || battle.RejectedRecords == 0 || battle.LastErrorOperation != "match_allocation" || !strings.Contains(battle.LastError, "forced SQL failure for match_allocation_audits") {
+		t.Fatalf("battle audit status should expose SQL repository failure: %+v", battle)
+	}
+}
+
 func envelopePayload(seq int64, nonce string, op string, body map[string]any) map[string]any {
 	return envelopePayloadAt(seq, time.Now(), nonce, op, body)
 }
@@ -975,14 +1111,19 @@ var nakamaSQLCaptureState = struct {
 	sync.Mutex
 	nextID int
 	calls  []nakamaSQLCaptureCall
+	failOn map[string]bool
 }{}
 
-func registerNakamaSQLCaptureDriver(t *testing.T) string {
+func registerNakamaSQLCaptureDriver(t *testing.T, failOnTables ...string) string {
 	t.Helper()
 	nakamaSQLCaptureState.Lock()
 	defer nakamaSQLCaptureState.Unlock()
 	nakamaSQLCaptureState.nextID++
 	nakamaSQLCaptureState.calls = nil
+	nakamaSQLCaptureState.failOn = map[string]bool{}
+	for _, table := range failOnTables {
+		nakamaSQLCaptureState.failOn[table] = true
+	}
 	name := fmt.Sprintf("nakama_sql_capture_driver_%d", nakamaSQLCaptureState.nextID)
 	sql.Register(name, nakamaSQLCaptureDriver{})
 	return name
@@ -1055,7 +1196,11 @@ func (nakamaSQLCaptureConn) ExecContext(ctx context.Context, query string, args 
 	}
 	nakamaSQLCaptureState.Lock()
 	nakamaSQLCaptureState.calls = append(nakamaSQLCaptureState.calls, nakamaSQLCaptureCall{query: query, args: values})
+	err := nakamaSQLForcedErrorLocked(query)
 	nakamaSQLCaptureState.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return driver.RowsAffected(1), nil
 }
 
@@ -1082,8 +1227,21 @@ func (stmt nakamaSQLCaptureStmt) Exec(args []driver.Value) (driver.Result, error
 	}
 	nakamaSQLCaptureState.Lock()
 	nakamaSQLCaptureState.calls = append(nakamaSQLCaptureState.calls, nakamaSQLCaptureCall{query: stmt.query, args: values})
+	err := nakamaSQLForcedErrorLocked(stmt.query)
 	nakamaSQLCaptureState.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return driver.RowsAffected(1), nil
+}
+
+func nakamaSQLForcedErrorLocked(query string) error {
+	for table := range nakamaSQLCaptureState.failOn {
+		if strings.Contains(query, "INSERT INTO "+table) {
+			return fmt.Errorf("forced SQL failure for %s", table)
+		}
+	}
+	return nil
 }
 
 func (stmt nakamaSQLCaptureStmt) Query(args []driver.Value) (driver.Rows, error) {

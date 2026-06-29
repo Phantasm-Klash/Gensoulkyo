@@ -192,6 +192,8 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		return handler.call(func() (any, error) { return handler.service.ClaimActivity(request.SessionID, body) })
 	case "battle.servers":
 		return successResponse(handler.service.BattleServers())
+	case "business.envelope.audit.status":
+		return successResponse(handler.EnvelopeSnapshot())
 	case "battle.audit.status":
 		return successResponse(handler.service.BattleLifecycleAuditStatus())
 	case "lobby.audit.status":
@@ -286,6 +288,8 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "replay.get", "replay":
 		replayID := fieldString(body, "replay_id", "replayId")
 		return handler.call(func() (any, error) { return handler.service.Replay(message.SessionID, replayID) })
+	case "business.envelope.audit.status":
+		return successResponse(handler.EnvelopeSnapshot())
 	case "battle.audit.status":
 		return successResponse(handler.service.BattleLifecycleAuditStatus())
 	case "lobby.audit.status":
