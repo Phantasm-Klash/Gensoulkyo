@@ -92,6 +92,8 @@ type BattleLifecycleAuditStatus struct {
 	ResultRecords       int       `json:"result_records"`
 	ReplayRecords       int       `json:"replay_records"`
 	RejectedRecords     int       `json:"rejected_records"`
+	LastRecordOperation string    `json:"last_record_operation,omitempty"`
+	LastRecordAt        time.Time `json:"last_record_at,omitempty"`
 	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
 	LastError           string    `json:"last_error,omitempty"`
 	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
@@ -112,6 +114,11 @@ type LobbyLifecycleAuditStatus struct {
 	RulesReadRecords    int       `json:"rules_read_records"`
 	MessageRecords      int       `json:"message_records"`
 	RejectedRecords     int       `json:"rejected_records"`
+	LastRecordOperation string    `json:"last_record_operation,omitempty"`
+	LastRecordAt        time.Time `json:"last_record_at,omitempty"`
+	LastRoomCode        string    `json:"last_room_code,omitempty"`
+	LastMessageID       string    `json:"last_message_id,omitempty"`
+	LastMessageKind     string    `json:"last_message_kind,omitempty"`
 	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
 	LastError           string    `json:"last_error,omitempty"`
 	LastErrorAt         time.Time `json:"last_error_at,omitempty"`

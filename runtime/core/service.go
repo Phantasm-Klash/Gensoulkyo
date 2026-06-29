@@ -4380,7 +4380,7 @@ func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAlloc
 		CreatedAt:           allocation.AllocatedAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("match_allocation", err)
+	s.recordBattleAuditOutcomeLocked("match_allocation", allocation.AllocatedAt, err)
 }
 
 func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
@@ -4407,7 +4407,7 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		ExpiresAt:           ticket.ExpiresAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("battle_ticket", err)
+	s.recordBattleAuditOutcomeLocked("battle_ticket", ticket.IssuedAt, err)
 }
 
 func (s *Service) recordLobbyRoomAuditLocked(room *roomState, ticket *queueTicket, userID string, action string, createdAt time.Time) {
@@ -4501,7 +4501,7 @@ func (s *Service) recordLobbyRoomAuditRecordLocked(record LobbyRoomAuditRecord) 
 		return
 	}
 	err := s.lobbyAuditRepo.RecordLobbyRoomAudit(record)
-	s.recordLobbyAuditOutcomeLocked(record.Action, err)
+	s.recordLobbyAuditOutcomeLocked(record.Action, record.RoomCode, "", "", record.CreatedAt, err)
 }
 
 func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
@@ -4526,10 +4526,10 @@ func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
 		CreatedAt:           message.CreatedAt,
 		ServerAuthoritative: true,
 	})
-	s.recordLobbyAuditOutcomeLocked("message", err)
+	s.recordLobbyAuditOutcomeLocked("message", message.RoomCode, message.MessageID, message.Kind, message.CreatedAt, err)
 }
 
-func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
+func (s *Service) recordLobbyAuditOutcomeLocked(operation string, roomCode string, messageID string, messageKind string, recordAt time.Time, err error) {
 	s.lobbyAuditStatus.Configured = s.lobbyAuditRepo != nil
 	s.lobbyAuditStatus.ServerAuthoritative = true
 	if err != nil {
@@ -4548,6 +4548,11 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
 	default:
 		s.lobbyAuditStatus.RoomRecords++
 	}
+	s.lobbyAuditStatus.LastRecordOperation = operation
+	s.lobbyAuditStatus.LastRecordAt = recordAt
+	s.lobbyAuditStatus.LastRoomCode = roomCode
+	s.lobbyAuditStatus.LastMessageID = messageID
+	s.lobbyAuditStatus.LastMessageKind = messageKind
 	if s.lobbyAuditStatus.Configured {
 		s.lobbyAuditStatus.OK = s.lobbyAuditStatus.LastError == ""
 	}
@@ -4574,7 +4579,7 @@ func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *B
 		SettledAt:           match.BattleResultAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("battle_result", err)
+	s.recordBattleAuditOutcomeLocked("battle_result", verifiedAt, err)
 }
 
 func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
@@ -4595,10 +4600,10 @@ func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
 		SettledAt:           replay.SettledAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("replay", err)
+	s.recordBattleAuditOutcomeLocked("replay", replay.SettledAt, err)
 }
 
-func (s *Service) recordBattleAuditOutcomeLocked(operation string, err error) {
+func (s *Service) recordBattleAuditOutcomeLocked(operation string, recordAt time.Time, err error) {
 	s.battleAuditStatus.Configured = s.battleAuditRepo != nil
 	s.battleAuditStatus.ServerAuthoritative = true
 	if err != nil {
@@ -4619,6 +4624,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, err error) {
 	case "replay":
 		s.battleAuditStatus.ReplayRecords++
 	}
+	s.battleAuditStatus.LastRecordOperation = operation
+	s.battleAuditStatus.LastRecordAt = recordAt
 	if s.battleAuditStatus.Configured {
 		s.battleAuditStatus.OK = s.battleAuditStatus.LastError == ""
 	}

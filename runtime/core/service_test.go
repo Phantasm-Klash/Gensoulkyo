@@ -676,6 +676,9 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	if !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("audit status did not account successful lifecycle writes: %+v", status)
 	}
+	if status.LastRecordOperation != "battle_result" || !status.LastRecordAt.Equal(now) {
+		t.Fatalf("audit status should expose latest successful durable write: %+v", status)
+	}
 }
 
 func TestBattleLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
@@ -813,6 +816,23 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	status := service.LobbyLifecycleAuditStatus()
 	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
+	}
+	if status.LastRecordOperation != "left" || status.LastRoomCode != created.RoomCode || status.LastMessageID != "" || !status.LastRecordAt.Equal(now) {
+		t.Fatalf("lobby audit status should expose latest room write identity: %+v", status)
+	}
+
+	followUp, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "audit-announcement-after-leave",
+		Kind:      "announcement",
+		Text:      "host follow-up",
+	})
+	if err != nil {
+		t.Fatalf("follow-up announcement: %v", err)
+	}
+	messageStatus := service.LobbyLifecycleAuditStatus()
+	if messageStatus.LastRecordOperation != "message" || messageStatus.LastRoomCode != created.RoomCode || messageStatus.LastMessageID != followUp.MessageID || messageStatus.LastMessageKind != "announcement" {
+		t.Fatalf("lobby audit status should expose latest message write identity: %+v", messageStatus)
 	}
 }
 
