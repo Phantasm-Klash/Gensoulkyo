@@ -78,8 +78,82 @@ var ModeConfigs = map[string]ModeConfig{
 type Clock func() time.Time
 
 type Config struct {
-	Clock              Clock
-	MatchDurationTicks int
+	Clock                    Clock
+	MatchDurationTicks       int
+	BattleLifecycleAuditRepo BattleLifecycleAuditRepository
+}
+
+type BattleLifecycleAuditRepository interface {
+	RecordMatchAllocationAudit(BattleAllocationAuditRecord) error
+	RecordBattleTicketAudit(BattleTicketAuditRecord) error
+	RecordBattleResultAudit(BattleResultAuditRecord) error
+	RecordReplayAudit(ReplayAuditRecord) error
+}
+
+type BattleAllocationAuditRecord struct {
+	MatchID             string    `json:"match_id"`
+	ModeID              string    `json:"mode_id"`
+	BattleServerID      string    `json:"battle_server_id"`
+	Endpoint            string    `json:"endpoint"`
+	Region              string    `json:"region"`
+	ProtocolVersion     string    `json:"protocol_version"`
+	RulesetVersion      string    `json:"ruleset_version"`
+	ModeConfigHash      string    `json:"mode_config_hash"`
+	ServerSeedHash      string    `json:"server_seed_hash"`
+	PlayerCount         int       `json:"player_count"`
+	AllocationJSON      string    `json:"allocation_json"`
+	Status              string    `json:"status"`
+	CreatedAt           time.Time `json:"created_at"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
+}
+
+type BattleTicketAuditRecord struct {
+	TicketID            string    `json:"ticket_id"`
+	MatchID             string    `json:"match_id"`
+	UserID              string    `json:"user_id"`
+	PlayerID            string    `json:"player_id"`
+	BattleServerID      string    `json:"battle_server_id"`
+	Endpoint            string    `json:"endpoint"`
+	KeyID               string    `json:"key_id"`
+	RulesetVersion      string    `json:"ruleset_version"`
+	ProtocolVersion     string    `json:"protocol_version"`
+	DeckSnapshotHash    string    `json:"deck_snapshot_hash"`
+	ModeConfigHash      string    `json:"mode_config_hash"`
+	Nonce               string    `json:"nonce"`
+	SignaturePrefix     string    `json:"signature_prefix"`
+	Status              string    `json:"status"`
+	IssuedAt            time.Time `json:"issued_at"`
+	ExpiresAt           time.Time `json:"expires_at"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
+}
+
+type BattleResultAuditRecord struct {
+	MatchID             string    `json:"match_id"`
+	ModeID              string    `json:"mode_id"`
+	BattleServerID      string    `json:"battle_server_id"`
+	ResultHash          string    `json:"result_hash"`
+	ReplayID            string    `json:"replay_id"`
+	KeyID               string    `json:"key_id"`
+	PlayerIDs           []string  `json:"player_ids"`
+	SettlementKey       string    `json:"settlement_key"`
+	VerifiedAt          time.Time `json:"verified_at"`
+	SettledAt           time.Time `json:"settled_at"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
+}
+
+type ReplayAuditRecord struct {
+	ReplayID            string    `json:"replay_id"`
+	MatchID             string    `json:"match_id"`
+	UserID              string    `json:"user_id"`
+	ModeID              string    `json:"mode_id"`
+	RulesetVersion      string    `json:"ruleset_version"`
+	ModeRulesetVersion  string    `json:"mode_ruleset_version"`
+	StateHash           string    `json:"state_hash"`
+	InputCount          int       `json:"input_count"`
+	EventCount          int       `json:"event_count"`
+	SettlementKey       string    `json:"settlement_key"`
+	SettledAt           time.Time `json:"settled_at"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
 }
 
 type VersionStamp struct {

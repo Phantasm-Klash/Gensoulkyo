@@ -597,6 +597,109 @@ func TestBattleResultSubmitVerifiesAllocationAndSettlesMatch(t *testing.T) {
 	}
 }
 
+func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRecords(t *testing.T) {
+	now := time.Date(2026, 6, 28, 9, 0, 0, 0, time.UTC)
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                    func() time.Time { return now },
+		BattleLifecycleAuditRepo: repo,
+	})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "audit-battle-dev",
+		Endpoint:       "127.0.0.1:7920",
+		Region:         "local",
+		BuildID:        "audit-test",
+		Capacity:       4,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register battle server: %v", err)
+	}
+	alice := mustLogin(t, service, "Audit Alice")
+	bob := mustLogin(t, service, "Audit Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	if allocation.BattleServerID != "audit-battle-dev" {
+		t.Fatalf("expected audit battle server: %+v", allocation)
+	}
+	if len(repo.allocations) != 1 {
+		t.Fatalf("expected one allocation audit, got %+v", repo.allocations)
+	}
+	allocationAudit := repo.allocations[0]
+	if allocationAudit.MatchID != matchID || allocationAudit.ModeID != "pvp_duel" || allocationAudit.BattleServerID != "audit-battle-dev" || allocationAudit.PlayerCount != 2 || allocationAudit.AllocationJSON == "" {
+		t.Fatalf("allocation audit invalid: %+v", allocationAudit)
+	}
+
+	ticket, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("battle ticket: %v", err)
+	}
+	if ticket.Ticket.UserID != alice.UserID {
+		t.Fatalf("ticket user mismatch: %+v", ticket)
+	}
+	if len(repo.tickets) == 0 {
+		t.Fatalf("expected ticket audit")
+	}
+	ticketAudit := repo.tickets[len(repo.tickets)-1]
+	if ticketAudit.TicketID != ticket.Ticket.TicketID || ticketAudit.UserID != alice.UserID || ticketAudit.MatchID != matchID || ticketAudit.SignaturePrefix == "" || ticketAudit.Status != "issued" {
+		t.Fatalf("ticket audit invalid: %+v", ticketAudit)
+	}
+
+	signed := signedBattleResultForAllocation(allocation)
+	result, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
+	if err != nil {
+		t.Fatalf("submit result: %v", err)
+	}
+	if !result.Accepted || result.Duplicate {
+		t.Fatalf("result response invalid: %+v", result)
+	}
+	if len(repo.results) != 1 {
+		t.Fatalf("expected one result audit, got %+v", repo.results)
+	}
+	resultAudit := repo.results[0]
+	if resultAudit.MatchID != matchID || resultAudit.ResultHash != signed.Result.ResultHash || resultAudit.ReplayID != signed.Result.ReplayID || len(resultAudit.PlayerIDs) != 2 || resultAudit.SettlementKey == "" {
+		t.Fatalf("result audit invalid: %+v", resultAudit)
+	}
+	if len(repo.replays) != 2 {
+		t.Fatalf("expected per-player replay audits, got %+v", repo.replays)
+	}
+	for _, replayAudit := range repo.replays {
+		if replayAudit.MatchID != matchID || replayAudit.StateHash == "" || replayAudit.SettlementKey == "" || !replayAudit.ServerAuthoritative {
+			t.Fatalf("replay audit invalid: %+v", replayAudit)
+		}
+	}
+}
+
+type captureBattleLifecycleAuditRepo struct {
+	allocations []BattleAllocationAuditRecord
+	tickets     []BattleTicketAuditRecord
+	results     []BattleResultAuditRecord
+	replays     []ReplayAuditRecord
+}
+
+func (repo *captureBattleLifecycleAuditRepo) RecordMatchAllocationAudit(record BattleAllocationAuditRecord) error {
+	repo.allocations = append(repo.allocations, record)
+	return nil
+}
+
+func (repo *captureBattleLifecycleAuditRepo) RecordBattleTicketAudit(record BattleTicketAuditRecord) error {
+	repo.tickets = append(repo.tickets, record)
+	return nil
+}
+
+func (repo *captureBattleLifecycleAuditRepo) RecordBattleResultAudit(record BattleResultAuditRecord) error {
+	repo.results = append(repo.results, record)
+	return nil
+}
+
+func (repo *captureBattleLifecycleAuditRepo) RecordReplayAudit(record ReplayAuditRecord) error {
+	repo.replays = append(repo.replays, record)
+	return nil
+}
+
 func TestInventoryDeckSaveAndMatchUsesServerActiveDeck(t *testing.T) {
 	service := NewService(Config{})
 	alice := mustLogin(t, service, "Deck Alice")
