@@ -904,6 +904,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	}
 	if ticket, room := s.waitingRoomTicketForUserLocked(user.UserID); ticket != nil && room != nil {
 		existingMode := ModeConfigs[ticket.ModeID]
+		s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "create_retry", s.clock())
 		return s.queueResponseLocked(ticket, existingMode, s.ticketDepthLocked(ticket), nil), nil
 	}
 	roomCode := s.nextRoomCodeLocked()
@@ -973,6 +974,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 	for _, ticketID := range room.TicketIDs {
 		ticket := s.tickets[ticketID]
 		if ticket != nil && ticket.UserID == user.UserID {
+			s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "join_retry", s.clock())
 			return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
 		}
 	}
@@ -4666,6 +4668,8 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint st
 		s.lobbyAuditStatus.RulesReadRecords++
 	case "message":
 		s.lobbyAuditStatus.MessageRecords++
+	case "create_retry", "join_retry":
+		s.lobbyAuditStatus.RoomReadRecords++
 	default:
 		s.lobbyAuditStatus.RoomRecords++
 	}

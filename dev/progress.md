@@ -162,3 +162,10 @@ Status date: 2026-06-28
 - Updated the PostgreSQL `battle_result_audits` draft to keep one accepted row per match while allowing one idempotent duplicate callback marker per match/result hash, and wired the SQL repository to persist the callback status.
 - Extended core and DB-backed Nakama handler regressions so duplicate service-origin `battle.result.submit` calls return authoritative idempotent receipts, write a duplicate result audit row, and do not create extra replay audit rows or reopen client settlement authority.
 - Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
+
+## 2026-06-29 gensoulkyo-lobby idempotent lobby retry audit update
+
+- Added PostgreSQL-compatible `create_retry` and `join_retry` room lifecycle audit actions for idempotent room create/join retries, counted as read/visibility records rather than new room mutations.
+- Extended the core lobby audit regression and migration action guard so duplicate lobby lifecycle calls leave a durable non-secret fingerprint without creating extra tickets, rooms, or player authority.
+- This preserves the Nakama/Go authority split: retry audits improve lobby observability only, while battle allocation, ticket issuance, and result submission boundaries remain unchanged.
+- Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.

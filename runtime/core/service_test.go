@@ -976,26 +976,38 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if len(repo.rooms) != 1 || repo.rooms[0].Action != "created" || repo.rooms[0].RoomCode != created.RoomCode || repo.rooms[0].DeckSnapshotHash == "" {
 		t.Fatalf("create room audit invalid: %+v", repo.rooms)
 	}
+	retryCreate, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "audit_host_retry_deck",
+		DeckSnapshot: validDeck("audit_host_retry_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("retry create room: %v", err)
+	}
+	if retryCreate.TicketID != created.TicketID || len(repo.rooms) != 2 || repo.rooms[1].Action != "create_retry" || repo.rooms[1].TicketID != created.TicketID || repo.rooms[1].CurrentPlayers != 1 {
+		t.Fatalf("create retry audit invalid: response=%+v audits=%+v", retryCreate, repo.rooms)
+	}
 
 	listed, err := service.ListRooms(guest.SessionToken)
 	if err != nil {
 		t.Fatalf("list rooms: %v", err)
 	}
-	if len(listed.Rooms) != 1 || len(repo.rooms) != 2 || repo.rooms[1].Action != "listed" || repo.rooms[1].UserID != guest.UserID {
+	if len(listed.Rooms) != 1 || len(repo.rooms) != 3 || repo.rooms[2].Action != "listed" || repo.rooms[2].UserID != guest.UserID {
 		t.Fatalf("list audit invalid: list=%+v audits=%+v", listed, repo.rooms)
 	}
 
 	if _, err := service.Room(guest.SessionToken, created.RoomCode); err != nil {
 		t.Fatalf("room snapshot: %v", err)
 	}
-	if len(repo.rooms) != 3 || repo.rooms[2].Action != "snapshot_read" || repo.rooms[2].UserID != guest.UserID {
+	if len(repo.rooms) != 4 || repo.rooms[3].Action != "snapshot_read" || repo.rooms[3].UserID != guest.UserID {
 		t.Fatalf("snapshot read audit invalid: %+v", repo.rooms)
 	}
 
 	if _, err := service.RoomRules(guest.SessionToken, created.RoomCode); err != nil {
 		t.Fatalf("room rules: %v", err)
 	}
-	if len(repo.rooms) != 4 || repo.rooms[3].Action != "rules_read" || repo.rooms[3].UserID != guest.UserID || repo.rooms[3].ModeConfigHash == "" {
+	if len(repo.rooms) != 5 || repo.rooms[4].Action != "rules_read" || repo.rooms[4].UserID != guest.UserID || repo.rooms[4].ModeConfigHash == "" {
 		t.Fatalf("rules audit invalid: %+v", repo.rooms)
 	}
 
@@ -1007,15 +1019,26 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if err != nil {
 		t.Fatalf("join room: %v", err)
 	}
-	if len(repo.rooms) != 5 || repo.rooms[4].Action != "joined" || repo.rooms[4].TicketID != joined.TicketID || repo.rooms[4].CurrentPlayers != 2 {
+	if len(repo.rooms) != 6 || repo.rooms[5].Action != "joined" || repo.rooms[5].TicketID != joined.TicketID || repo.rooms[5].CurrentPlayers != 2 {
 		t.Fatalf("join audit invalid: %+v", repo.rooms)
+	}
+	retryJoin, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "audit_guest_retry_deck",
+		DeckSnapshot: validDeck("audit_guest_retry_deck"),
+	})
+	if err != nil {
+		t.Fatalf("retry join room: %v", err)
+	}
+	if retryJoin.TicketID != joined.TicketID || len(repo.rooms) != 7 || repo.rooms[6].Action != "join_retry" || repo.rooms[6].TicketID != joined.TicketID || repo.rooms[6].CurrentPlayers != 2 {
+		t.Fatalf("join retry audit invalid: response=%+v audits=%+v", retryJoin, repo.rooms)
 	}
 
 	polled, err := service.QueueTicket(guest.SessionToken, joined.TicketID)
 	if err != nil {
 		t.Fatalf("poll room ticket: %v", err)
 	}
-	if polled.TicketID != joined.TicketID || len(repo.rooms) != 6 || repo.rooms[5].Action != "ticket_read" || repo.rooms[5].TicketID != joined.TicketID || repo.rooms[5].CurrentPlayers != 2 {
+	if polled.TicketID != joined.TicketID || len(repo.rooms) != 8 || repo.rooms[7].Action != "ticket_read" || repo.rooms[7].TicketID != joined.TicketID || repo.rooms[7].CurrentPlayers != 2 {
 		t.Fatalf("ticket read audit invalid: response=%+v audits=%+v", polled, repo.rooms)
 	}
 
@@ -1063,7 +1086,7 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("leave audit invalid: response=%+v audit=%+v", left, lastRoomAudit)
 	}
 	status := service.LobbyLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 3 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 5 || status.RulesReadRecords != 1 || status.MessageRecords != 3 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
 	}
 	if status.LastSuccessOperation != "left" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {

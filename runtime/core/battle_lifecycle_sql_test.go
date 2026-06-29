@@ -36,7 +36,7 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 			t.Fatalf("match allocation audit migration must allow battle server lifecycle status %s", status)
 		}
 	}
-	for _, action := range []string{"'listed'", "'snapshot_read'", "'ticket_read'"} {
+	for _, action := range []string{"'listed'", "'snapshot_read'", "'ticket_read'", "'create_retry'", "'join_retry'"} {
 		if !strings.Contains(upSQL, action) {
 			t.Fatalf("lobby room audit migration must allow read action %s", action)
 		}
