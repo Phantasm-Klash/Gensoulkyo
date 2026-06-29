@@ -75,3 +75,9 @@ Status date: 2026-06-28
 - Registered `replay.get` in the build-tagged Nakama RPC source and extended source-shape tests so replay reads stay in the exact RPC registry while `battle.result.submit` remains service-origin only.
 - Added a Nakama adapter regression that accepts a service-origin battle result, derives the server-authoritative replay id from duplicate settlement state, rejects prefix/empty/cross-user replay reads, and returns the owner's replay with the C++ callback replay marker.
 - Verified `go test ./runtime/nakamaapi -run TestNakamaReplayReadRequiresEnvelopeAndOwner -count=1`, `go test ./cmd/gensoulkyo_nakama -run 'TestNakamaBinding' -count=1`, `go test ./...`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`. Direct execution of the protocol audit script is blocked by its non-executable file mode, and `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration.
+
+## 2026-06-29 gensoulkyo-lobby room ticket read audit update
+
+- Added server-authoritative lobby read audit records for room-backed `matchmaking.ticket` polling so Nakama RPC/WSS clients reading a waiting-room ticket leave a PostgreSQL-compatible lifecycle trace without mutating room state.
+- Extended `LobbyLifecycleAuditStatus` and the PostgreSQL `lobby_room_audits.action` constraint with `ticket_read`, keeping ticket polling counted with read visibility instead of room mutation/message/rules counters.
+- Verified `go test ./runtime/core ./runtime/nakamaapi ./cmd/gensoulkyo_nakama`, `go test ./...`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`. Direct `docker compose --profile ...` is unavailable on this host, and direct execution of the protocol audit script is blocked by file mode, so `docker-compose` and `python3` were used.

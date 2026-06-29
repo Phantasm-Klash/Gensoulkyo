@@ -835,6 +835,14 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("join audit invalid: %+v", repo.rooms)
 	}
 
+	polled, err := service.QueueTicket(guest.SessionToken, joined.TicketID)
+	if err != nil {
+		t.Fatalf("poll room ticket: %v", err)
+	}
+	if polled.TicketID != joined.TicketID || len(repo.rooms) != 6 || repo.rooms[5].Action != "ticket_read" || repo.rooms[5].TicketID != joined.TicketID || repo.rooms[5].CurrentPlayers != 2 {
+		t.Fatalf("ticket read audit invalid: response=%+v audits=%+v", polled, repo.rooms)
+	}
+
 	chat, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
 		RoomCode:  created.RoomCode,
 		MessageID: "audit-chat-1",
@@ -867,7 +875,7 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("leave audit invalid: response=%+v audit=%+v", left, lastRoomAudit)
 	}
 	status := service.LobbyLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 2 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
 	}
 }

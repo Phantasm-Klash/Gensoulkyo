@@ -1270,6 +1270,11 @@ func (s *Service) QueueTicket(sessionToken string, ticketID string) (*QueueRespo
 	if ticket.MatchID != "" {
 		match = s.matches[ticket.MatchID]
 	}
+	if ticket.RoomCode != "" {
+		record := s.lobbyRoomAuditRecordLocked(s.rooms[normalizeRoomCode(ticket.RoomCode)], ticket, user.UserID, "ticket_read", s.clock())
+		record.CurrentPlayers = s.ticketDepthLocked(ticket)
+		s.recordLobbyRoomAuditRecordLocked(record)
+	}
 	return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), match), nil
 }
 
@@ -4569,7 +4574,7 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
 		return
 	}
 	switch operation {
-	case "listed", "snapshot_read":
+	case "listed", "snapshot_read", "ticket_read":
 		s.lobbyAuditStatus.RoomReadRecords++
 	case "rules_read":
 		s.lobbyAuditStatus.RulesReadRecords++

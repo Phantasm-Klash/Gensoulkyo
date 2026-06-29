@@ -27,7 +27,7 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	if !strings.Contains(upSQL, "'dev-ed25519-0'") {
 		t.Fatalf("migration must seed dev-ed25519-0 so battle_ticket_audits.key_id foreign key can accept signed ticket audits")
 	}
-	for _, action := range []string{"'listed'", "'snapshot_read'"} {
+	for _, action := range []string{"'listed'", "'snapshot_read'", "'ticket_read'"} {
 		if !strings.Contains(upSQL, action) {
 			t.Fatalf("lobby room audit migration must allow read action %s", action)
 		}
