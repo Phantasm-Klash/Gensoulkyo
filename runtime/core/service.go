@@ -1296,7 +1296,21 @@ func (s *Service) CancelTicket(sessionToken string, ticketID string) (*QueueResp
 		return nil, newError(codeMatchState, "ticket is %s", ticket.Status)
 	}
 	if ticket.RoomCode != "" {
+		var roomAudit LobbyRoomAuditRecord
+		if room := s.rooms[normalizeRoomCode(ticket.RoomCode)]; room != nil {
+			roomAudit = s.lobbyRoomAuditRecordLocked(room, ticket, user.UserID, "cancelled", s.clock())
+		}
 		s.cancelRoomTicketLocked(ticket, user.UserID)
+		if roomAudit.RoomCode != "" {
+			roomAudit.RoomStatus = ticket.RoomStatus
+			roomAudit.CurrentPlayers = s.ticketDepthLocked(ticket)
+			if updated := s.rooms[normalizeRoomCode(ticket.RoomCode)]; updated != nil {
+				roomAudit.RoomStatus = updated.Status
+				roomAudit.HostUserID = updated.HostUserID
+				roomAudit.CurrentPlayers = len(updated.TicketIDs)
+			}
+			s.recordLobbyRoomAuditRecordLocked(roomAudit)
+		}
 	} else {
 		s.queues[ticket.QueueKey] = removeString(s.queues[ticket.QueueKey], ticket.TicketID)
 		ticket.Status = "cancelled"

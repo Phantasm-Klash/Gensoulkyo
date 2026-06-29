@@ -1335,7 +1335,8 @@ func TestMatchmakingLoadoutStageBucketAndValidation(t *testing.T) {
 }
 
 func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
-	service := NewService(Config{})
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
 	alice := mustLogin(t, service, "Cancel Alice")
 	bob := mustLogin(t, service, "Cancel Bob")
 	cara := mustLogin(t, service, "Cancel Cara")
@@ -1408,6 +1409,9 @@ func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
 	if roomCancel.QueueStatus != "cancelled" || roomCancel.RoomStatus != "cancelled" || roomCancel.CurrentPlayers != 0 {
 		t.Fatalf("host room cancel invalid: %+v", roomCancel)
 	}
+	if last := repo.rooms[len(repo.rooms)-1]; last.Action != "cancelled" || last.RoomCode != room.RoomCode || last.UserID != host.UserID || last.CurrentPlayers != 0 || last.RoomStatus != "cancelled" {
+		t.Fatalf("host room cancel audit invalid: %+v", last)
+	}
 	if _, err := service.JoinRoom(guest.SessionToken, room.RoomCode, JoinRoomRequest{
 		ModeID:       "certification",
 		ActiveDeckID: "cancel_guest_deck",
@@ -1439,6 +1443,9 @@ func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
 	if guestCancelled.QueueStatus != "cancelled" || guestCancelled.RoomStatus != "cancelled" || guestCancelled.CurrentPlayers != 1 {
 		t.Fatalf("guest room cancel invalid: %+v", guestCancelled)
 	}
+	if last := repo.rooms[len(repo.rooms)-1]; last.Action != "cancelled" || last.RoomCode != largerRoom.RoomCode || last.UserID != guestCancel.UserID || last.CurrentPlayers != 1 || last.RoomStatus != "waiting" {
+		t.Fatalf("member room cancel audit invalid: %+v", last)
+	}
 	replacementJoined, err := service.JoinRoom(guestReplacement.SessionToken, largerRoom.RoomCode, JoinRoomRequest{
 		ModeID:       "world_boss",
 		ActiveDeckID: "cancel_guest_replacement_deck",
@@ -1449,6 +1456,10 @@ func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
 	}
 	if replacementJoined.RoomStatus != "waiting" || replacementJoined.CurrentPlayers != 2 {
 		t.Fatalf("room should remain waiting after guest cancel: %+v", replacementJoined)
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.RoomRecords != 6 || status.RoomReadRecords != 0 || status.RejectedRecords != 0 {
+		t.Fatalf("cancel audit status invalid: %+v", status)
 	}
 }
 

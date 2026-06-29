@@ -56,3 +56,9 @@ Status date: 2026-06-28
 - Added a regression proving fallback allocation reports `ActiveMatches=1`, nonzero load, and does not double-count when the existing allocation is read again by another participant.
 - Probed the real Nakama SDK tag build: `github.com/heroiclabs/nakama-common@v1.34.0` is the newest tested module baseline here that still supports the repository's Go 1.20 Docker image; newer tags require Go 1.23+ or later. A temporary local module pin made `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` and `go build -tags nakama -buildmode=plugin` pass, but the durable `go.mod`/`go.sum` pin is outside this scope's allowed paths, so it was not kept in this scoped change.
 - Verified `go test ./runtime/core -run 'TestBattleAllocationFallbackAccountsServerLoad|TestBattleAllocationAndSignedTicketUseRegisteredServer|TestPvPDuelModeContractAllocationAndSettlement'`, `go test ./...`, `docker-compose --profile test run --rm test`, and `/root/gotouhou/docs/ops/protocol_audit_check.py`. Current in-scope tree still reports `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration.
+
+## 2026-06-29 gensoulkyo-lobby room cancellation audit update
+
+- Wired explicit `CancelTicket` room cancellations into the existing lobby lifecycle audit repository using the already-migrated `cancelled` action, covering both empty-room host cancellation and member cancellation from a waiting room.
+- Added a regression that queue-only cancellation remains local queue state while room-ticket cancellation emits server-authoritative lobby audit records and increments `LobbyLifecycleAuditStatus.RoomRecords`.
+- Verified `go test ./runtime/core -run TestCancelTicketRemovesQueueAndRoomWait -count=1`, `go test ./...`, `docker-compose --profile test run --rm test`, and `/root/gotouhou/docs/ops/protocol_audit_check.py`.
