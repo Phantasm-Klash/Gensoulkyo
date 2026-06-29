@@ -1026,6 +1026,18 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if !duplicate.Duplicate || len(repo.messages) != 2 || repo.messages[0].MessageID != chat.MessageID || repo.messages[0].MetadataHash == "" || !repo.messages[1].Duplicate {
 		t.Fatalf("message audits invalid: messages=%+v duplicate=%+v", repo.messages, duplicate)
 	}
+	hostCollision, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: chat.MessageID,
+		Kind:      "announcement",
+		Text:      "host scoped message id",
+	})
+	if err != nil {
+		t.Fatalf("host message id collision should be scoped by user: %v", err)
+	}
+	if hostCollision.Duplicate || hostCollision.UserID != host.UserID || hostCollision.Text != "host scoped message id" || len(repo.messages) != 3 {
+		t.Fatalf("cross-user message id collision should create a new authoritative message: message=%+v audits=%+v", hostCollision, repo.messages)
+	}
 
 	left, err := service.LeaveRoom(guest.SessionToken, created.RoomCode)
 	if err != nil {
@@ -1036,7 +1048,7 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("leave audit invalid: response=%+v audit=%+v", left, lastRoomAudit)
 	}
 	status := service.LobbyLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 3 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
 	}
 	if status.LastSuccessOperation != "left" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
@@ -1066,6 +1078,74 @@ func TestLobbyLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
 	}
 	if !status.ServerAuthoritative {
 		t.Fatalf("lobby audit status must stay server authoritative: %+v", status)
+	}
+}
+
+func TestRoomHostLeavePromotesRemainingParticipantAuthority(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Promoted Host Original")
+	guest := mustLogin(t, service, "Promoted Host Guest")
+	observer := mustLogin(t, service, "Promoted Host Observer")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "promote_host_deck",
+		DeckSnapshot: validDeck("promote_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "promote_guest_deck",
+		DeckSnapshot: validDeck("promote_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.CurrentPlayers != 2 || joined.RoomStatus != "waiting" {
+		t.Fatalf("join should leave room waiting with two players: %+v", joined)
+	}
+
+	left, err := service.LeaveRoom(host.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("host leave: %v", err)
+	}
+	if left.QueueStatus != "cancelled" || left.RoomStatus != "cancelled" || left.CurrentPlayers != 1 {
+		t.Fatalf("leaving host ticket response invalid: %+v", left)
+	}
+	room, err := service.Room(observer.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("observer room read: %v", err)
+	}
+	if room.RoomStatus != "waiting" || room.HostUserID != guest.UserID || room.CurrentPlayers != 1 || len(room.Participants) != 1 || room.Participants[0].UserID != guest.UserID {
+		t.Fatalf("room should promote remaining queued participant as host: %+v", room)
+	}
+	if _, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "old-host-announcement",
+		Kind:      "announcement",
+		Text:      "stale host",
+	}); ErrorCode(err) != codeUnauthorized {
+		t.Fatalf("old host must lose room announcement authority, got %v", err)
+	}
+	promotedAnnouncement, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "new-host-announcement",
+		Kind:      "announcement",
+		Text:      "new host ready",
+	})
+	if err != nil {
+		t.Fatalf("promoted host announcement: %v", err)
+	}
+	if promotedAnnouncement.UserID != guest.UserID || promotedAnnouncement.Kind != "announcement" || !promotedAnnouncement.ServerAuthoritative {
+		t.Fatalf("promoted host announcement invalid: %+v", promotedAnnouncement)
+	}
+	lastRoomAudit := repo.rooms[len(repo.rooms)-1]
+	if lastRoomAudit.Action != "snapshot_read" || lastRoomAudit.HostUserID != guest.UserID || lastRoomAudit.CurrentPlayers != 1 {
+		t.Fatalf("room read audit must expose promoted host state: %+v", lastRoomAudit)
 	}
 }
 

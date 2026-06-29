@@ -1217,7 +1217,7 @@ func (s *Service) LobbyMessage(sessionToken string, req LobbyMessageRequest) (*L
 	if messageID == "" {
 		return nil, newError(codeInvalidRequest, "message_id is required")
 	}
-	if existing := roomMessageByID(room, messageID); existing != nil {
+	if existing := roomMessageByID(room, messageID, user.UserID); existing != nil {
 		duplicate := copyLobbyMessage(*existing)
 		duplicate.Duplicate = true
 		s.recordLobbyMessageAuditLocked(duplicate)
@@ -2346,12 +2346,12 @@ func (s *Service) roomTicketForUserLocked(roomCode string, userID string) *queue
 	return nil
 }
 
-func roomMessageByID(room *roomState, messageID string) *LobbyMessage {
-	if room == nil || messageID == "" {
+func roomMessageByID(room *roomState, messageID string, userID string) *LobbyMessage {
+	if room == nil || messageID == "" || userID == "" {
 		return nil
 	}
 	for index := range room.Messages {
-		if room.Messages[index].MessageID == messageID {
+		if room.Messages[index].MessageID == messageID && room.Messages[index].UserID == userID {
 			return &room.Messages[index]
 		}
 	}

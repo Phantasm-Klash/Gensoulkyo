@@ -149,3 +149,9 @@ Status date: 2026-06-28
 - Added a 30-second registered battle server heartbeat freshness gate for new match allocations so stale-but-not-explicitly-offline servers are skipped before issuing battle tickets.
 - Preserved existing allocation stability: once a match has a server allocation, later heartbeat staleness does not silently move that match to another endpoint.
 - Kept the local default fallback eligible for development contract tests while registered C++ battle server candidates must stay online and fresh to receive new allocations.
+
+## 2026-06-29 gensoulkyo-lobby lobby message idempotency update
+
+- Scoped lobby message idempotency to `room_code + user_id + message_id`, matching the PostgreSQL audit uniqueness target and preventing one participant from colliding with another participant's client-generated message id.
+- Added regression coverage that a cross-user message-id collision creates a new server-authoritative message while same-user retries remain duplicate/idempotent audit records.
+- Added a host-leave lifecycle regression proving the remaining queued participant is visible as the promoted host and is the only player allowed to publish host announcements.
