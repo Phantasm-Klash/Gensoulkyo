@@ -27,11 +27,15 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	if !strings.Contains(upSQL, "'dev-ed25519-0'") {
 		t.Fatalf("migration must seed dev-ed25519-0 so battle_ticket_audits.key_id foreign key can accept signed ticket audits")
 	}
+	if !strings.Contains(upSQL, "'client-dev-key'") {
+		t.Fatalf("migration must seed client-dev-key so Nakama RPC/WSS envelope audit tests satisfy the key foreign key")
+	}
 	for _, action := range []string{"'listed'", "'snapshot_read'", "'ticket_read'"} {
 		if !strings.Contains(upSQL, action) {
 			t.Fatalf("lobby room audit migration must allow read action %s", action)
 		}
 	}
+	assertMigrationHasUniqueIndex(t, upSQL, "ux_lobby_message_audit_duplicate", "lobby_message_audits", []string{"message_id", "room_code", "user_id", "duplicate"})
 	assertDownMigrationDropsTable(t, downSQL, "lobby_room_audits")
 	assertDownMigrationDropsTable(t, downSQL, "lobby_message_audits")
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")
@@ -272,6 +276,35 @@ func assertDownMigrationDropsTable(t *testing.T, migrationSQL string, table stri
 	t.Helper()
 	if !strings.Contains(migrationSQL, "DROP TABLE IF EXISTS "+table+";") {
 		t.Fatalf("down migration does not drop %s", table)
+	}
+}
+
+func assertMigrationHasUniqueIndex(t *testing.T, migrationSQL string, indexName string, table string, columns []string) {
+	t.Helper()
+	indexPrefix := "CREATE UNIQUE INDEX IF NOT EXISTS " + indexName
+	start := strings.Index(migrationSQL, indexPrefix)
+	if start < 0 {
+		t.Fatalf("migration missing unique index %s", indexName)
+	}
+	tableFragment := "ON " + table
+	tableStart := strings.Index(migrationSQL[start:], tableFragment)
+	if tableStart < 0 {
+		t.Fatalf("unique index %s does not target %s", indexName, table)
+	}
+	tableStart += start
+	open := strings.Index(migrationSQL[tableStart:], "(")
+	if open < 0 {
+		t.Fatalf("unique index %s missing column list", indexName)
+	}
+	open += tableStart
+	close := strings.Index(migrationSQL[open:], ")")
+	if close < 0 {
+		t.Fatalf("unique index %s missing column list close", indexName)
+	}
+	close += open
+	got := splitSQLColumns(migrationSQL[open+1 : close])
+	if strings.Join(got, ",") != strings.Join(columns, ",") {
+		t.Fatalf("unique index %s columns mismatch: got %v want %v", indexName, got, columns)
 	}
 }
 

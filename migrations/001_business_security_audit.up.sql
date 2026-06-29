@@ -212,6 +212,9 @@ CREATE INDEX IF NOT EXISTS ix_lobby_message_audit_room_time
 CREATE INDEX IF NOT EXISTS ix_lobby_message_audit_user_time
     ON lobby_message_audits (user_id, created_at DESC);
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_lobby_message_audit_duplicate
+    ON lobby_message_audits (message_id, room_code, user_id, duplicate);
+
 INSERT INTO business_envelope_keys (
     key_id,
     protocol_version,
@@ -228,6 +231,24 @@ INSERT INTO business_envelope_keys (
     NULL,
     'local-dev-placeholder',
     'Development scaffold key id used by HTTP fallback tests. Replace before production.'
+) ON CONFLICT (key_id) DO NOTHING;
+
+INSERT INTO business_envelope_keys (
+    key_id,
+    protocol_version,
+    suite,
+    status,
+    public_key_hex,
+    server_key_ref,
+    notes
+) VALUES (
+    'client-dev-key',
+    'business-v0-scaffold',
+    'tls13_plus_x25519_hkdf_chacha20poly1305_client_dev_scaffold',
+    'dev_scaffold',
+    NULL,
+    'local-dev-client-envelope-placeholder',
+    'Development scaffold key id used by Nakama RPC/WSS envelope tests. Replace before production.'
 ) ON CONFLICT (key_id) DO NOTHING;
 
 INSERT INTO business_envelope_keys (
