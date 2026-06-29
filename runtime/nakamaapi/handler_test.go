@@ -712,6 +712,45 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !ticket.OK {
 		t.Fatalf("host battle ticket failed: %+v", ticket)
 	}
+	allocation := ticket.Payload.(*core.SignedBattleTicket)
+	playerIDs := []string{}
+	for _, player := range match.BattleAllocation.Players {
+		playerIDs = append(playerIDs, player.PlayerID)
+	}
+	resultSubmit := handler.HandleRPC(RPCRequest{
+		ID:      "battle.result.submit",
+		Service: true,
+		Payload: map[string]any{"signed_result": map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"version": map[string]any{
+					"protocol_version":     core.ProtocolVersion,
+					"business_api_version": core.BusinessAPIVersion,
+					"battle_api_version":   core.BattleAPIVersion,
+					"ruleset_version":      core.RulesetVersion,
+				},
+				"match_id":               match.MatchID,
+				"mode_id":                match.ModeID,
+				"result_hash":            "sha256:abcd1234",
+				"replay_id":              "nakama-sql-replay",
+				"player_ids":             playerIDs,
+				"reward_projection_json": `{"source":"battle_server"}`,
+				"mode_result_json":       `{"verified":true}`,
+				"settled_at_ms":          time.Now().UnixMilli(),
+			},
+			"signature_alg":        "ED25519",
+			"key_id":               allocation.Ticket.BattleServerID,
+			"signature_hex":        strings.Repeat("a", 128),
+			"public_key_hex":       strings.Repeat("b", 64),
+			"server_authoritative": true,
+		}},
+	})
+	if !resultSubmit.OK {
+		t.Fatalf("service-origin battle result submit failed: %+v", resultSubmit)
+	}
+	if receipt := resultSubmit.Payload.(*core.BattleResultSubmitResponse); !receipt.Accepted || receipt.Duplicate || !receipt.ServerAuthoritative {
+		t.Fatalf("result submit receipt should be accepted and authoritative: %+v", receipt)
+	}
 	battleStatus := handler.HandleRPC(RPCRequest{
 		ID:        "battle.audit.status",
 		SessionID: host.SessionToken,
@@ -721,7 +760,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
 	}
-	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords < 2 {
+	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ReplayRecords != 2 {
 		t.Fatalf("battle audit status should reflect SQL repository writes: %+v", status)
 	}
 	lobbyStatus := handler.HandleWSSMessage(WSSMessage{
@@ -738,7 +777,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 8 || tableCounts["lobby_room_audits"] != 3 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 {
+	if tableCounts["business_envelope_audits"] < 8 || tableCounts["lobby_room_audits"] != 3 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 1 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasDuplicateLobbyMessageAudit() {
@@ -820,6 +859,8 @@ func nakamaSQLTableCounts() map[string]int {
 			"lobby_message_audits",
 			"match_allocation_audits",
 			"battle_ticket_audits",
+			"battle_result_audits",
+			"replay_audits",
 		} {
 			if strings.Contains(call.query, "INSERT INTO "+table) {
 				counts[table]++
