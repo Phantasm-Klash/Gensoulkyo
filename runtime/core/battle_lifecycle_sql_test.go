@@ -17,6 +17,7 @@ import (
 func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	upSQL := readMigrationFile(t, "001_business_security_audit.up.sql")
 	downSQL := readMigrationFile(t, "001_business_security_audit.down.sql")
+	readme := readMigrationReadme(t)
 
 	assertMigrationCoversInsertColumns(t, upSQL, insertMatchAllocationAuditSQL, "match_allocation_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertBattleTicketAuditSQL, "battle_ticket_audits")
@@ -40,6 +41,20 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	assertDownMigrationDropsTable(t, downSQL, "lobby_message_audits")
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")
 	assertDownMigrationDropsTable(t, downSQL, "replay_audits")
+	for _, table := range []string{
+		"business_envelope_audits",
+		"business_envelope_nonce_windows",
+		"battle_ticket_audits",
+		"match_allocation_audits",
+		"battle_result_audits",
+		"replay_audits",
+		"lobby_room_audits",
+		"lobby_message_audits",
+	} {
+		if !strings.Contains(readme, table) {
+			t.Fatalf("migration README must document table %s", table)
+		}
+	}
 }
 
 func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.T) {
@@ -254,6 +269,16 @@ func TestSQLLobbyLifecycleAuditRepositoryRejectsNilDB(t *testing.T) {
 func readMigrationFile(t *testing.T, name string) string {
 	t.Helper()
 	path := filepath.Join("..", "..", "migrations", name)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func readMigrationReadme(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join("..", "..", "migrations", "README.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
