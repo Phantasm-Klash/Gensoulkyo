@@ -860,7 +860,7 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 		t.Fatalf("expected one result audit, got %+v", repo.results)
 	}
 	resultAudit := repo.results[0]
-	if resultAudit.MatchID != matchID || resultAudit.ResultHash != signed.Result.ResultHash || resultAudit.ReplayID != signed.Result.ReplayID || len(resultAudit.PlayerIDs) != 2 || resultAudit.SettlementKey == "" {
+	if resultAudit.MatchID != matchID || resultAudit.ResultHash != signed.Result.ResultHash || resultAudit.ReplayID != signed.Result.ReplayID || len(resultAudit.PlayerIDs) != 2 || resultAudit.SettlementKey == "" || resultAudit.Status != "accepted" {
 		t.Fatalf("result audit invalid: %+v", resultAudit)
 	}
 	if len(repo.replays) != 2 {
@@ -877,6 +877,21 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	}
 	if status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("audit status should expose a non-secret last-success fingerprint: %+v", status)
+	}
+
+	duplicate, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
+	if err != nil {
+		t.Fatalf("duplicate result callback: %v", err)
+	}
+	if !duplicate.Accepted || !duplicate.Duplicate {
+		t.Fatalf("duplicate result response invalid: %+v", duplicate)
+	}
+	if len(repo.results) != 2 || repo.results[1].Status != "duplicate" || repo.results[1].MatchID != matchID || len(repo.replays) != 2 {
+		t.Fatalf("duplicate callback should record one duplicate result audit without extra replay writes: results=%+v replays=%+v", repo.results, repo.replays)
+	}
+	status = service.BattleLifecycleAuditStatus()
+	if status.ResultRecords != 1 || status.ResultDuplicateRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result_duplicate" {
+		t.Fatalf("duplicate result callback audit status invalid: %+v", status)
 	}
 }
 

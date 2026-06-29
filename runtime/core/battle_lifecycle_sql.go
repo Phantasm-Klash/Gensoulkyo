@@ -59,12 +59,13 @@ INSERT INTO battle_result_audits (
     key_id,
     player_ids_json,
     settlement_key,
+    status,
     verified_at,
     settled_at,
     server_authoritative
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11
-) ON CONFLICT (match_id) DO NOTHING`
+    $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12
+) ON CONFLICT DO NOTHING`
 
 const insertReplayAuditSQL = `
 INSERT INTO replay_audits (
@@ -197,6 +198,7 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordBattleResultAudit(record Ba
 		record.KeyID,
 		string(playerIDsJSON),
 		record.SettlementKey,
+		firstNonEmptyCore(record.Status, "accepted"),
 		record.VerifiedAt,
 		record.SettledAt,
 		record.ServerAuthoritative,

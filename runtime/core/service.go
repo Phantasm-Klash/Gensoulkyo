@@ -1971,6 +1971,7 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	}
 	if match.Status == "ended" {
 		if match.BattleResultHash != "" && match.BattleResultHash == result.ResultHash {
+			s.recordBattleResultDuplicateAuditLocked(match, allocation, signed, now)
 			return &BattleResultSubmitResponse{
 				OK:                  true,
 				Version:             currentVersionStamp(),
@@ -4696,12 +4697,39 @@ func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *B
 		KeyID:               signed.KeyID,
 		PlayerIDs:           copyStringSlice(signed.Result.PlayerIDs),
 		SettlementKey:       battleResultSettlementKey(match.MatchID),
+		Status:              "accepted",
 		VerifiedAt:          verifiedAt,
 		SettledAt:           match.BattleResultAt,
 		ServerAuthoritative: true,
 	})
 	fingerprint := lifecycleFingerprint("battle:result", match.MatchID, match.ModeID, battleServerID, signed.Result.ResultHash, signed.Result.ReplayID, fmt.Sprintf("%d", signed.Result.SettledAtMS))
 	s.recordBattleAuditOutcomeLocked("battle_result", fingerprint, verifiedAt, err)
+}
+
+func (s *Service) recordBattleResultDuplicateAuditLocked(match *matchState, allocation *BattleServerAllocation, signed SignedBattleResult, verifiedAt time.Time) {
+	if s.battleAuditRepo == nil || match == nil {
+		return
+	}
+	battleServerID := signed.KeyID
+	if allocation != nil && allocation.BattleServerID != "" {
+		battleServerID = allocation.BattleServerID
+	}
+	err := s.battleAuditRepo.RecordBattleResultAudit(BattleResultAuditRecord{
+		MatchID:             match.MatchID,
+		ModeID:              match.ModeID,
+		BattleServerID:      battleServerID,
+		ResultHash:          signed.Result.ResultHash,
+		ReplayID:            signed.Result.ReplayID,
+		KeyID:               signed.KeyID,
+		PlayerIDs:           copyStringSlice(signed.Result.PlayerIDs),
+		SettlementKey:       battleResultSettlementKey(match.MatchID),
+		Status:              "duplicate",
+		VerifiedAt:          verifiedAt,
+		SettledAt:           match.BattleResultAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:result:duplicate", match.MatchID, match.ModeID, battleServerID, signed.Result.ResultHash, signed.Result.ReplayID, fmt.Sprintf("%d", signed.Result.SettledAtMS))
+	s.recordBattleAuditOutcomeLocked("battle_result_duplicate", fingerprint, verifiedAt, err)
 }
 
 func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
@@ -4746,6 +4774,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		s.battleAuditStatus.TicketRecords++
 	case "battle_result":
 		s.battleAuditStatus.ResultRecords++
+	case "battle_result_duplicate":
+		s.battleAuditStatus.ResultDuplicateRecords++
 	case "replay":
 		s.battleAuditStatus.ReplayRecords++
 	}

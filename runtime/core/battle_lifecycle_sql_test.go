@@ -42,6 +42,11 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 		}
 	}
 	assertMigrationHasUniqueIndex(t, upSQL, "ux_lobby_message_audit_duplicate", "lobby_message_audits", []string{"message_id", "room_code", "user_id", "duplicate"})
+	assertMigrationHasUniqueIndex(t, upSQL, "ux_battle_result_audit_accepted", "battle_result_audits", []string{"match_id"})
+	assertMigrationHasUniqueIndex(t, upSQL, "ux_battle_result_audit_duplicate", "battle_result_audits", []string{"match_id", "result_hash", "status"})
+	if !strings.Contains(upSQL, "status IN ('accepted', 'duplicate')") {
+		t.Fatalf("battle result audit migration must allow duplicate callback status")
+	}
 	assertDownMigrationDropsTable(t, downSQL, "lobby_room_audits")
 	assertDownMigrationDropsTable(t, downSQL, "lobby_message_audits")
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")
@@ -128,6 +133,7 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 		KeyID:               "battle-a",
 		PlayerIDs:           []string{"player-a", "player-b"},
 		SettlementKey:       "battle-result:match-a",
+		Status:              "accepted",
 		VerifiedAt:          now,
 		SettledAt:           now,
 		ServerAuthoritative: true,
@@ -167,10 +173,10 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" || calls[1].args[16] != true {
 		t.Fatalf("ticket args invalid: %+v", calls[1].args)
 	}
-	if !strings.Contains(calls[2].query, "INSERT INTO battle_result_audits") || len(calls[2].args) != 11 {
+	if !strings.Contains(calls[2].query, "INSERT INTO battle_result_audits") || len(calls[2].args) != 12 {
 		t.Fatalf("result insert invalid: %+v", calls[2])
 	}
-	if calls[2].args[0] != "match-a" || calls[2].args[6] != `["player-a","player-b"]` || calls[2].args[10] != true {
+	if calls[2].args[0] != "match-a" || calls[2].args[6] != `["player-a","player-b"]` || calls[2].args[8] != "accepted" || calls[2].args[11] != true {
 		t.Fatalf("result args invalid: %+v", calls[2].args)
 	}
 	if !strings.Contains(calls[3].query, "INSERT INTO replay_audits") || len(calls[3].args) != 12 {

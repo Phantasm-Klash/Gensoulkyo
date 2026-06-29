@@ -155,3 +155,10 @@ Status date: 2026-06-28
 - Scoped lobby message idempotency to `room_code + user_id + message_id`, matching the PostgreSQL audit uniqueness target and preventing one participant from colliding with another participant's client-generated message id.
 - Added regression coverage that a cross-user message-id collision creates a new server-authoritative message while same-user retries remain duplicate/idempotent audit records.
 - Added a host-leave lifecycle regression proving the remaining queued participant is visible as the promoted host and is the only player allowed to publish host announcements.
+
+## 2026-06-29 gensoulkyo-lobby duplicate result callback audit update
+
+- Added a `duplicate` battle result audit status and a separate `result_duplicate_records` lifecycle counter so repeated C++ Battle Server result callbacks are durable and visible without counting as new settlements.
+- Updated the PostgreSQL `battle_result_audits` draft to keep one accepted row per match while allowing one idempotent duplicate callback marker per match/result hash, and wired the SQL repository to persist the callback status.
+- Extended core and DB-backed Nakama handler regressions so duplicate service-origin `battle.result.submit` calls return authoritative idempotent receipts, write a duplicate result audit row, and do not create extra replay audit rows or reopen client settlement authority.
+- Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
