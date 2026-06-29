@@ -19,9 +19,11 @@ INSERT INTO match_allocation_audits (
     server_seed_hash,
     player_count,
     allocation_json,
-    status
+    status,
+    server_authoritative,
+    created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14
 ) ON CONFLICT (match_id) DO NOTHING`
 
 const insertBattleTicketAuditSQL = `
@@ -41,9 +43,10 @@ INSERT INTO battle_ticket_audits (
     mode_config_hash,
     nonce,
     signature_prefix,
-    status
+    status,
+    server_authoritative
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 ) ON CONFLICT (ticket_id) DO NOTHING`
 
 const insertBattleResultAuditSQL = `
@@ -143,6 +146,8 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordMatchAllocationAudit(record
 		record.PlayerCount,
 		firstNonEmptyCore(record.AllocationJSON, "{}"),
 		firstNonEmptyCore(record.Status, "allocated"),
+		record.ServerAuthoritative,
+		record.CreatedAt,
 	)
 	return err
 }
@@ -169,6 +174,7 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordBattleTicketAudit(record Ba
 		record.Nonce,
 		record.SignaturePrefix,
 		firstNonEmptyCore(record.Status, "issued"),
+		record.ServerAuthoritative,
 	)
 	return err
 }
