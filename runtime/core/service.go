@@ -4295,7 +4295,7 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 	bestModeBreadth := math.MaxInt
 	for _, id := range ids {
 		server := s.battleServers[id]
-		if server == nil || server.Status != "online" || !serverSupportsMode(server, modeID) {
+		if server == nil || !s.battleServerEligibleForAllocationLocked(server, modeID) {
 			continue
 		}
 		if server.Capacity > 0 && server.ActiveMatches >= server.Capacity {
@@ -4320,6 +4320,20 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 	}
 	s.accountBattleServerAllocationLocked(fallback)
 	return fallback
+}
+
+func (s *Service) battleServerEligibleForAllocationLocked(server *battleServerState, modeID string) bool {
+	if server == nil || server.Status != "online" || !serverSupportsMode(server, modeID) {
+		return false
+	}
+	if server.BattleServerID == DefaultBattleServerID {
+		return true
+	}
+	lastSeen := server.LastSeenAt
+	if lastSeen.IsZero() {
+		return false
+	}
+	return !s.clock().After(lastSeen.Add(time.Duration(BattleServerHeartbeatTTLSeconds) * time.Second))
 }
 
 func (s *Service) accountBattleServerAllocationLocked(server *battleServerState) {

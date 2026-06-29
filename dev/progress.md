@@ -143,3 +143,9 @@ Status date: 2026-06-28
 - Added a service-origin-only `battle.servers.offline` Nakama RPC path that marks an existing battle server unavailable, preserves its discovery metadata, resets reported load, and keeps future allocations on online servers.
 - Recorded offline transitions through the same PostgreSQL-compatible battle lifecycle audit repository and migration status constraint as register/heartbeat callbacks.
 - Kept public/client calls fail-closed: authenticated players can still read `battle.servers` through the business envelope guard, but cannot register, heartbeat, offline, or submit settlement callbacks.
+
+## 2026-06-29 gensoulkyo-lobby battle server heartbeat freshness update
+
+- Added a 30-second registered battle server heartbeat freshness gate for new match allocations so stale-but-not-explicitly-offline servers are skipped before issuing battle tickets.
+- Preserved existing allocation stability: once a match has a server allocation, later heartbeat staleness does not silently move that match to another endpoint.
+- Kept the local default fallback eligible for development contract tests while registered C++ battle server candidates must stay online and fresh to receive new allocations.

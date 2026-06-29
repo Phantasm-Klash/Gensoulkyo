@@ -508,6 +508,95 @@ func TestBattleServerOfflineLifecycleSkipsFutureAllocations(t *testing.T) {
 	}
 }
 
+func TestBattleServerStaleHeartbeatSkipsFutureAllocations(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-stale-a",
+		Endpoint:       "127.0.0.1:7921",
+		Region:         "local",
+		BuildID:        "stale-a",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register stale candidate: %v", err)
+	}
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-fresh-b",
+		Endpoint:       "127.0.0.1:7922",
+		Region:         "local",
+		BuildID:        "fresh-b",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register fresh candidate: %v", err)
+	}
+	now = now.Add(time.Duration(BattleServerHeartbeatTTLSeconds+1) * time.Second)
+	if _, err := service.BattleServerHeartbeat(BattleServerHeartbeatRequest{
+		BattleServerID: "pvp-fresh-b",
+		Endpoint:       "127.0.0.1:7922",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("refresh fresh candidate: %v", err)
+	}
+
+	alice := mustLogin(t, service, "Stale Alice")
+	bob := mustLogin(t, service, "Stale Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation after stale heartbeat: %v", err)
+	}
+	if allocation.BattleServerID != "pvp-fresh-b" {
+		t.Fatalf("stale registered server must be skipped for new allocations: %+v", allocation)
+	}
+	servers := service.BattleServers()
+	for _, server := range servers.Servers {
+		if server.BattleServerID == "pvp-stale-a" && server.Status != "online" {
+			t.Fatalf("stale heartbeat should not mutate discovery status without an offline callback: %+v", server)
+		}
+	}
+}
+
+func TestBattleAllocationReadKeepsExistingServerAfterHeartbeatStales(t *testing.T) {
+	now := time.Date(2026, 6, 29, 13, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-existing-a",
+		Endpoint:       "127.0.0.1:7923",
+		Region:         "local",
+		BuildID:        "existing-a",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register existing candidate: %v", err)
+	}
+
+	alice := mustLogin(t, service, "Existing Alice")
+	bob := mustLogin(t, service, "Existing Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	first, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("initial allocation: %v", err)
+	}
+	if first.BattleServerID != "pvp-existing-a" {
+		t.Fatalf("expected registered server before heartbeat stales: %+v", first)
+	}
+	now = now.Add(time.Duration(BattleServerHeartbeatTTLSeconds+1) * time.Second)
+	second, err := service.BattleAllocation(bob.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("existing allocation read after stale heartbeat: %v", err)
+	}
+	if second.BattleServerID != first.BattleServerID || second.Endpoint != first.Endpoint {
+		t.Fatalf("existing allocation reads must remain stable after heartbeat stales: first=%+v second=%+v", first, second)
+	}
+}
+
 func TestPvPDuelModeContractAllocationAndSettlement(t *testing.T) {
 	now := time.Date(2026, 6, 27, 11, 0, 0, 0, time.UTC)
 	service := NewService(Config{Clock: func() time.Time { return now }})

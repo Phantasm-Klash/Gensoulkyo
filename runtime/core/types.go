@@ -7,18 +7,19 @@ import (
 )
 
 const (
-	ServerVersion          = "0.1.0"
-	ProtocolVersion        = phkv1.ProtocolVersion
-	BusinessAPIVersion     = phkv1.BusinessAPIVersion
-	BattleAPIVersion       = phkv1.BattleAPIVersion
-	RulesetVersion         = phkv1.RulesetVersion
-	TickRate               = 60
-	DefaultInputDelayTick  = 2
-	DefaultMatchTicks      = 60 * 90
-	ReconnectWindowSeconds = 30
-	BattleTicketTTLSeconds = 60
-	DefaultBattleServerID  = "battle-local-dev"
-	DefaultBattleEndpoint  = "127.0.0.1:7901"
+	ServerVersion                   = "0.1.0"
+	ProtocolVersion                 = phkv1.ProtocolVersion
+	BusinessAPIVersion              = phkv1.BusinessAPIVersion
+	BattleAPIVersion                = phkv1.BattleAPIVersion
+	RulesetVersion                  = phkv1.RulesetVersion
+	TickRate                        = 60
+	DefaultInputDelayTick           = 2
+	DefaultMatchTicks               = 60 * 90
+	ReconnectWindowSeconds          = 30
+	BattleTicketTTLSeconds          = 60
+	BattleServerHeartbeatTTLSeconds = 30
+	DefaultBattleServerID           = "battle-local-dev"
+	DefaultBattleEndpoint           = "127.0.0.1:7901"
 )
 
 type ModeConfig struct {
