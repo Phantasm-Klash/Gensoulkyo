@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS lobby_message_audits;
+DROP TABLE IF EXISTS lobby_room_audits;
 DROP TABLE IF EXISTS replay_audits;
 DROP TABLE IF EXISTS battle_result_audits;
 DROP TABLE IF EXISTS match_allocation_audits;

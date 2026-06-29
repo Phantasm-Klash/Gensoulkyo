@@ -41,6 +41,7 @@ var rpcIDs = []string{
 	"activity.claim",
 	"battle.servers",
 	"battle.audit.status",
+	"lobby.audit.status",
 	"battle.allocation",
 	"battle.ticket",
 	"battle.result.submit",
@@ -48,6 +49,7 @@ var rpcIDs = []string{
 
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	var battleAuditRepo core.BattleLifecycleAuditRepository
+	var lobbyAuditRepo core.LobbyLifecycleAuditRepository
 	guard := security.NewBusinessEnvelopeGuard()
 	if db != nil {
 		sink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
@@ -60,8 +62,16 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 			return err
 		}
 		battleAuditRepo = repo
+		lobbyRepo, err := core.NewSQLLobbyLifecycleAuditRepository(db)
+		if err != nil {
+			return err
+		}
+		lobbyAuditRepo = lobbyRepo
 	}
-	service := core.NewService(core.Config{BattleLifecycleAuditRepo: battleAuditRepo})
+	service := core.NewService(core.Config{
+		BattleLifecycleAuditRepo: battleAuditRepo,
+		LobbyLifecycleAuditRepo:  lobbyAuditRepo,
+	})
 	handler := nakamaapi.New(service, nakamaapi.WithBusinessEnvelopeGuard(guard))
 	for _, id := range rpcIDs {
 		rpcID := id

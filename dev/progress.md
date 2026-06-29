@@ -19,3 +19,9 @@ Status date: 2026-06-28
 - Added a server-authoritative `BattleLifecycleAuditStatus` snapshot in `runtime/core` that counts allocation, battle ticket, battle result, and replay audit repository writes and records the last non-secret write failure.
 - Exposed the snapshot through authenticated, business-envelope-protected `battle.audit.status` RPC/WSS dispatch in `runtime/nakamaapi`, and registered the RPC in the build-tagged Nakama binding.
 - Kept HTTP/local fallback battle lifecycle behavior permissive: audit repository failures are surfaced for operations/CI visibility but do not make the development fallback path the production combat authority.
+
+## 2026-06-29 gensoulkyo-lobby lobby audit update
+
+- Added an injected lobby lifecycle audit repository for room create/join/match/leave/rules-read and lobby message/duplicate-message events, plus a `database/sql` PostgreSQL writer and migration tables for `lobby_room_audits` and `lobby_message_audits`.
+- Wired the Nakama build-tagged module to create both battle and lobby lifecycle audit repositories from Nakama's `*sql.DB`; authenticated `lobby.audit.status` RPC/WSS now exposes whether durable lobby audit writes are configured and whether recent writes failed.
+- Preserved the authority split: room lifecycle validation, forbidden client-authored fields, host-only announcements, and battle allocation/ticket/result paths stay server-owned; audit sink failures are visible in status but do not turn HTTP fallback into production authority.

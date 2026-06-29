@@ -108,6 +108,8 @@ type Service struct {
 	matchDurationTicks int
 	battleAuditRepo    BattleLifecycleAuditRepository
 	battleAuditStatus  BattleLifecycleAuditStatus
+	lobbyAuditRepo     LobbyLifecycleAuditRepository
+	lobbyAuditStatus   LobbyLifecycleAuditStatus
 	signingKeyID       string
 	signingPublicKey   ed25519.PublicKey
 	signingPrivateKey  ed25519.PrivateKey
@@ -395,6 +397,12 @@ func NewService(config Config) *Service {
 			Configured:          config.BattleLifecycleAuditRepo != nil,
 			ServerAuthoritative: true,
 		},
+		lobbyAuditRepo: config.LobbyLifecycleAuditRepo,
+		lobbyAuditStatus: LobbyLifecycleAuditStatus{
+			OK:                  true,
+			Configured:          config.LobbyLifecycleAuditRepo != nil,
+			ServerAuthoritative: true,
+		},
 		signingKeyID:      "dev-ed25519-0",
 		signingPublicKey:  publicKey,
 		signingPrivateKey: privateKey,
@@ -423,6 +431,17 @@ func (s *Service) BattleLifecycleAuditStatus() BattleLifecycleAuditStatus {
 
 	status := s.battleAuditStatus
 	status.Configured = s.battleAuditRepo != nil
+	status.OK = status.Configured && status.LastError == ""
+	status.ServerAuthoritative = true
+	return status
+}
+
+func (s *Service) LobbyLifecycleAuditStatus() LobbyLifecycleAuditStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	status := s.lobbyAuditStatus
+	status.Configured = s.lobbyAuditRepo != nil
 	status.OK = status.Configured && status.LastError == ""
 	status.ServerAuthoritative = true
 	return status
@@ -914,6 +933,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	}
 	s.tickets[ticketID] = ticket
 	s.rooms[roomCode] = room
+	s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "created", ticket.CreatedAt)
 	return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
 }
 
@@ -1001,8 +1021,10 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		match := s.createMatchLocked(mode, groupIDs)
 		room.MatchID = match.MatchID
 		room.Status = "found"
+		s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "matched", s.clock())
 		return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), match), nil
 	}
+	s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "joined", ticket.CreatedAt)
 	return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
 }
 
@@ -1055,7 +1077,8 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
 		return nil, err
 	}
 	room, err := s.roomByCodeLocked(roomCode)
@@ -1070,7 +1093,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		forbiddenFields = append(forbiddenFields, field)
 	}
 	sort.Strings(forbiddenFields)
-	return &RoomRulesSnapshot{
+	rules := &RoomRulesSnapshot{
 		OK:              true,
 		Version:         currentVersionStamp(),
 		Room:            snapshot,
@@ -1099,7 +1122,9 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		ForbiddenFields:     forbiddenFields,
 		ServerTime:          now,
 		ServerAuthoritative: true,
-	}, nil
+	}
+	s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "rules_read", now)
+	return rules, nil
 }
 
 func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueResponse, error) {
@@ -1141,7 +1166,16 @@ func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueRespons
 	if ticket.Status != "queued" {
 		return nil, newError(codeMatchState, "ticket is %s", ticket.Status)
 	}
+	roomAudit := s.lobbyRoomAuditRecordLocked(room, ticket, user.UserID, "left", s.clock())
 	s.cancelRoomTicketLocked(ticket, user.UserID)
+	roomAudit.RoomStatus = ticket.RoomStatus
+	roomAudit.CurrentPlayers = s.ticketDepthLocked(ticket)
+	if updated := s.rooms[normalizeRoomCode(roomCode)]; updated != nil {
+		roomAudit.RoomStatus = updated.Status
+		roomAudit.HostUserID = updated.HostUserID
+		roomAudit.CurrentPlayers = len(updated.TicketIDs)
+	}
+	s.recordLobbyRoomAuditRecordLocked(roomAudit)
 	return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), nil), nil
 }
 
@@ -1180,6 +1214,7 @@ func (s *Service) LobbyMessage(sessionToken string, req LobbyMessageRequest) (*L
 	if existing := roomMessageByID(room, messageID); existing != nil {
 		duplicate := copyLobbyMessage(*existing)
 		duplicate.Duplicate = true
+		s.recordLobbyMessageAuditLocked(duplicate)
 		return &duplicate, nil
 	}
 	if field := firstForbiddenFieldDeep(req.Metadata); field != "" {
@@ -1208,6 +1243,7 @@ func (s *Service) LobbyMessage(sessionToken string, req LobbyMessageRequest) (*L
 	if len(room.Messages) > 32 {
 		room.Messages = append([]LobbyMessage{}, room.Messages[len(room.Messages)-32:]...)
 	}
+	s.recordLobbyMessageAuditLocked(message)
 	return &message, nil
 }
 
@@ -4372,6 +4408,149 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		ServerAuthoritative: true,
 	})
 	s.recordBattleAuditOutcomeLocked("battle_ticket", err)
+}
+
+func (s *Service) recordLobbyRoomAuditLocked(room *roomState, ticket *queueTicket, userID string, action string, createdAt time.Time) {
+	s.recordLobbyRoomAuditRecordLocked(s.lobbyRoomAuditRecordLocked(room, ticket, userID, action, createdAt))
+}
+
+func (s *Service) lobbyRoomAuditRecordLocked(room *roomState, ticket *queueTicket, userID string, action string, createdAt time.Time) LobbyRoomAuditRecord {
+	if createdAt.IsZero() {
+		createdAt = s.clock()
+	}
+	modeID := ""
+	roomCode := ""
+	roomStatus := ""
+	hostUserID := ""
+	stageID := ""
+	matchID := ""
+	currentPlayers := 0
+	requiredPlayers := 0
+	modeRulesetVersion := ""
+	modeConfigHashValue := ""
+	if room != nil {
+		modeID = room.ModeID
+		roomCode = room.RoomCode
+		roomStatus = room.Status
+		hostUserID = room.HostUserID
+		stageID = room.StageID
+		matchID = room.MatchID
+		currentPlayers = len(room.TicketIDs)
+		if mode, ok := ModeConfigs[room.ModeID]; ok {
+			requiredPlayers = mode.MinPlayers
+			modeRulesetVersion = mode.ModeRulesetVersion
+		}
+		modeConfigHashValue = modeConfigHash(room.ModeID)
+	}
+	ticketID := ""
+	deckHash := ""
+	if ticket != nil {
+		ticketID = ticket.TicketID
+		if userID == "" {
+			userID = ticket.UserID
+		}
+		if modeID == "" {
+			modeID = ticket.ModeID
+		}
+		if roomCode == "" {
+			roomCode = ticket.RoomCode
+		}
+		if roomStatus == "" {
+			roomStatus = ticket.RoomStatus
+		}
+		if matchID == "" {
+			matchID = ticket.MatchID
+		}
+		if stageID == "" {
+			stageID = ticket.Loadout.StageID
+		}
+		deckHash = deckSnapshotHash(ticket.DeckSnapshot)
+		if requiredPlayers == 0 {
+			if mode, ok := ModeConfigs[ticket.ModeID]; ok {
+				requiredPlayers = mode.MinPlayers
+				modeRulesetVersion = mode.ModeRulesetVersion
+			}
+		}
+		if modeConfigHashValue == "" {
+			modeConfigHashValue = modeConfigHash(ticket.ModeID)
+		}
+	}
+	return LobbyRoomAuditRecord{
+		RoomCode:            roomCode,
+		Action:              action,
+		ModeID:              modeID,
+		UserID:              userID,
+		TicketID:            ticketID,
+		MatchID:             matchID,
+		RoomStatus:          roomStatus,
+		HostUserID:          hostUserID,
+		CurrentPlayers:      currentPlayers,
+		RequiredPlayers:     requiredPlayers,
+		StageID:             stageID,
+		RulesetVersion:      RulesetVersion,
+		ModeRulesetVersion:  modeRulesetVersion,
+		ModeConfigHash:      modeConfigHashValue,
+		DeckSnapshotHash:    deckHash,
+		CreatedAt:           createdAt,
+		ServerAuthoritative: true,
+	}
+}
+
+func (s *Service) recordLobbyRoomAuditRecordLocked(record LobbyRoomAuditRecord) {
+	if s.lobbyAuditRepo == nil || record.RoomCode == "" || record.Action == "" {
+		return
+	}
+	err := s.lobbyAuditRepo.RecordLobbyRoomAudit(record)
+	s.recordLobbyAuditOutcomeLocked(record.Action, err)
+}
+
+func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
+	if s.lobbyAuditRepo == nil || message.MessageID == "" {
+		return
+	}
+	metadataHash := ""
+	if len(message.Metadata) > 0 {
+		if encoded, err := json.Marshal(message.Metadata); err == nil {
+			metadataHash = "sha256:" + shortHash(string(encoded))
+		}
+	}
+	err := s.lobbyAuditRepo.RecordLobbyMessageAudit(LobbyMessageAuditRecord{
+		MessageID:           message.MessageID,
+		RoomCode:            message.RoomCode,
+		ModeID:              message.ModeID,
+		Kind:                message.Kind,
+		UserID:              message.UserID,
+		Duplicate:           message.Duplicate,
+		TextLength:          len(message.Text),
+		MetadataHash:        metadataHash,
+		CreatedAt:           message.CreatedAt,
+		ServerAuthoritative: true,
+	})
+	s.recordLobbyAuditOutcomeLocked("message", err)
+}
+
+func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
+	s.lobbyAuditStatus.Configured = s.lobbyAuditRepo != nil
+	s.lobbyAuditStatus.ServerAuthoritative = true
+	if err != nil {
+		s.lobbyAuditStatus.OK = false
+		s.lobbyAuditStatus.RejectedRecords++
+		s.lobbyAuditStatus.LastErrorOperation = operation
+		s.lobbyAuditStatus.LastError = err.Error()
+		s.lobbyAuditStatus.LastErrorAt = s.clock()
+		return
+	}
+	switch operation {
+	case "rules_read":
+		s.lobbyAuditStatus.RulesReadRecords++
+	case "message":
+		s.lobbyAuditStatus.MessageRecords++
+	default:
+		s.lobbyAuditStatus.RoomRecords++
+	}
+	if s.lobbyAuditStatus.Configured {
+		s.lobbyAuditStatus.OK = s.lobbyAuditStatus.LastError == ""
+	}
 }
 
 func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *BattleServerAllocation, signed SignedBattleResult, verifiedAt time.Time) {

@@ -188,6 +188,8 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		return successResponse(handler.service.BattleServers())
 	case "battle.audit.status":
 		return successResponse(handler.service.BattleLifecycleAuditStatus())
+	case "lobby.audit.status":
+		return successResponse(handler.service.LobbyLifecycleAuditStatus())
 	case "battle.allocation":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleAllocation(request.SessionID, matchID) })
@@ -274,6 +276,8 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 		return handler.call(func() (any, error) { return handler.service.BattleTicket(message.SessionID, matchID) })
 	case "battle.audit.status":
 		return successResponse(handler.service.BattleLifecycleAuditStatus())
+	case "lobby.audit.status":
+		return successResponse(handler.service.LobbyLifecycleAuditStatus())
 	default:
 		return errorResponse(http.StatusNotFound, "not_found", fmt.Sprintf("wss message %q is not registered", message.Name))
 	}

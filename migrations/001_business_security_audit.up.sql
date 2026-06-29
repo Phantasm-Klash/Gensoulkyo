@@ -162,6 +162,56 @@ CREATE INDEX IF NOT EXISTS ix_replay_audit_match_user
 CREATE INDEX IF NOT EXISTS ix_replay_audit_user_time
     ON replay_audits (user_id, settled_at DESC);
 
+CREATE TABLE IF NOT EXISTS lobby_room_audits (
+    audit_id BIGSERIAL PRIMARY KEY,
+    room_code TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('created', 'joined', 'matched', 'left', 'rules_read', 'cancelled', 'unknown')),
+    mode_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    ticket_id TEXT NOT NULL DEFAULT '',
+    match_id TEXT NOT NULL DEFAULT '',
+    room_status TEXT NOT NULL DEFAULT '',
+    host_user_id TEXT NOT NULL DEFAULT '',
+    current_players INTEGER NOT NULL DEFAULT 0,
+    required_players INTEGER NOT NULL DEFAULT 0,
+    stage_id TEXT NOT NULL DEFAULT '',
+    ruleset_version TEXT NOT NULL,
+    mode_ruleset_version TEXT NOT NULL DEFAULT '',
+    mode_config_hash TEXT NOT NULL DEFAULT '',
+    deck_snapshot_hash TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS ix_lobby_room_audit_room_time
+    ON lobby_room_audits (room_code, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS ix_lobby_room_audit_user_time
+    ON lobby_room_audits (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS ix_lobby_room_audit_action_time
+    ON lobby_room_audits (action, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS lobby_message_audits (
+    audit_id BIGSERIAL PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    room_code TEXT NOT NULL,
+    mode_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('chat', 'announcement')),
+    user_id TEXT NOT NULL,
+    duplicate BOOLEAN NOT NULL DEFAULT FALSE,
+    text_length INTEGER NOT NULL DEFAULT 0,
+    metadata_hash TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS ix_lobby_message_audit_room_time
+    ON lobby_message_audits (room_code, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS ix_lobby_message_audit_user_time
+    ON lobby_message_audits (user_id, created_at DESC);
+
 INSERT INTO business_envelope_keys (
     key_id,
     protocol_version,

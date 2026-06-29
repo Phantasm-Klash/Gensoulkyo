@@ -81,6 +81,7 @@ type Config struct {
 	Clock                    Clock
 	MatchDurationTicks       int
 	BattleLifecycleAuditRepo BattleLifecycleAuditRepository
+	LobbyLifecycleAuditRepo  LobbyLifecycleAuditRepository
 }
 
 type BattleLifecycleAuditStatus struct {
@@ -102,6 +103,57 @@ type BattleLifecycleAuditRepository interface {
 	RecordBattleTicketAudit(BattleTicketAuditRecord) error
 	RecordBattleResultAudit(BattleResultAuditRecord) error
 	RecordReplayAudit(ReplayAuditRecord) error
+}
+
+type LobbyLifecycleAuditStatus struct {
+	OK                  bool      `json:"ok"`
+	Configured          bool      `json:"configured"`
+	RoomRecords         int       `json:"room_records"`
+	RulesReadRecords    int       `json:"rules_read_records"`
+	MessageRecords      int       `json:"message_records"`
+	RejectedRecords     int       `json:"rejected_records"`
+	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
+	LastError           string    `json:"last_error,omitempty"`
+	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
+}
+
+type LobbyLifecycleAuditRepository interface {
+	RecordLobbyRoomAudit(LobbyRoomAuditRecord) error
+	RecordLobbyMessageAudit(LobbyMessageAuditRecord) error
+}
+
+type LobbyRoomAuditRecord struct {
+	RoomCode            string    `json:"room_code"`
+	Action              string    `json:"action"`
+	ModeID              string    `json:"mode_id"`
+	UserID              string    `json:"user_id"`
+	TicketID            string    `json:"ticket_id"`
+	MatchID             string    `json:"match_id"`
+	RoomStatus          string    `json:"room_status"`
+	HostUserID          string    `json:"host_user_id"`
+	CurrentPlayers      int       `json:"current_players"`
+	RequiredPlayers     int       `json:"required_players"`
+	StageID             string    `json:"stage_id"`
+	RulesetVersion      string    `json:"ruleset_version"`
+	ModeRulesetVersion  string    `json:"mode_ruleset_version"`
+	ModeConfigHash      string    `json:"mode_config_hash"`
+	DeckSnapshotHash    string    `json:"deck_snapshot_hash"`
+	CreatedAt           time.Time `json:"created_at"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
+}
+
+type LobbyMessageAuditRecord struct {
+	MessageID           string    `json:"message_id"`
+	RoomCode            string    `json:"room_code"`
+	ModeID              string    `json:"mode_id"`
+	Kind                string    `json:"kind"`
+	UserID              string    `json:"user_id"`
+	Duplicate           bool      `json:"duplicate"`
+	TextLength          int       `json:"text_length"`
+	MetadataHash        string    `json:"metadata_hash"`
+	CreatedAt           time.Time `json:"created_at"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
 }
 
 type BattleAllocationAuditRecord struct {
