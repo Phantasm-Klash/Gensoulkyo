@@ -107,6 +107,7 @@ type Service struct {
 	clock              Clock
 	matchDurationTicks int
 	battleAuditRepo    BattleLifecycleAuditRepository
+	battleAuditStatus  BattleLifecycleAuditStatus
 	signingKeyID       string
 	signingPublicKey   ed25519.PublicKey
 	signingPrivateKey  ed25519.PrivateKey
@@ -389,26 +390,42 @@ func NewService(config Config) *Service {
 		clock:              clock,
 		matchDurationTicks: matchTicks,
 		battleAuditRepo:    config.BattleLifecycleAuditRepo,
-		signingKeyID:       "dev-ed25519-0",
-		signingPublicKey:   publicKey,
-		signingPrivateKey:  privateKey,
-		users:              map[string]*userState{},
-		sessionToUser:      map[string]string{},
-		queues:             map[string][]string{},
-		tickets:            map[string]*queueTicket{},
-		rooms:              map[string]*roomState{},
-		matches:            map[string]*matchState{},
-		rematches:          map[string]*rematchState{},
-		settlements:        map[string]*MatchEndEvent{},
-		replays:            map[string]*ReplayRecord{},
-		activityClaims:     map[string]*ActivityClaimResult{},
-		worldBossAttempts:  map[string]map[string]int{},
-		battleServers:      map[string]*battleServerState{},
-		battleAllocations:  map[string]*BattleServerAllocation{},
-		battleTickets:      map[string]*SignedBattleTicket{},
+		battleAuditStatus: BattleLifecycleAuditStatus{
+			OK:                  true,
+			Configured:          config.BattleLifecycleAuditRepo != nil,
+			ServerAuthoritative: true,
+		},
+		signingKeyID:      "dev-ed25519-0",
+		signingPublicKey:  publicKey,
+		signingPrivateKey: privateKey,
+		users:             map[string]*userState{},
+		sessionToUser:     map[string]string{},
+		queues:            map[string][]string{},
+		tickets:           map[string]*queueTicket{},
+		rooms:             map[string]*roomState{},
+		matches:           map[string]*matchState{},
+		rematches:         map[string]*rematchState{},
+		settlements:       map[string]*MatchEndEvent{},
+		replays:           map[string]*ReplayRecord{},
+		activityClaims:    map[string]*ActivityClaimResult{},
+		worldBossAttempts: map[string]map[string]int{},
+		battleServers:     map[string]*battleServerState{},
+		battleAllocations: map[string]*BattleServerAllocation{},
+		battleTickets:     map[string]*SignedBattleTicket{},
 	}
 	service.registerDefaultBattleServerLocked()
 	return service
+}
+
+func (s *Service) BattleLifecycleAuditStatus() BattleLifecycleAuditStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	status := s.battleAuditStatus
+	status.Configured = s.battleAuditRepo != nil
+	status.OK = status.Configured && status.LastError == ""
+	status.ServerAuthoritative = true
+	return status
 }
 
 func (s *Service) LoginAnonymous(req AnonymousLoginRequest) (*AuthSession, error) {
@@ -4311,7 +4328,7 @@ func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAlloc
 	if server != nil {
 		region = server.Region
 	}
-	_ = s.battleAuditRepo.RecordMatchAllocationAudit(BattleAllocationAuditRecord{
+	err := s.battleAuditRepo.RecordMatchAllocationAudit(BattleAllocationAuditRecord{
 		MatchID:             allocation.MatchID,
 		ModeID:              allocation.ModeID,
 		BattleServerID:      allocation.BattleServerID,
@@ -4327,6 +4344,7 @@ func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAlloc
 		CreatedAt:           allocation.AllocatedAt,
 		ServerAuthoritative: true,
 	})
+	s.recordBattleAuditOutcomeLocked("match_allocation", err)
 }
 
 func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
@@ -4334,7 +4352,7 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		return
 	}
 	ticket := signed.Ticket
-	_ = s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+	err := s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
 		TicketID:            ticket.TicketID,
 		MatchID:             ticket.MatchID,
 		UserID:              ticket.UserID,
@@ -4353,6 +4371,7 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		ExpiresAt:           ticket.ExpiresAt,
 		ServerAuthoritative: true,
 	})
+	s.recordBattleAuditOutcomeLocked("battle_ticket", err)
 }
 
 func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *BattleServerAllocation, signed SignedBattleResult, verifiedAt time.Time) {
@@ -4363,7 +4382,7 @@ func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *B
 	if allocation != nil && allocation.BattleServerID != "" {
 		battleServerID = allocation.BattleServerID
 	}
-	_ = s.battleAuditRepo.RecordBattleResultAudit(BattleResultAuditRecord{
+	err := s.battleAuditRepo.RecordBattleResultAudit(BattleResultAuditRecord{
 		MatchID:             match.MatchID,
 		ModeID:              match.ModeID,
 		BattleServerID:      battleServerID,
@@ -4376,13 +4395,14 @@ func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *B
 		SettledAt:           match.BattleResultAt,
 		ServerAuthoritative: true,
 	})
+	s.recordBattleAuditOutcomeLocked("battle_result", err)
 }
 
 func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
 	if s.battleAuditRepo == nil || replay == nil || replay.ReplayID == "" {
 		return
 	}
-	_ = s.battleAuditRepo.RecordReplayAudit(ReplayAuditRecord{
+	err := s.battleAuditRepo.RecordReplayAudit(ReplayAuditRecord{
 		ReplayID:            replay.ReplayID,
 		MatchID:             replay.MatchID,
 		UserID:              replay.UserID,
@@ -4396,6 +4416,33 @@ func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
 		SettledAt:           replay.SettledAt,
 		ServerAuthoritative: true,
 	})
+	s.recordBattleAuditOutcomeLocked("replay", err)
+}
+
+func (s *Service) recordBattleAuditOutcomeLocked(operation string, err error) {
+	s.battleAuditStatus.Configured = s.battleAuditRepo != nil
+	s.battleAuditStatus.ServerAuthoritative = true
+	if err != nil {
+		s.battleAuditStatus.OK = false
+		s.battleAuditStatus.RejectedRecords++
+		s.battleAuditStatus.LastErrorOperation = operation
+		s.battleAuditStatus.LastError = err.Error()
+		s.battleAuditStatus.LastErrorAt = s.clock()
+		return
+	}
+	switch operation {
+	case "match_allocation":
+		s.battleAuditStatus.AllocationRecords++
+	case "battle_ticket":
+		s.battleAuditStatus.TicketRecords++
+	case "battle_result":
+		s.battleAuditStatus.ResultRecords++
+	case "replay":
+		s.battleAuditStatus.ReplayRecords++
+	}
+	if s.battleAuditStatus.Configured {
+		s.battleAuditStatus.OK = s.battleAuditStatus.LastError == ""
+	}
 }
 
 func validateSignedBattleResultShape(signed SignedBattleResult, now time.Time) error {

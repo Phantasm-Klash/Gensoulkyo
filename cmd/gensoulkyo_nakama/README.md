@@ -12,3 +12,5 @@ go build -tags nakama -buildmode=plugin -o gensoulkyo.so ./cmd/gensoulkyo_nakama
 ```
 
 The binding is intentionally thin: Nakama SDK context/session extraction and JSON payload wrapping happen here; security checks, audit snapshots, and business dispatch stay in `runtime/nakamaapi`.
+
+When Nakama supplies a real `*sql.DB`, the module wires both `security.NewSQLBusinessEnvelopeAuditSink` and `core.NewSQLBattleLifecycleAuditRepository`. The authenticated `battle.audit.status` RPC reports whether match allocation, battle ticket, result, and replay audit writes are durably configured and whether any repository write has failed.

@@ -32,6 +32,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"rooms.chat",
 		"rooms.announcement",
 		"match.ready",
+		"battle.audit.status",
 		"battle.allocation",
 		"battle.ticket",
 		"battle.result.submit",
