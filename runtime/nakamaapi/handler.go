@@ -289,6 +289,8 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(message.SessionID, matchID) })
+	case "battle.servers":
+		return successResponse(handler.service.BattleServers())
 	case "battle.allocation":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleAllocation(message.SessionID, matchID) })

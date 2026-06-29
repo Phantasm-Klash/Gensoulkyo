@@ -266,11 +266,34 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		t.Fatalf("room rules missing protocol fields: %+v", rulesPayload)
 	}
 
+	battleServersMissingEnvelope := handler.HandleWSSMessage(WSSMessage{
+		Name:      "battle.servers",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload:   map[string]any{},
+	})
+	if battleServersMissingEnvelope.OK || battleServersMissingEnvelope.Status != 400 || battleServersMissingEnvelope.ErrorCode != CodeBusinessEnvelopeRequired {
+		t.Fatalf("battle server WSS discovery must require envelope, got %+v", battleServersMissingEnvelope)
+	}
+	battleServers := handler.HandleWSSMessage(WSSMessage{
+		Name:      "battle.servers",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload:   envelopePayload(3, "nonce-room-battle-servers", "battle_servers", map[string]any{}),
+	})
+	if !battleServers.OK || battleServers.Status != 200 {
+		t.Fatalf("battle server WSS discovery failed: %+v", battleServers)
+	}
+	serverList := battleServers.Payload.(*core.BattleServerListResponse)
+	if !serverList.OK || len(serverList.Servers) == 0 || !serverList.ServerAuthoritative {
+		t.Fatalf("battle server WSS discovery payload invalid: %+v", serverList)
+	}
+
 	joined := handler.HandleWSSMessage(WSSMessage{
 		Name:      "rooms.join",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(3, "nonce-room-join", "rooms_join", map[string]any{
+		Payload: envelopePayload(4, "nonce-room-join", "rooms_join", map[string]any{
 			"room_code":      createPayload.RoomCode,
 			"mode_id":        "world_boss",
 			"active_deck_id": "guest_lobby_deck",
@@ -289,7 +312,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		Name:      "rooms.message",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(4, "nonce-room-chat", "rooms_message", map[string]any{
+		Payload: envelopePayload(5, "nonce-room-chat", "rooms_message", map[string]any{
 			"room_code":  createPayload.RoomCode,
 			"message_id": "guest-chat-rpc-1",
 			"kind":       "chat",
@@ -309,7 +332,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		Name:      "rooms.message",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(5, "nonce-room-chat-duplicate", "rooms_message", map[string]any{
+		Payload: envelopePayload(6, "nonce-room-chat-duplicate", "rooms_message", map[string]any{
 			"room_code":  createPayload.RoomCode,
 			"message_id": "guest-chat-rpc-1",
 			"kind":       "chat",
@@ -324,7 +347,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		Name:      "rooms.message",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(6, "nonce-room-chat-authority", "rooms_message", map[string]any{
+		Payload: envelopePayload(7, "nonce-room-chat-authority", "rooms_message", map[string]any{
 			"room_code":  createPayload.RoomCode,
 			"message_id": "guest-chat-bad",
 			"kind":       "chat",
@@ -355,7 +378,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		Name:      "rooms.leave",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(7, "nonce-room-leave", "rooms_leave", map[string]any{
+		Payload: envelopePayload(8, "nonce-room-leave", "rooms_leave", map[string]any{
 			"room_code": createPayload.RoomCode,
 		}),
 	})
@@ -371,7 +394,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		ID:        "rooms.create",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(8, "nonce-room-forbidden", "rooms_create", map[string]any{
+		Payload: envelopePayload(9, "nonce-room-forbidden", "rooms_create", map[string]any{
 			"mode_id":        "world_boss",
 			"active_deck_id": "bad_lobby_deck",
 			"deck_snapshot":  deckPayload("bad_lobby_deck"),

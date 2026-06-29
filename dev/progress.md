@@ -105,3 +105,9 @@ Status date: 2026-06-28
 - Added SDK-neutral Nakama business WSS dispatch for `matchmaking.ticket`, matching the existing RPC route so room and match progress polling can stay on the intended business socket path.
 - Extended Nakama adapter regressions to prove WSS ticket polling requires the shared business envelope, returns the server-owned match allocation and signed battle ticket, and does not create fake audit progress when durable lobby repositories are not configured.
 - Extended the DB-backed handler regression so configured SQL repositories record WSS room-ticket polling as the existing `ticket_read` lobby lifecycle audit, with status fingerprints reflecting the durable read.
+
+## 2026-06-29 gensoulkyo-lobby WSS battle server discovery update
+
+- Added SDK-neutral Nakama business WSS dispatch for `battle.servers`, matching the existing RPC route so lobby clients can inspect server-authoritative battle server discovery through the business socket path.
+- Extended Nakama lobby adapter coverage to prove WSS battle server discovery is business-envelope protected and returns a server-authoritative `BattleServerListResponse`.
+- This remains discovery/status parity only: allocation, ticket issuance, and result submission authority are unchanged, and client-origin result submission remains rejected.
