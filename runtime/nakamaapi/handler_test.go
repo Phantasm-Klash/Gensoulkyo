@@ -888,12 +888,25 @@ func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T
 	if heartbeatStatus.Endpoint != "127.0.0.1:7997" || heartbeatStatus.Region != "local" || heartbeatStatus.BuildID != "nakama-service-test" || heartbeatStatus.ActiveMatches != 2 || heartbeatStatus.Load != 0.5 || !heartbeatStatus.ServerAuthoritative {
 		t.Fatalf("heartbeat should preserve server metadata while updating load: %+v", heartbeatStatus)
 	}
+	audit := handler.HandleRPC(RPCRequest{
+		ID:        "battle.audit.status",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(2, "nonce-battle-register-audit", "battle_audit_status", map[string]any{}),
+	})
+	if !audit.OK {
+		t.Fatalf("battle audit status failed: %+v", audit)
+	}
+	auditStatus := audit.Payload.(core.BattleLifecycleAuditStatus)
+	if auditStatus.Configured || auditStatus.ServerLifecycleRecords != 0 || !auditStatus.ServerAuthoritative {
+		t.Fatalf("unconfigured handler should not fake durable lifecycle audit writes: %+v", auditStatus)
+	}
 
 	servers := handler.HandleRPC(RPCRequest{
 		ID:        "battle.servers",
 		SessionID: session.SessionToken,
 		UserID:    session.UserID,
-		Payload:   envelopePayload(2, "nonce-public-battle-list", "battle_servers", map[string]any{}),
+		Payload:   envelopePayload(3, "nonce-public-battle-list", "battle_servers", map[string]any{}),
 	})
 	if !servers.OK || servers.Status != 200 {
 		t.Fatalf("public battle server list failed: %+v", servers)
@@ -921,6 +934,37 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	handler, err := NewWithDatabase(db)
 	if err != nil {
 		t.Fatal(err)
+	}
+	registered := handler.HandleRPC(RPCRequest{
+		ID:      "battle.servers.register",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "nakama-sql-battle",
+			"endpoint":         "127.0.0.1:7907",
+			"region":           "local",
+			"build_id":         "nakama-sql-test",
+			"capacity":         4,
+			"active_matches":   0,
+			"load":             0,
+			"status":           "online",
+			"supported_modes":  []any{"pvp_duel"},
+		},
+	})
+	if !registered.OK {
+		t.Fatalf("service-origin battle server registration failed: %+v", registered)
+	}
+	heartbeat := handler.HandleRPC(RPCRequest{
+		ID:      "battle.servers.heartbeat",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "nakama-sql-battle",
+			"active_matches":   0,
+			"load":             0,
+			"status":           "online",
+		},
+	})
+	if !heartbeat.OK {
+		t.Fatalf("service-origin battle server heartbeat failed: %+v", heartbeat)
 	}
 	hostLogin := handler.HandleRPC(RPCRequest{
 		ID:      "auth.anonymous",
@@ -1091,7 +1135,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
 	}
-	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.ServerLifecycleRecords != 2 || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("battle audit status should reflect SQL repository writes: %+v", status)
 	}
 	lobbyStatus := handler.HandleWSSMessage(WSSMessage{
@@ -1108,8 +1152,11 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 9 || tableCounts["lobby_room_audits"] != 4 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 1 || tableCounts["replay_audits"] != 2 {
+	if tableCounts["business_envelope_audits"] < 9 || tableCounts["lobby_room_audits"] != 4 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 3 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 1 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
+	}
+	if !nakamaSQLHasBattleServerLifecycleAudits() {
+		t.Fatalf("expected service-origin battle server lifecycle audit rows: calls=%+v", nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasDuplicateLobbyMessageAudit() {
 		t.Fatalf("expected duplicate lobby message audit row: calls=%+v", nakamaSQLCaptureCalls())
@@ -1352,6 +1399,26 @@ func nakamaSQLHasDuplicateLobbyMessageAudit() bool {
 		}
 	}
 	return false
+}
+
+func nakamaSQLHasBattleServerLifecycleAudits() bool {
+	foundRegister := false
+	foundHeartbeat := false
+	for _, call := range nakamaSQLCaptureCalls() {
+		if !strings.Contains(call.query, "INSERT INTO match_allocation_audits") || len(call.args) < 14 {
+			continue
+		}
+		if call.args[0] != "battle-server:nakama-sql-battle" || call.args[2] != "nakama-sql-battle" || call.args[12] != true {
+			continue
+		}
+		switch call.args[11] {
+		case "server_registered":
+			foundRegister = true
+		case "server_heartbeat":
+			foundHeartbeat = true
+		}
+	}
+	return foundRegister && foundHeartbeat
 }
 
 type nakamaSQLCaptureDriver struct{}

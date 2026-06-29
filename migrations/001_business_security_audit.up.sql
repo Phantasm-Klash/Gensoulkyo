@@ -111,12 +111,13 @@ CREATE TABLE IF NOT EXISTS match_allocation_audits (
     server_seed_hash TEXT NOT NULL,
     player_count INTEGER NOT NULL,
     allocation_json JSONB NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled')) DEFAULT 'allocated',
+    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled', 'server_registered', 'server_heartbeat')) DEFAULT 'allocated',
     server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_match_allocation_audit_match
-    ON match_allocation_audits (match_id);
+    ON match_allocation_audits (match_id)
+    WHERE status = 'allocated';
 
 CREATE INDEX IF NOT EXISTS ix_match_allocation_audit_server_time
     ON match_allocation_audits (battle_server_id, created_at DESC);

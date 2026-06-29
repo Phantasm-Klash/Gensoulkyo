@@ -131,3 +131,9 @@ Status date: 2026-06-28
 - Documented the profile in `cmd/gensoulkyo_nakama/README.md` so SDK tag-build validation no longer requires editing in-scope files or leaving `go.mod`/`go.sum` changes behind; the compose service now forwards `GOSUMDB` alongside `GOPROXY` so restricted fallback runners can use explicit module-fetch overrides.
 - Validated the real Nakama tag-build path in Docker with the pinned SDK baseline: the default `proxy.golang.org` and direct checksum paths timed out on external module fetches, then `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build` completed `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` and `go build -tags nakama -buildmode=plugin`.
 - Added default source-shape coverage that pins the compose profile, README fallback command, and temporary SDK pin contract while the durable `go.mod`/`go.sum` Nakama dependency remains outside this scope's allowed paths.
+
+## 2026-06-29 gensoulkyo-lobby battle server lifecycle audit update
+
+- Added PostgreSQL-compatible audit records for service-origin Nakama `battle.servers.register` and `battle.servers.heartbeat` callbacks using the existing battle lifecycle repository path.
+- Extended `BattleLifecycleAuditStatus` with `server_lifecycle_records` so operators can distinguish battle gateway registration/heartbeat writes from match allocation, ticket, result, and replay audit rows.
+- Kept the boundary closed to clients: public/miswired Nakama RPC calls still require service origin and cannot become combat authority or settlement authority.

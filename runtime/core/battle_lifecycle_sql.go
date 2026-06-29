@@ -24,7 +24,7 @@ INSERT INTO match_allocation_audits (
     created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14
-) ON CONFLICT (match_id) DO NOTHING`
+) ON CONFLICT DO NOTHING`
 
 const insertBattleTicketAuditSQL = `
 INSERT INTO battle_ticket_audits (

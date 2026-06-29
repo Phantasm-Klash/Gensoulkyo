@@ -657,6 +657,14 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	}); err != nil {
 		t.Fatalf("register battle server: %v", err)
 	}
+	if _, err := service.BattleServerHeartbeat(BattleServerHeartbeatRequest{
+		BattleServerID: "audit-battle-dev",
+		ActiveMatches:  0,
+		Load:           0,
+		Status:         "online",
+	}); err != nil {
+		t.Fatalf("battle server heartbeat: %v", err)
+	}
 	alice := mustLogin(t, service, "Audit Alice")
 	bob := mustLogin(t, service, "Audit Bob")
 	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
@@ -667,10 +675,16 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	if allocation.BattleServerID != "audit-battle-dev" {
 		t.Fatalf("expected audit battle server: %+v", allocation)
 	}
-	if len(repo.allocations) != 1 {
+	if len(repo.allocations) != 3 {
 		t.Fatalf("expected one allocation audit, got %+v", repo.allocations)
 	}
-	allocationAudit := repo.allocations[0]
+	if repo.allocations[0].Status != "server_registered" || repo.allocations[0].MatchID != "battle-server:audit-battle-dev" || repo.allocations[0].ModeID != "battle_server_lifecycle" || repo.allocations[0].PlayerCount != 0 || repo.allocations[0].AllocationJSON == "" {
+		t.Fatalf("registration audit invalid: %+v", repo.allocations[0])
+	}
+	if repo.allocations[1].Status != "server_heartbeat" || repo.allocations[1].MatchID != "battle-server:audit-battle-dev" || repo.allocations[1].PlayerCount != 0 || repo.allocations[1].AllocationJSON == "" {
+		t.Fatalf("heartbeat audit invalid: %+v", repo.allocations[1])
+	}
+	allocationAudit := repo.allocations[2]
 	if allocationAudit.MatchID != matchID || allocationAudit.ModeID != "pvp_duel" || allocationAudit.BattleServerID != "audit-battle-dev" || allocationAudit.PlayerCount != 2 || allocationAudit.AllocationJSON == "" {
 		t.Fatalf("allocation audit invalid: %+v", allocationAudit)
 	}
@@ -714,7 +728,7 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 		}
 	}
 	status := service.BattleLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.ServerLifecycleRecords != 2 || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("audit status did not account successful lifecycle writes: %+v", status)
 	}
 	if status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {

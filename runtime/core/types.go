@@ -87,6 +87,7 @@ type Config struct {
 type BattleLifecycleAuditStatus struct {
 	OK                     bool      `json:"ok"`
 	Configured             bool      `json:"configured"`
+	ServerLifecycleRecords int       `json:"server_lifecycle_records"`
 	AllocationRecords      int       `json:"allocation_records"`
 	TicketRecords          int       `json:"ticket_records"`
 	ResultRecords          int       `json:"result_records"`

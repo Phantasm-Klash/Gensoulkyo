@@ -1839,6 +1839,7 @@ func (s *Service) RegisterBattleServer(req RegisterBattleServerRequest) (*Battle
 	if err != nil {
 		return nil, err
 	}
+	s.recordBattleServerLifecycleAuditLocked(server, "server_registered")
 	status := battleServerStatusFromState(server)
 	return &status, nil
 }
@@ -1851,6 +1852,7 @@ func (s *Service) BattleServerHeartbeat(req BattleServerHeartbeatRequest) (*Batt
 	if err != nil {
 		return nil, err
 	}
+	s.recordBattleServerLifecycleAuditLocked(server, "server_heartbeat")
 	status := battleServerStatusFromState(server)
 	return &status, nil
 }
@@ -4417,6 +4419,47 @@ func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAlloc
 	s.recordBattleAuditOutcomeLocked("match_allocation", fingerprint, allocation.AllocatedAt, err)
 }
 
+func (s *Service) recordBattleServerLifecycleAuditLocked(server *battleServerState, status string) {
+	if s.battleAuditRepo == nil || server == nil || server.BattleServerID == "" {
+		return
+	}
+	now := s.clock()
+	metadata := map[string]any{
+		"battle_server_id": server.BattleServerID,
+		"endpoint":         server.Endpoint,
+		"region":           server.Region,
+		"build_id":         server.BuildID,
+		"capacity":         server.Capacity,
+		"active_matches":   server.ActiveMatches,
+		"load":             server.Load,
+		"status":           server.Status,
+		"supported_modes":  append([]string{}, server.SupportedModes...),
+		"last_seen_at":     server.LastSeenAt,
+	}
+	metadataJSON := "{}"
+	if encoded, err := json.Marshal(metadata); err == nil {
+		metadataJSON = string(encoded)
+	}
+	err := s.battleAuditRepo.RecordMatchAllocationAudit(BattleAllocationAuditRecord{
+		MatchID:             "battle-server:" + server.BattleServerID,
+		ModeID:              "battle_server_lifecycle",
+		BattleServerID:      server.BattleServerID,
+		Endpoint:            server.Endpoint,
+		Region:              server.Region,
+		ProtocolVersion:     fmt.Sprintf("%d", ProtocolVersion),
+		RulesetVersion:      RulesetVersion,
+		ModeConfigHash:      "sha256:" + shortHash(strings.Join(server.SupportedModes, ",")),
+		ServerSeedHash:      "sha256:" + shortHash(server.BuildID+"|"+server.Endpoint+"|"+server.Region),
+		PlayerCount:         server.ActiveMatches,
+		AllocationJSON:      metadataJSON,
+		Status:              status,
+		CreatedAt:           now,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:server", status, server.BattleServerID, server.Endpoint, server.BuildID, fmt.Sprintf("%d", server.ActiveMatches), fmt.Sprintf("%.3f", server.Load))
+	s.recordBattleAuditOutcomeLocked(status, fingerprint, now, err)
+}
+
 func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
 		return
@@ -4657,6 +4700,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		return
 	}
 	switch operation {
+	case "server_registered", "server_heartbeat":
+		s.battleAuditStatus.ServerLifecycleRecords++
 	case "match_allocation":
 		s.battleAuditStatus.AllocationRecords++
 	case "battle_ticket":
