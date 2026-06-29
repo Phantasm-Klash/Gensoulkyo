@@ -24,6 +24,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"nakamaapi.NewWithDatabase",
 		"runtime.RUNTIME_CTX_SESSION_ID",
 		"runtime.RUNTIME_CTX_USER_ID",
+		"runtime.RUNTIME_CTX_MODE",
 		"PayloadError: payloadError(payload)",
 		"auth.anonymous",
 		"bootstrap",
@@ -112,13 +113,20 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 		t.Fatalf("read module source: %v", err)
 	}
 	text := string(source)
-	for _, forbidden := range []string{
-		"Service: true",
-		"Service:true",
-		"Service:     true",
+	if strings.Contains(text, "Service: true") || strings.Contains(text, "Service:true") {
+		t.Fatalf("public Nakama RPC binding must not mark every RPC as service-origin")
+	}
+	for _, expected := range []string{
+		"Service:      isServiceOriginRPC(ctx, rpcID)",
+		"var serviceOriginRPCIDs = map[string]struct{}",
+		"func isServiceOriginRPC(ctx context.Context, rpcID string) bool",
+		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID) != \"\"",
+		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID) != \"\"",
+		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)",
+		"mode != \"\" && mode != \"client\"",
 	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("public Nakama RPC binding must not mark client RPCs as service-origin; found %q", forbidden)
+		if !strings.Contains(text, expected) {
+			t.Fatalf("Nakama binding service-origin gate missing %q", expected)
 		}
 	}
 	if !strings.Contains(text, "NewWithDatabase(db)") {
@@ -141,6 +149,9 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	} {
 		if !strings.Contains(text, serviceRPC) {
 			t.Fatalf("Nakama binding must register service-origin RPC %q", serviceRPC)
+		}
+		if !strings.Contains(text, "\""+serviceRPC+"\":") {
+			t.Fatalf("Nakama binding must explicitly allowlist service-origin RPC %q", serviceRPC)
 		}
 	}
 }

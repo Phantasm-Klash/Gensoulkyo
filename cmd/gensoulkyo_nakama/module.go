@@ -51,6 +51,13 @@ var rpcIDs = []string{
 	"battle.result.submit",
 }
 
+var serviceOriginRPCIDs = map[string]struct{}{
+	"battle.servers.register":  {},
+	"battle.servers.heartbeat": {},
+	"battle.servers.offline":   {},
+	"battle.result.submit":     {},
+}
+
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	handler := nakamaapi.New(nil)
 	if db != nil {
@@ -68,6 +75,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 				SessionID:    runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID),
 				UserID:       runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID),
 				DisplayName:  runtimeCtxString(ctx, runtime.RUNTIME_CTX_USERNAME),
+				Service:      isServiceOriginRPC(ctx, rpcID),
 				Payload:      decodedPayload(payload),
 				PayloadError: payloadError(payload),
 			})
@@ -80,6 +88,17 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		logger.Info("Gensoulkyo Nakama runtime registered %d RPC handlers", len(rpcIDs))
 	}
 	return nil
+}
+
+func isServiceOriginRPC(ctx context.Context, rpcID string) bool {
+	if _, ok := serviceOriginRPCIDs[rpcID]; !ok {
+		return false
+	}
+	if runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID) != "" || runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID) != "" {
+		return false
+	}
+	mode := strings.ToLower(strings.TrimSpace(runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)))
+	return mode != "" && mode != "client"
 }
 
 func decodePayload(payload string) map[string]any {
