@@ -40,6 +40,7 @@ var rpcIDs = []string{
 	"activity.claim",
 	"battle.servers.register",
 	"battle.servers.heartbeat",
+	"battle.servers.offline",
 	"battle.servers",
 	"business.envelope.audit.status",
 	"battle.audit.status",

@@ -1857,6 +1857,30 @@ func (s *Service) BattleServerHeartbeat(req BattleServerHeartbeatRequest) (*Batt
 	return &status, nil
 }
 
+func (s *Service) BattleServerOffline(req BattleServerOfflineRequest) (*BattleServerStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	serverID := strings.TrimSpace(req.BattleServerID)
+	if serverID == "" {
+		return nil, newError(codeInvalidRequest, "battle_server_id is required")
+	}
+	server, ok := s.battleServers[serverID]
+	if !ok || server == nil {
+		return nil, newError(codeNotFound, "battle server %q not found", serverID)
+	}
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = "offline"
+	}
+	server.Status = status
+	server.Load = 0
+	server.LastSeenAt = s.clock()
+	s.recordBattleServerLifecycleAuditLocked(server, "server_offline")
+	out := battleServerStatusFromState(server)
+	return &out, nil
+}
+
 func (s *Service) BattleServers() *BattleServerListResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -4700,7 +4724,7 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		return
 	}
 	switch operation {
-	case "server_registered", "server_heartbeat":
+	case "server_registered", "server_heartbeat", "server_offline":
 		s.battleAuditStatus.ServerLifecycleRecords++
 	case "match_allocation":
 		s.battleAuditStatus.AllocationRecords++

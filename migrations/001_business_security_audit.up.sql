@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS match_allocation_audits (
     server_seed_hash TEXT NOT NULL,
     player_count INTEGER NOT NULL,
     allocation_json JSONB NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled', 'server_registered', 'server_heartbeat')) DEFAULT 'allocated',
+    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled', 'server_registered', 'server_heartbeat', 'server_offline')) DEFAULT 'allocated',
     server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
 );
 

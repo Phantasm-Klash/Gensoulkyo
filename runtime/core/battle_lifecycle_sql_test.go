@@ -31,7 +31,7 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	if !strings.Contains(upSQL, "'client-dev-key'") {
 		t.Fatalf("migration must seed client-dev-key so Nakama RPC/WSS envelope audit tests satisfy the key foreign key")
 	}
-	for _, status := range []string{"'server_registered'", "'server_heartbeat'"} {
+	for _, status := range []string{"'server_registered'", "'server_heartbeat'", "'server_offline'"} {
 		if !strings.Contains(upSQL, status) {
 			t.Fatalf("match allocation audit migration must allow battle server lifecycle status %s", status)
 		}

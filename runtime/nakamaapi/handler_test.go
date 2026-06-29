@@ -811,7 +811,7 @@ func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *
 	}
 }
 
-func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T) {
+func TestNakamaBattleServerRegisterHeartbeatAndOfflineRequireServiceOrigin(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	login := handler.HandleRPC(RPCRequest{
 		ID:      "auth.anonymous",
@@ -836,6 +836,17 @@ func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T
 	if publicRegister.OK || publicRegister.Status != 403 || publicRegister.ErrorCode != CodeServiceOriginRequired {
 		t.Fatalf("public battle server registration must require service origin, got %+v", publicRegister)
 	}
+	publicOffline := handler.HandleRPC(RPCRequest{
+		ID:        "battle.servers.offline",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload: envelopePayload(2, "nonce-public-battle-offline", "battle_servers_offline", map[string]any{
+			"battle_server_id": "public-battle-server",
+		}),
+	})
+	if publicOffline.OK || publicOffline.Status != 403 || publicOffline.ErrorCode != CodeServiceOriginRequired {
+		t.Fatalf("public battle server offline must require service origin, got %+v", publicOffline)
+	}
 
 	miswiredRegister := handler.HandleRPC(RPCRequest{
 		ID:        "battle.servers.register",
@@ -846,6 +857,16 @@ func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T
 	})
 	if miswiredRegister.OK || miswiredRegister.Status != 403 || miswiredRegister.ErrorCode != CodeServiceOriginRequired {
 		t.Fatalf("service-origin battle server registration must not include player context, got %+v", miswiredRegister)
+	}
+	miswiredOffline := handler.HandleRPC(RPCRequest{
+		ID:        "battle.servers.offline",
+		Service:   true,
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   map[string]any{"battle_server_id": "miswired-battle-server"},
+	})
+	if miswiredOffline.OK || miswiredOffline.Status != 403 || miswiredOffline.ErrorCode != CodeServiceOriginRequired {
+		t.Fatalf("service-origin battle server offline must not include player context, got %+v", miswiredOffline)
 	}
 
 	registered := handler.HandleRPC(RPCRequest{
@@ -888,11 +909,25 @@ func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T
 	if heartbeatStatus.Endpoint != "127.0.0.1:7997" || heartbeatStatus.Region != "local" || heartbeatStatus.BuildID != "nakama-service-test" || heartbeatStatus.ActiveMatches != 2 || heartbeatStatus.Load != 0.5 || !heartbeatStatus.ServerAuthoritative {
 		t.Fatalf("heartbeat should preserve server metadata while updating load: %+v", heartbeatStatus)
 	}
+	offline := handler.HandleRPC(RPCRequest{
+		ID:      "battle.servers.offline",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "nakama-service-battle",
+		},
+	})
+	if !offline.OK || offline.Status != 200 {
+		t.Fatalf("service-origin battle server offline failed: %+v", offline)
+	}
+	offlineStatus := offline.Payload.(*core.BattleServerStatus)
+	if offlineStatus.Status != "offline" || offlineStatus.Load != 0 || offlineStatus.Endpoint != "127.0.0.1:7997" || !offlineStatus.ServerAuthoritative {
+		t.Fatalf("offline should preserve server metadata and mark unavailable: %+v", offlineStatus)
+	}
 	audit := handler.HandleRPC(RPCRequest{
 		ID:        "battle.audit.status",
 		SessionID: session.SessionToken,
 		UserID:    session.UserID,
-		Payload:   envelopePayload(2, "nonce-battle-register-audit", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(3, "nonce-battle-register-audit", "battle_audit_status", map[string]any{}),
 	})
 	if !audit.OK {
 		t.Fatalf("battle audit status failed: %+v", audit)
@@ -906,7 +941,7 @@ func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T
 		ID:        "battle.servers",
 		SessionID: session.SessionToken,
 		UserID:    session.UserID,
-		Payload:   envelopePayload(3, "nonce-public-battle-list", "battle_servers", map[string]any{}),
+		Payload:   envelopePayload(4, "nonce-public-battle-list", "battle_servers", map[string]any{}),
 	})
 	if !servers.OK || servers.Status != 200 {
 		t.Fatalf("public battle server list failed: %+v", servers)
@@ -914,7 +949,7 @@ func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T
 	list := servers.Payload.(*core.BattleServerListResponse)
 	found := false
 	for _, server := range list.Servers {
-		if server.BattleServerID == "nakama-service-battle" && server.ActiveMatches == 2 && server.Load == 0.5 {
+		if server.BattleServerID == "nakama-service-battle" && server.ActiveMatches == 2 && server.Load == 0 && server.Status == "offline" {
 			found = true
 		}
 	}
@@ -965,6 +1000,34 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	})
 	if !heartbeat.OK {
 		t.Fatalf("service-origin battle server heartbeat failed: %+v", heartbeat)
+	}
+	offline := handler.HandleRPC(RPCRequest{
+		ID:      "battle.servers.offline",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "nakama-sql-battle",
+		},
+	})
+	if !offline.OK {
+		t.Fatalf("service-origin battle server offline failed: %+v", offline)
+	}
+	registeredAgain := handler.HandleRPC(RPCRequest{
+		ID:      "battle.servers.register",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "nakama-sql-battle-active",
+			"endpoint":         "127.0.0.1:7908",
+			"region":           "local",
+			"build_id":         "nakama-sql-active",
+			"capacity":         4,
+			"active_matches":   0,
+			"load":             0,
+			"status":           "online",
+			"supported_modes":  []any{"pvp_duel"},
+		},
+	})
+	if !registeredAgain.OK {
+		t.Fatalf("service-origin replacement battle server registration failed: %+v", registeredAgain)
 	}
 	hostLogin := handler.HandleRPC(RPCRequest{
 		ID:      "auth.anonymous",
@@ -1135,7 +1198,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
 	}
-	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.ServerLifecycleRecords != 2 || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.ServerLifecycleRecords != 4 || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("battle audit status should reflect SQL repository writes: %+v", status)
 	}
 	lobbyStatus := handler.HandleWSSMessage(WSSMessage{
@@ -1152,7 +1215,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 9 || tableCounts["lobby_room_audits"] != 4 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 3 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 1 || tableCounts["replay_audits"] != 2 {
+	if tableCounts["business_envelope_audits"] < 9 || tableCounts["lobby_room_audits"] != 4 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 1 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasBattleServerLifecycleAudits() {
@@ -1404,6 +1467,7 @@ func nakamaSQLHasDuplicateLobbyMessageAudit() bool {
 func nakamaSQLHasBattleServerLifecycleAudits() bool {
 	foundRegister := false
 	foundHeartbeat := false
+	foundOffline := false
 	for _, call := range nakamaSQLCaptureCalls() {
 		if !strings.Contains(call.query, "INSERT INTO match_allocation_audits") || len(call.args) < 14 {
 			continue
@@ -1416,9 +1480,11 @@ func nakamaSQLHasBattleServerLifecycleAudits() bool {
 			foundRegister = true
 		case "server_heartbeat":
 			foundHeartbeat = true
+		case "server_offline":
+			foundOffline = true
 		}
 	}
-	return foundRegister && foundHeartbeat
+	return foundRegister && foundHeartbeat && foundOffline
 }
 
 type nakamaSQLCaptureDriver struct{}

@@ -453,6 +453,61 @@ func TestBattleAllocationFallbackAccountsServerLoad(t *testing.T) {
 	}
 }
 
+func TestBattleServerOfflineLifecycleSkipsFutureAllocations(t *testing.T) {
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{BattleLifecycleAuditRepo: repo})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-offline-a",
+		Endpoint:       "127.0.0.1:7911",
+		Region:         "local",
+		BuildID:        "offline-a",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register offline candidate: %v", err)
+	}
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-online-b",
+		Endpoint:       "127.0.0.1:7912",
+		Region:         "local",
+		BuildID:        "online-b",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register online candidate: %v", err)
+	}
+	offline, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "pvp-offline-a"})
+	if err != nil {
+		t.Fatalf("offline battle server: %v", err)
+	}
+	if offline.Status != "offline" || offline.Load != 0 || !offline.ServerAuthoritative {
+		t.Fatalf("offline status invalid: %+v", offline)
+	}
+
+	alice := mustLogin(t, service, "Offline Alice")
+	bob := mustLogin(t, service, "Offline Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation after offline: %v", err)
+	}
+	if allocation.BattleServerID != "pvp-online-b" {
+		t.Fatalf("offline server must be skipped for future allocations: %+v", allocation)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ServerLifecycleRecords != 3 || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.LastSuccessOperation == "" {
+		t.Fatalf("offline lifecycle audit status invalid: %+v", status)
+	}
+	if len(repo.allocations) != 4 || repo.allocations[2].Status != "server_offline" || repo.allocations[2].BattleServerID != "pvp-offline-a" {
+		t.Fatalf("expected register/register/offline/allocation audit records, got %+v", repo.allocations)
+	}
+	if _, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "missing-battle"}); ErrorCode(err) != codeNotFound {
+		t.Fatalf("missing offline should be not_found, got %v", err)
+	}
+}
+
 func TestPvPDuelModeContractAllocationAndSettlement(t *testing.T) {
 	now := time.Date(2026, 6, 27, 11, 0, 0, 0, time.UTC)
 	service := NewService(Config{Clock: func() time.Time { return now }})

@@ -137,3 +137,9 @@ Status date: 2026-06-28
 - Added PostgreSQL-compatible audit records for service-origin Nakama `battle.servers.register` and `battle.servers.heartbeat` callbacks using the existing battle lifecycle repository path.
 - Extended `BattleLifecycleAuditStatus` with `server_lifecycle_records` so operators can distinguish battle gateway registration/heartbeat writes from match allocation, ticket, result, and replay audit rows.
 - Kept the boundary closed to clients: public/miswired Nakama RPC calls still require service origin and cannot become combat authority or settlement authority.
+
+## 2026-06-29 gensoulkyo-lobby battle server offline lifecycle update
+
+- Added a service-origin-only `battle.servers.offline` Nakama RPC path that marks an existing battle server unavailable, preserves its discovery metadata, resets reported load, and keeps future allocations on online servers.
+- Recorded offline transitions through the same PostgreSQL-compatible battle lifecycle audit repository and migration status constraint as register/heartbeat callbacks.
+- Kept public/client calls fail-closed: authenticated players can still read `battle.servers` through the business envelope guard, but cannot register, heartbeat, offline, or submit settlement callbacks.

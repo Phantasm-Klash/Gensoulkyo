@@ -261,6 +261,11 @@ type BattleServerHeartbeatRequest struct {
 	SupportedModes []string `json:"supported_modes,omitempty"`
 }
 
+type BattleServerOfflineRequest struct {
+	BattleServerID string `json:"battle_server_id"`
+	Status         string `json:"status,omitempty"`
+}
+
 type BattleServerStatus struct {
 	OK                  bool      `json:"ok"`
 	BattleServerID      string    `json:"battle_server_id"`

@@ -209,6 +209,12 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.BattleServerHeartbeat(req) })
+	case "battle.servers.offline":
+		var req core.BattleServerOfflineRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BattleServerOffline(req) })
 	case "battle.servers":
 		return successResponse(handler.service.BattleServers())
 	case "business.envelope.audit.status":
@@ -451,7 +457,7 @@ func rpcSkipsEnvelope(rpcID string) bool {
 
 func rpcRequiresServiceOrigin(rpcID string) bool {
 	switch rpcID {
-	case "battle.result.submit", "battle.servers.register", "battle.servers.heartbeat":
+	case "battle.result.submit", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline":
 		return true
 	default:
 		return false

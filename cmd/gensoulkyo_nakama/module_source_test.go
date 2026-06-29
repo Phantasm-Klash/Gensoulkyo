@@ -37,6 +37,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"match.ready",
 		"battle.servers.register",
 		"battle.servers.heartbeat",
+		"battle.servers.offline",
 		"business.envelope.audit.status",
 		"battle.audit.status",
 		"lobby.audit.status",
@@ -83,6 +84,7 @@ func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
 		"activity.claim",
 		"battle.servers.register",
 		"battle.servers.heartbeat",
+		"battle.servers.offline",
 		"battle.servers",
 		"business.envelope.audit.status",
 		"battle.audit.status",
@@ -135,6 +137,7 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 		"battle.result.submit",
 		"battle.servers.register",
 		"battle.servers.heartbeat",
+		"battle.servers.offline",
 	} {
 		if !strings.Contains(text, serviceRPC) {
 			t.Fatalf("Nakama binding must register service-origin RPC %q", serviceRPC)
