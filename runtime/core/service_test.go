@@ -760,10 +760,25 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("create room audit invalid: %+v", repo.rooms)
 	}
 
+	listed, err := service.ListRooms(guest.SessionToken)
+	if err != nil {
+		t.Fatalf("list rooms: %v", err)
+	}
+	if len(listed.Rooms) != 1 || len(repo.rooms) != 2 || repo.rooms[1].Action != "listed" || repo.rooms[1].UserID != guest.UserID {
+		t.Fatalf("list audit invalid: list=%+v audits=%+v", listed, repo.rooms)
+	}
+
+	if _, err := service.Room(guest.SessionToken, created.RoomCode); err != nil {
+		t.Fatalf("room snapshot: %v", err)
+	}
+	if len(repo.rooms) != 3 || repo.rooms[2].Action != "snapshot_read" || repo.rooms[2].UserID != guest.UserID {
+		t.Fatalf("snapshot read audit invalid: %+v", repo.rooms)
+	}
+
 	if _, err := service.RoomRules(guest.SessionToken, created.RoomCode); err != nil {
 		t.Fatalf("room rules: %v", err)
 	}
-	if len(repo.rooms) != 2 || repo.rooms[1].Action != "rules_read" || repo.rooms[1].UserID != guest.UserID || repo.rooms[1].ModeConfigHash == "" {
+	if len(repo.rooms) != 4 || repo.rooms[3].Action != "rules_read" || repo.rooms[3].UserID != guest.UserID || repo.rooms[3].ModeConfigHash == "" {
 		t.Fatalf("rules audit invalid: %+v", repo.rooms)
 	}
 
@@ -775,7 +790,7 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if err != nil {
 		t.Fatalf("join room: %v", err)
 	}
-	if len(repo.rooms) != 3 || repo.rooms[2].Action != "joined" || repo.rooms[2].TicketID != joined.TicketID || repo.rooms[2].CurrentPlayers != 2 {
+	if len(repo.rooms) != 5 || repo.rooms[4].Action != "joined" || repo.rooms[4].TicketID != joined.TicketID || repo.rooms[4].CurrentPlayers != 2 {
 		t.Fatalf("join audit invalid: %+v", repo.rooms)
 	}
 
@@ -811,7 +826,7 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("leave audit invalid: response=%+v audit=%+v", left, lastRoomAudit)
 	}
 	status := service.LobbyLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 2 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
 	}
 }

@@ -1032,7 +1032,8 @@ func (s *Service) ListRooms(sessionToken string) (*RoomListResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
 		return nil, err
 	}
 	now := s.clock()
@@ -1046,8 +1047,10 @@ func (s *Service) ListRooms(sessionToken string) (*RoomListResponse, error) {
 	sort.Strings(codes)
 	rooms := make([]RoomSnapshot, 0, len(codes))
 	for _, roomCode := range codes {
-		if snapshot := s.roomSnapshotLocked(s.rooms[roomCode], now); snapshot.OK {
+		room := s.rooms[roomCode]
+		if snapshot := s.roomSnapshotLocked(room, now); snapshot.OK {
 			rooms = append(rooms, snapshot)
+			s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "listed", now)
 		}
 	}
 	return &RoomListResponse{
@@ -1062,14 +1065,17 @@ func (s *Service) Room(sessionToken string, roomCode string) (*RoomSnapshot, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
 		return nil, err
 	}
 	room, err := s.roomByCodeLocked(roomCode)
 	if err != nil {
 		return nil, err
 	}
-	snapshot := s.roomSnapshotLocked(room, s.clock())
+	now := s.clock()
+	snapshot := s.roomSnapshotLocked(room, now)
+	s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "snapshot_read", now)
 	return &snapshot, nil
 }
 
@@ -4541,6 +4547,8 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
 		return
 	}
 	switch operation {
+	case "listed", "snapshot_read":
+		s.lobbyAuditStatus.RoomReadRecords++
 	case "rules_read":
 		s.lobbyAuditStatus.RulesReadRecords++
 	case "message":

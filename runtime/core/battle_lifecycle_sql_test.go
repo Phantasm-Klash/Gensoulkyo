@@ -27,6 +27,11 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	if !strings.Contains(upSQL, "'dev-ed25519-0'") {
 		t.Fatalf("migration must seed dev-ed25519-0 so battle_ticket_audits.key_id foreign key can accept signed ticket audits")
 	}
+	for _, action := range []string{"'listed'", "'snapshot_read'"} {
+		if !strings.Contains(upSQL, action) {
+			t.Fatalf("lobby room audit migration must allow read action %s", action)
+		}
+	}
 	assertDownMigrationDropsTable(t, downSQL, "lobby_room_audits")
 	assertDownMigrationDropsTable(t, downSQL, "lobby_message_audits")
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")

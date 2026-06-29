@@ -109,6 +109,7 @@ type LobbyLifecycleAuditStatus struct {
 	OK                  bool      `json:"ok"`
 	Configured          bool      `json:"configured"`
 	RoomRecords         int       `json:"room_records"`
+	RoomReadRecords     int       `json:"room_read_records"`
 	RulesReadRecords    int       `json:"rules_read_records"`
 	MessageRecords      int       `json:"message_records"`
 	RejectedRecords     int       `json:"rejected_records"`

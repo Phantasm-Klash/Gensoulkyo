@@ -43,3 +43,9 @@ Status date: 2026-06-28
 - Hardened `cmd/gensoulkyo_nakama` source-shape coverage so default tests parse the build-tagged `rpcIDs` registry and require the exact lobby, battle allocation/ticket, audit status, and result-submit RPC set without duplicates.
 - Added a regression guard that the public Nakama RPC binding continues to wire Nakama `*sql.DB` through `runtime/nakamaapi.NewWithDatabase` while not marking client-origin RPC calls as service-origin.
 - Verified `go test ./...`, Docker Compose test profile, and the cross-repo protocol audit. Real `go test -tags nakama` is still blocked until the module/dependency scope can add and pin `github.com/heroiclabs/nakama-common/runtime`; current latest module metadata requires a newer Go toolchain than this runner.
+
+## 2026-06-29 gensoulkyo-lobby lobby read audit update
+
+- Added server-authoritative lobby read audit records for `rooms.list` and `rooms.get`, keeping read visibility separate from room mutation, rules-read, and message counters in `LobbyLifecycleAuditStatus`.
+- Extended the PostgreSQL lobby room audit action constraint and SQL/Nakama regression coverage so DB-backed handlers record room snapshot reads through protected RPC/WSS adapters before allocation/ticket issuance.
+- Verified `go test ./...`, `docker-compose --profile test run --rm test`, and `/root/gotouhou/docs/ops/protocol_audit_check.py`; `go test -tags nakama ./cmd/gensoulkyo_nakama` remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration.

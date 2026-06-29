@@ -640,11 +640,23 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	room := created.Payload.(*core.QueueResponse)
 
+	snapshot := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.get",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(2, "nonce-sql-room-get", "rooms_get", map[string]any{
+			"room_code": room.RoomCode,
+		}),
+	})
+	if !snapshot.OK {
+		t.Fatalf("room snapshot read failed: %+v", snapshot)
+	}
+
 	joined := handler.HandleWSSMessage(WSSMessage{
 		Name:      "rooms.join",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(1, "nonce-sql-room-join", "rooms_join", map[string]any{
+		Payload: envelopePayload(3, "nonce-sql-room-join", "rooms_join", map[string]any{
 			"room_code":      room.RoomCode,
 			"mode_id":        "pvp_duel",
 			"active_deck_id": "sql_guest_deck",
@@ -686,17 +698,17 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		Name:      "lobby.audit.status",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload:   envelopePayload(2, "nonce-sql-lobby-status", "lobby_audit_status", map[string]any{}),
+		Payload:   envelopePayload(4, "nonce-sql-lobby-status", "lobby_audit_status", map[string]any{}),
 	})
 	if !lobbyStatus.OK {
 		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
 	}
-	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 {
+	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 1 {
 		t.Fatalf("lobby audit status should reflect SQL repository writes: %+v", status)
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 5 || tableCounts["lobby_room_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 {
+	if tableCounts["business_envelope_audits"] < 6 || tableCounts["lobby_room_audits"] != 3 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 }
