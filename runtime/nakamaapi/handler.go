@@ -195,6 +195,12 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(request.SessionID, matchID) })
+	case "match.disconnect", "matches.disconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.DisconnectMatch(request.SessionID, matchID) })
+	case "match.reconnect", "matches.reconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.ReconnectMatch(request.SessionID, matchID) })
 	case "activity.claim":
 		return handler.call(func() (any, error) { return handler.service.ClaimActivity(request.SessionID, body) })
 	case "battle.servers.register":
@@ -307,6 +313,12 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(message.SessionID, matchID) })
+	case "match.disconnect", "matches.disconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.DisconnectMatch(message.SessionID, matchID) })
+	case "match.reconnect", "matches.reconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.ReconnectMatch(message.SessionID, matchID) })
 	case "battle.servers":
 		return successResponse(handler.service.BattleServers())
 	case "battle.allocation":

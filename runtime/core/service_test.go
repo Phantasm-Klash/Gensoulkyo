@@ -1185,6 +1185,82 @@ func TestLobbyLifecycleAuditRecordsRoomReadyTransitions(t *testing.T) {
 	}
 }
 
+func TestLobbyLifecycleAuditRecordsRoomReconnectTransitions(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Reconnect Audit Host")
+	guest := mustLogin(t, service, "Reconnect Audit Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "reconnect_host_deck",
+		DeckSnapshot: validDeck("reconnect_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "reconnect_guest_deck",
+		DeckSnapshot: validDeck("reconnect_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if _, err := service.ReadyMatch(host.SessionToken, joined.MatchID); err != nil {
+		t.Fatalf("host ready: %v", err)
+	}
+	if _, err := service.ReadyMatch(guest.SessionToken, joined.MatchID); err != nil {
+		t.Fatalf("guest ready: %v", err)
+	}
+	beforeConnectionAudits := len(repo.rooms)
+
+	disconnected, err := service.DisconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	if disconnected.ReconnectStatus != "disconnected" || disconnected.Connected {
+		t.Fatalf("disconnect response invalid: %+v", disconnected)
+	}
+	duplicateDisconnect, err := service.DisconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("duplicate disconnect: %v", err)
+	}
+	if duplicateDisconnect.ReconnectStatus != "disconnected" || duplicateDisconnect.Connected {
+		t.Fatalf("duplicate disconnect response invalid: %+v", duplicateDisconnect)
+	}
+	reconnected, err := service.ReconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	if reconnected.ReconnectStatus != "restored" || !reconnected.Connected || reconnected.BattleTicket == nil {
+		t.Fatalf("reconnect response invalid: %+v", reconnected)
+	}
+	duplicateReconnect, err := service.ReconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("duplicate reconnect: %v", err)
+	}
+	if duplicateReconnect.ReconnectStatus != "restored" || !duplicateReconnect.Connected {
+		t.Fatalf("duplicate reconnect response invalid: %+v", duplicateReconnect)
+	}
+
+	connectionAudits := repo.rooms[beforeConnectionAudits:]
+	if len(connectionAudits) != 2 {
+		t.Fatalf("expected disconnect and reconnect audit records only, got %+v", connectionAudits)
+	}
+	if connectionAudits[0].Action != "disconnected" || connectionAudits[0].UserID != host.UserID || connectionAudits[0].MatchID != joined.MatchID || connectionAudits[0].CurrentPlayers != 1 || connectionAudits[0].RequiredPlayers != 2 {
+		t.Fatalf("disconnect audit invalid: %+v", connectionAudits[0])
+	}
+	if connectionAudits[1].Action != "reconnected" || connectionAudits[1].UserID != host.UserID || connectionAudits[1].MatchID != joined.MatchID || connectionAudits[1].CurrentPlayers != 2 || connectionAudits[1].RequiredPlayers != 2 {
+		t.Fatalf("reconnect audit invalid: %+v", connectionAudits[1])
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ConnectionRecords != 2 || status.LastSuccessOperation != "reconnected" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
+		t.Fatalf("connection audit status invalid: %+v", status)
+	}
+}
+
 func TestRoomHostLeavePromotesRemainingParticipantAuthority(t *testing.T) {
 	repo := &captureLobbyLifecycleAuditRepo{}
 	service := NewService(Config{LobbyLifecycleAuditRepo: repo})

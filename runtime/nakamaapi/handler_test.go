@@ -1173,11 +1173,34 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		t.Fatalf("duplicate ready should remain idempotent: %+v", duplicateReady)
 	}
 
+	disconnected := handler.HandleWSSMessage(WSSMessage{
+		Name:      "match.disconnect",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(7, "nonce-sql-host-disconnect", "match_disconnect", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !disconnected.OK || disconnected.Payload.(*core.ReconnectResponse).ReconnectStatus != "disconnected" {
+		t.Fatalf("host disconnect failed: %+v", disconnected)
+	}
+	reconnected := handler.HandleRPC(RPCRequest{
+		ID:        "match.reconnect",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(8, "nonce-sql-host-reconnect", "match_reconnect", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !reconnected.OK || reconnected.Payload.(*core.ReconnectResponse).ReconnectStatus != "restored" || reconnected.Payload.(*core.ReconnectResponse).BattleTicket == nil {
+		t.Fatalf("host reconnect failed: %+v", reconnected)
+	}
+
 	ticket := handler.HandleRPC(RPCRequest{
 		ID:        "battle.ticket",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(7, "nonce-sql-host-ticket", "battle_ticket", map[string]any{
+		Payload: envelopePayload(9, "nonce-sql-host-ticket", "battle_ticket", map[string]any{
 			"match_id": match.MatchID,
 		}),
 	})
@@ -1261,7 +1284,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:        "battle.audit.status",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload:   envelopePayload(8, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(10, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
 	})
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
@@ -1278,12 +1301,12 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !lobbyStatus.OK {
 		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
 	}
-	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 2 || status.ReadyRecords != 2 || status.MessageRecords != 2 || status.LastSuccessOperation != "ready" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 2 || status.ReadyRecords != 2 || status.ConnectionRecords != 2 || status.MessageRecords != 2 || status.LastSuccessOperation != "reconnected" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("lobby audit status should reflect SQL repository writes: %+v", status)
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 12 || tableCounts["lobby_room_audits"] != 6 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
+	if tableCounts["business_envelope_audits"] < 14 || tableCounts["lobby_room_audits"] != 8 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasBattleServerLifecycleAudits() {

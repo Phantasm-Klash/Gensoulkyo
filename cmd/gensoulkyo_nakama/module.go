@@ -37,6 +37,8 @@ var rpcIDs = []string{
 	"rooms.chat",
 	"rooms.announcement",
 	"match.ready",
+	"match.disconnect",
+	"match.reconnect",
 	"activity.claim",
 	"battle.servers.register",
 	"battle.servers.heartbeat",

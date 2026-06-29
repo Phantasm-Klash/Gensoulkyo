@@ -1484,10 +1484,14 @@ func (s *Service) DisconnectMatch(sessionToken string, matchID string) (*Reconne
 		return nil, newError(codeMatchState, "match already ended")
 	}
 	now := s.clock()
+	wasConnected := player.Connected
 	player.Connected = false
 	player.DisconnectedAt = now
 	match.LastEvents = []MatchEvent{}
 	appendMatchEventLocked(match, MatchEvent{Type: "player_disconnected", Tick: match.Tick, UserID: user.UserID})
+	if wasConnected {
+		s.recordLobbyConnectionAuditLocked(match, user.UserID, "disconnected")
+	}
 	snapshot := s.snapshotLocked(match, true)
 	return &ReconnectResponse{
 		OK:                true,
@@ -1526,10 +1530,14 @@ func (s *Service) ReconnectMatch(sessionToken string, matchID string) (*Reconnec
 			return nil, newError(codeReconnectExpired, "reconnect window expired")
 		}
 	}
+	wasDisconnected := !player.Connected
 	player.Connected = true
 	player.DisconnectedAt = time.Time{}
 	match.LastEvents = []MatchEvent{}
 	appendMatchEventLocked(match, MatchEvent{Type: "player_reconnected", Tick: match.Tick, UserID: user.UserID})
+	if wasDisconnected {
+		s.recordLobbyConnectionAuditLocked(match, user.UserID, "reconnected")
+	}
 	snapshot := s.snapshotLocked(match, true)
 	var start *MatchStartEvent
 	if match.Status == "running" {
@@ -3157,6 +3165,42 @@ func (s *Service) recordLobbyReadyAuditLocked(match *matchState, userID string) 
 	s.recordLobbyRoomAuditRecordLocked(record)
 }
 
+func (s *Service) recordLobbyConnectionAuditLocked(match *matchState, userID string, action string) {
+	if s.lobbyAuditRepo == nil || match == nil || userID == "" {
+		return
+	}
+	ticketID := s.ticketIDForMatchUserLocked(match.MatchID, userID)
+	if ticketID == "" {
+		return
+	}
+	ticket := s.tickets[ticketID]
+	if ticket == nil || ticket.RoomCode == "" {
+		return
+	}
+	room := s.rooms[normalizeRoomCode(ticket.RoomCode)]
+	if room == nil {
+		return
+	}
+	record := s.lobbyRoomAuditRecordLocked(room, ticket, userID, action, s.clock())
+	record.MatchID = match.MatchID
+	record.CurrentPlayers = connectedPlayerCountLocked(match)
+	record.RequiredPlayers = len(match.PlayerIDs)
+	s.recordLobbyRoomAuditRecordLocked(record)
+}
+
+func connectedPlayerCountLocked(match *matchState) int {
+	if match == nil {
+		return 0
+	}
+	count := 0
+	for _, player := range match.Players {
+		if player.Connected {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *Service) userBySessionLocked(sessionToken string) (*userState, error) {
 	token := strings.TrimSpace(strings.TrimPrefix(sessionToken, "Bearer "))
 	if token == "" {
@@ -4698,6 +4742,8 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint st
 		s.lobbyAuditStatus.RoomReadRecords++
 	case "ready":
 		s.lobbyAuditStatus.ReadyRecords++
+	case "disconnected", "reconnected":
+		s.lobbyAuditStatus.ConnectionRecords++
 	default:
 		s.lobbyAuditStatus.RoomRecords++
 	}

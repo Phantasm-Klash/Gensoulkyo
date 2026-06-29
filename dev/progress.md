@@ -175,3 +175,9 @@ Status date: 2026-06-28
 - Added PostgreSQL-compatible `ready` lobby lifecycle audit records for first-time room-backed `match.ready` transitions, with a separate `ready_records` status counter so operators can distinguish player readiness from room mutations and reads.
 - Kept ready retries idempotent: duplicate `match.ready` calls still return the authoritative running state and do not write extra ready audit rows.
 - Extended core and DB-backed Nakama handler regressions so RPC/WSS ready dispatch records durable room lifecycle visibility while battle allocation, ticket issuance, and result submission authority remain unchanged.
+
+## 2026-06-29 gensoulkyo-lobby reconnect audit update
+
+- Exposed `match.disconnect` and `match.reconnect` through the SDK-neutral Nakama RPC/WSS adapter and registered the build-tagged Nakama RPC ids, using the existing server-owned reconnect methods.
+- Added PostgreSQL-compatible `disconnected` and `reconnected` lobby lifecycle audit records for room-backed running matches, plus a `connection_records` status counter; duplicate disconnect/reconnect calls do not inflate lifecycle audit counts.
+- Kept the authority split intact: clients can request reconnect lifecycle changes through business envelope-protected Nakama RPC/WSS, while snapshots, signed battle tickets, allocation, replay, and settlement remain server-owned.

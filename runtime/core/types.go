@@ -118,6 +118,7 @@ type LobbyLifecycleAuditStatus struct {
 	RoomReadRecords        int       `json:"room_read_records"`
 	RulesReadRecords       int       `json:"rules_read_records"`
 	ReadyRecords           int       `json:"ready_records"`
+	ConnectionRecords      int       `json:"connection_records"`
 	MessageRecords         int       `json:"message_records"`
 	RejectedRecords        int       `json:"rejected_records"`
 	LastSuccessOperation   string    `json:"last_success_operation,omitempty"`
