@@ -32,6 +32,33 @@ services:
       - go-build-cache:/root/.cache/go-build
     command: ["go", "test", "./..."]
 
+  nakama-tag-build:
+    profiles:
+      - nakama-tag-build
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    environment:
+      GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+      NAKAMA_COMMON_VERSION: ${NAKAMA_COMMON_VERSION:-v1.34.0}
+    volumes:
+      - .:/workspace/Gensoulkyo:ro
+      - ../PhK-Protocol:/workspace/PhK-Protocol:ro
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        rm -rf /tmp/gensoulkyo-nakama-build
+        cp -a /workspace/Gensoulkyo /tmp/gensoulkyo-nakama-build
+        cd /tmp/gensoulkyo-nakama-build
+        go mod edit -replace github.com/phantasm-klash/phk-protocol=/workspace/PhK-Protocol
+        go get github.com/heroiclabs/nakama-common/runtime@$${NAKAMA_COMMON_VERSION}
+        go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...
+        go build -tags nakama -buildmode=plugin -o /tmp/gensoulkyo.so ./cmd/gensoulkyo_nakama
+
 volumes:
   go-mod-cache:
   go-build-cache:

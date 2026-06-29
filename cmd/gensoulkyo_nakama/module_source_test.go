@@ -142,6 +142,40 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	}
 }
 
+func TestNakamaTagBuildComposeProfileDocumentsTemporarySDKPin(t *testing.T) {
+	compose, err := os.ReadFile("../../docker-compose.yml")
+	if err != nil {
+		t.Fatalf("read docker compose: %v", err)
+	}
+	readme, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read Nakama binding README: %v", err)
+	}
+	for _, expected := range []string{
+		"nakama-tag-build",
+		"NAKAMA_COMMON_VERSION",
+		"v1.34.0",
+		"go mod edit -replace github.com/phantasm-klash/phk-protocol=/workspace/PhK-Protocol",
+		"go get github.com/heroiclabs/nakama-common/runtime@$${NAKAMA_COMMON_VERSION}",
+		"go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...",
+		"go build -tags nakama -buildmode=plugin",
+	} {
+		if !strings.Contains(string(compose), expected) {
+			t.Fatalf("Nakama tag-build compose profile missing %q", expected)
+		}
+	}
+	for _, expected := range []string{
+		"docker-compose --profile nakama-tag-build run --rm nakama-tag-build",
+		"without mutating the repository's `go.mod`/`go.sum`",
+		"github.com/heroiclabs/nakama-common/runtime",
+		"`v1.34.0`",
+	} {
+		if !strings.Contains(string(readme), expected) {
+			t.Fatalf("Nakama binding README missing %q", expected)
+		}
+	}
+}
+
 func extractRPCIDs(t *testing.T, source string) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "module.go", source, 0)

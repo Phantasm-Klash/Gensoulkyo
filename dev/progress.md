@@ -124,3 +124,9 @@ Status date: 2026-06-28
 - Kept player/client authority closed: public Nakama RPC calls and miswired service-origin calls carrying player `session_id` or `user_id` are rejected before registration/heartbeat dispatch, while authenticated clients can still read `battle.servers` through the business envelope guard.
 - Registered the new service-origin RPC ids in the build-tagged Nakama module and extended source-shape/handler regressions so battle server discovery, registration, heartbeat, allocation, ticket, and result-submit boundaries stay explicit.
 - Verified `go test ./runtime/nakamaapi -run TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin -count=1`, `go test ./cmd/gensoulkyo_nakama -run 'TestNakamaBinding' -count=1`, `go test ./...`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`. `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration outside this scope's allowed paths.
+
+## 2026-06-29 gensoulkyo-lobby Nakama tag-build compose update
+
+- Added a `nakama-tag-build` Docker Compose profile that copies the repository into a temporary container workspace, applies the local PhK-Protocol replace, temporarily pins `github.com/heroiclabs/nakama-common/runtime` through `NAKAMA_COMMON_VERSION` (default `v1.34.0`), then runs `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` and builds the Nakama Go Runtime plugin.
+- Documented the profile in `cmd/gensoulkyo_nakama/README.md` so SDK tag-build validation no longer requires editing in-scope files or leaving `go.mod`/`go.sum` changes behind.
+- Added default source-shape coverage that pins the compose profile and README contract while the real module dependency pin remains outside this scope's allowed paths.
