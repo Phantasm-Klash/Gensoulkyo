@@ -934,7 +934,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
 	}
-	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ReplayRecords != 2 {
+	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("battle audit status should reflect SQL repository writes: %+v", status)
 	}
 	lobbyStatus := handler.HandleWSSMessage(WSSMessage{
@@ -946,7 +946,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !lobbyStatus.OK {
 		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
 	}
-	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 1 || status.MessageRecords != 2 {
+	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 1 || status.MessageRecords != 2 || status.LastSuccessOperation != "matched" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("lobby audit status should reflect SQL repository writes: %+v", status)
 	}
 

@@ -85,17 +85,20 @@ type Config struct {
 }
 
 type BattleLifecycleAuditStatus struct {
-	OK                  bool      `json:"ok"`
-	Configured          bool      `json:"configured"`
-	AllocationRecords   int       `json:"allocation_records"`
-	TicketRecords       int       `json:"ticket_records"`
-	ResultRecords       int       `json:"result_records"`
-	ReplayRecords       int       `json:"replay_records"`
-	RejectedRecords     int       `json:"rejected_records"`
-	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
-	LastError           string    `json:"last_error,omitempty"`
-	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
-	ServerAuthoritative bool      `json:"server_authoritative"`
+	OK                     bool      `json:"ok"`
+	Configured             bool      `json:"configured"`
+	AllocationRecords      int       `json:"allocation_records"`
+	TicketRecords          int       `json:"ticket_records"`
+	ResultRecords          int       `json:"result_records"`
+	ReplayRecords          int       `json:"replay_records"`
+	RejectedRecords        int       `json:"rejected_records"`
+	LastSuccessOperation   string    `json:"last_success_operation,omitempty"`
+	LastSuccessFingerprint string    `json:"last_success_fingerprint,omitempty"`
+	LastSuccessAt          time.Time `json:"last_success_at,omitempty"`
+	LastErrorOperation     string    `json:"last_error_operation,omitempty"`
+	LastError              string    `json:"last_error,omitempty"`
+	LastErrorAt            time.Time `json:"last_error_at,omitempty"`
+	ServerAuthoritative    bool      `json:"server_authoritative"`
 }
 
 type BattleLifecycleAuditRepository interface {
@@ -106,17 +109,20 @@ type BattleLifecycleAuditRepository interface {
 }
 
 type LobbyLifecycleAuditStatus struct {
-	OK                  bool      `json:"ok"`
-	Configured          bool      `json:"configured"`
-	RoomRecords         int       `json:"room_records"`
-	RoomReadRecords     int       `json:"room_read_records"`
-	RulesReadRecords    int       `json:"rules_read_records"`
-	MessageRecords      int       `json:"message_records"`
-	RejectedRecords     int       `json:"rejected_records"`
-	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
-	LastError           string    `json:"last_error,omitempty"`
-	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
-	ServerAuthoritative bool      `json:"server_authoritative"`
+	OK                     bool      `json:"ok"`
+	Configured             bool      `json:"configured"`
+	RoomRecords            int       `json:"room_records"`
+	RoomReadRecords        int       `json:"room_read_records"`
+	RulesReadRecords       int       `json:"rules_read_records"`
+	MessageRecords         int       `json:"message_records"`
+	RejectedRecords        int       `json:"rejected_records"`
+	LastSuccessOperation   string    `json:"last_success_operation,omitempty"`
+	LastSuccessFingerprint string    `json:"last_success_fingerprint,omitempty"`
+	LastSuccessAt          time.Time `json:"last_success_at,omitempty"`
+	LastErrorOperation     string    `json:"last_error_operation,omitempty"`
+	LastError              string    `json:"last_error,omitempty"`
+	LastErrorAt            time.Time `json:"last_error_at,omitempty"`
+	ServerAuthoritative    bool      `json:"server_authoritative"`
 }
 
 type LobbyLifecycleAuditRepository interface {

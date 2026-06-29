@@ -93,3 +93,9 @@ Status date: 2026-06-28
 - Tightened SDK-neutral Nakama `battle.result.submit` handling so service-origin callbacks are rejected if they also carry player `session_id` or `user_id` context, preventing a miswired public RPC from looking like a C++ Battle Server settlement callback.
 - Added handler regression coverage for the new fail-closed path while preserving the context-free service-origin scaffold that reaches core signed-result validation, and pinned the build-tagged Nakama source-shape test to keep forwarding user context into `runtime/nakamaapi`.
 - Verified `go test ./...`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`. Direct `docker compose` is unavailable on this host; `go test -tags nakama ./cmd/gensoulkyo_nakama` remains blocked by the missing `github.com/heroiclabs/nakama-common/runtime` module declaration outside this scope's allowed paths.
+
+## 2026-06-29 gensoulkyo-lobby lifecycle status fingerprint update
+
+- Extended `BattleLifecycleAuditStatus` and `LobbyLifecycleAuditStatus` with non-secret last-success operation, timestamp, and deterministic fingerprint fields so Nakama status RPC/WSS checks can prove real lifecycle audit writes occurred.
+- Added core and DB-backed Nakama handler regressions covering the fingerprints after allocation/ticket/result/replay writes and after lobby room/read/message/match writes.
+- The fingerprint is derived from existing ids and hashes, not raw payloads, signatures, or secrets; it keeps audit visibility operational while preserving the Nakama/Go business authority split.

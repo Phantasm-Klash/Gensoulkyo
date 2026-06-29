@@ -4413,7 +4413,8 @@ func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAlloc
 		CreatedAt:           allocation.AllocatedAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("match_allocation", err)
+	fingerprint := lifecycleFingerprint("battle:allocation", allocation.MatchID, allocation.ModeID, allocation.BattleServerID, allocation.ModeConfigHash, fmt.Sprintf("%d", len(allocation.Players)))
+	s.recordBattleAuditOutcomeLocked("match_allocation", fingerprint, allocation.AllocatedAt, err)
 }
 
 func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
@@ -4440,7 +4441,8 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		ExpiresAt:           ticket.ExpiresAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("battle_ticket", err)
+	fingerprint := lifecycleFingerprint("battle:ticket", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	s.recordBattleAuditOutcomeLocked("battle_ticket", fingerprint, ticket.IssuedAt, err)
 }
 
 func (s *Service) recordLobbyRoomAuditLocked(room *roomState, ticket *queueTicket, userID string, action string, createdAt time.Time) {
@@ -4534,7 +4536,8 @@ func (s *Service) recordLobbyRoomAuditRecordLocked(record LobbyRoomAuditRecord) 
 		return
 	}
 	err := s.lobbyAuditRepo.RecordLobbyRoomAudit(record)
-	s.recordLobbyAuditOutcomeLocked(record.Action, err)
+	fingerprint := lifecycleFingerprint("lobby:room", record.Action, record.RoomCode, record.UserID, record.TicketID, record.MatchID, record.RoomStatus, record.DeckSnapshotHash)
+	s.recordLobbyAuditOutcomeLocked(record.Action, fingerprint, record.CreatedAt, err)
 }
 
 func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
@@ -4559,10 +4562,11 @@ func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
 		CreatedAt:           message.CreatedAt,
 		ServerAuthoritative: true,
 	})
-	s.recordLobbyAuditOutcomeLocked("message", err)
+	fingerprint := lifecycleFingerprint("lobby:message", message.MessageID, message.RoomCode, message.UserID, message.Kind, fmt.Sprintf("%t", message.Duplicate), metadataHash)
+	s.recordLobbyAuditOutcomeLocked("message", fingerprint, message.CreatedAt, err)
 }
 
-func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
+func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint string, occurredAt time.Time, err error) {
 	s.lobbyAuditStatus.Configured = s.lobbyAuditRepo != nil
 	s.lobbyAuditStatus.ServerAuthoritative = true
 	if err != nil {
@@ -4583,6 +4587,12 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
 	default:
 		s.lobbyAuditStatus.RoomRecords++
 	}
+	s.lobbyAuditStatus.LastSuccessOperation = operation
+	s.lobbyAuditStatus.LastSuccessFingerprint = fingerprint
+	if occurredAt.IsZero() {
+		occurredAt = s.clock()
+	}
+	s.lobbyAuditStatus.LastSuccessAt = occurredAt
 	if s.lobbyAuditStatus.Configured {
 		s.lobbyAuditStatus.OK = s.lobbyAuditStatus.LastError == ""
 	}
@@ -4609,7 +4619,8 @@ func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *B
 		SettledAt:           match.BattleResultAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("battle_result", err)
+	fingerprint := lifecycleFingerprint("battle:result", match.MatchID, match.ModeID, battleServerID, signed.Result.ResultHash, signed.Result.ReplayID, fmt.Sprintf("%d", signed.Result.SettledAtMS))
+	s.recordBattleAuditOutcomeLocked("battle_result", fingerprint, verifiedAt, err)
 }
 
 func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
@@ -4630,10 +4641,11 @@ func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
 		SettledAt:           replay.SettledAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("replay", err)
+	fingerprint := lifecycleFingerprint("battle:replay", replay.ReplayID, replay.MatchID, replay.UserID, replay.StateHash, replay.Settlement.SettlementKey)
+	s.recordBattleAuditOutcomeLocked("replay", fingerprint, replay.SettledAt, err)
 }
 
-func (s *Service) recordBattleAuditOutcomeLocked(operation string, err error) {
+func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint string, occurredAt time.Time, err error) {
 	s.battleAuditStatus.Configured = s.battleAuditRepo != nil
 	s.battleAuditStatus.ServerAuthoritative = true
 	if err != nil {
@@ -4654,6 +4666,12 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, err error) {
 	case "replay":
 		s.battleAuditStatus.ReplayRecords++
 	}
+	s.battleAuditStatus.LastSuccessOperation = operation
+	s.battleAuditStatus.LastSuccessFingerprint = fingerprint
+	if occurredAt.IsZero() {
+		occurredAt = s.clock()
+	}
+	s.battleAuditStatus.LastSuccessAt = occurredAt
 	if s.battleAuditStatus.Configured {
 		s.battleAuditStatus.OK = s.battleAuditStatus.LastError == ""
 	}
@@ -4887,6 +4905,10 @@ func seedFrom(matchID string) int64 {
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:4])
+}
+
+func lifecycleFingerprint(parts ...string) string {
+	return "sha256:" + shortHash(strings.Join(parts, "\x1f"))
 }
 
 func prefixString(value string, length int) string {

@@ -717,6 +717,9 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	if !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("audit status did not account successful lifecycle writes: %+v", status)
 	}
+	if status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+		t.Fatalf("audit status should expose a non-secret last-success fingerprint: %+v", status)
+	}
 }
 
 func TestBattleLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
@@ -877,6 +880,9 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	status := service.LobbyLifecycleAuditStatus()
 	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
+	}
+	if status.LastSuccessOperation != "left" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+		t.Fatalf("lobby audit status should expose a non-secret last-success fingerprint: %+v", status)
 	}
 }
 
