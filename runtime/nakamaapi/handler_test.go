@@ -811,6 +811,105 @@ func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *
 	}
 }
 
+func TestNakamaBattleServerRegisterAndHeartbeatRequireServiceOrigin(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	login := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-battle-register", "display_name": "Battle Register Client"},
+	})
+	if !login.OK {
+		t.Fatalf("login failed: %+v", login)
+	}
+	session := login.Payload.(*core.AuthSession)
+
+	publicRegister := handler.HandleRPC(RPCRequest{
+		ID:        "battle.servers.register",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload: envelopePayload(1, "nonce-public-battle-register", "battle_servers_register", map[string]any{
+			"battle_server_id": "public-battle-server",
+			"endpoint":         "127.0.0.1:7999",
+			"capacity":         8,
+			"status":           "online",
+		}),
+	})
+	if publicRegister.OK || publicRegister.Status != 403 || publicRegister.ErrorCode != CodeServiceOriginRequired {
+		t.Fatalf("public battle server registration must require service origin, got %+v", publicRegister)
+	}
+
+	miswiredRegister := handler.HandleRPC(RPCRequest{
+		ID:        "battle.servers.register",
+		Service:   true,
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   map[string]any{"battle_server_id": "miswired-battle-server", "endpoint": "127.0.0.1:7998", "capacity": 8},
+	})
+	if miswiredRegister.OK || miswiredRegister.Status != 403 || miswiredRegister.ErrorCode != CodeServiceOriginRequired {
+		t.Fatalf("service-origin battle server registration must not include player context, got %+v", miswiredRegister)
+	}
+
+	registered := handler.HandleRPC(RPCRequest{
+		ID:      "battle.servers.register",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "nakama-service-battle",
+			"endpoint":         "127.0.0.1:7997",
+			"region":           "local",
+			"build_id":         "nakama-service-test",
+			"capacity":         4,
+			"active_matches":   1,
+			"load":             0.25,
+			"status":           "online",
+			"supported_modes":  []any{"pvp_duel"},
+		},
+	})
+	if !registered.OK || registered.Status != 200 {
+		t.Fatalf("service-origin battle server registration failed: %+v", registered)
+	}
+	status := registered.Payload.(*core.BattleServerStatus)
+	if status.BattleServerID != "nakama-service-battle" || status.Endpoint != "127.0.0.1:7997" || status.ActiveMatches != 1 || status.Load != 0.25 || len(status.SupportedModes) != 1 || status.SupportedModes[0] != "pvp_duel" || !status.ServerAuthoritative {
+		t.Fatalf("registered status invalid: %+v", status)
+	}
+
+	heartbeat := handler.HandleRPC(RPCRequest{
+		ID:      "battle.servers.heartbeat",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "nakama-service-battle",
+			"active_matches":   2,
+			"load":             0.5,
+			"status":           "online",
+		},
+	})
+	if !heartbeat.OK || heartbeat.Status != 200 {
+		t.Fatalf("service-origin battle server heartbeat failed: %+v", heartbeat)
+	}
+	heartbeatStatus := heartbeat.Payload.(*core.BattleServerStatus)
+	if heartbeatStatus.Endpoint != "127.0.0.1:7997" || heartbeatStatus.Region != "local" || heartbeatStatus.BuildID != "nakama-service-test" || heartbeatStatus.ActiveMatches != 2 || heartbeatStatus.Load != 0.5 || !heartbeatStatus.ServerAuthoritative {
+		t.Fatalf("heartbeat should preserve server metadata while updating load: %+v", heartbeatStatus)
+	}
+
+	servers := handler.HandleRPC(RPCRequest{
+		ID:        "battle.servers",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(2, "nonce-public-battle-list", "battle_servers", map[string]any{}),
+	})
+	if !servers.OK || servers.Status != 200 {
+		t.Fatalf("public battle server list failed: %+v", servers)
+	}
+	list := servers.Payload.(*core.BattleServerListResponse)
+	found := false
+	for _, server := range list.Servers {
+		if server.BattleServerID == "nakama-service-battle" && server.ActiveMatches == 2 && server.Load == 0.5 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("service registered battle server missing from discovery: %+v", list)
+	}
+}
+
 func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	driverName := registerNakamaSQLCaptureDriver(t)
 	db, err := sql.Open(driverName, "")

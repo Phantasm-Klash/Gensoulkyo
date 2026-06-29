@@ -35,6 +35,8 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"rooms.chat",
 		"rooms.announcement",
 		"match.ready",
+		"battle.servers.register",
+		"battle.servers.heartbeat",
 		"business.envelope.audit.status",
 		"battle.audit.status",
 		"lobby.audit.status",
@@ -79,6 +81,8 @@ func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
 		"rooms.announcement",
 		"match.ready",
 		"activity.claim",
+		"battle.servers.register",
+		"battle.servers.heartbeat",
 		"battle.servers",
 		"business.envelope.audit.status",
 		"battle.audit.status",
@@ -100,7 +104,7 @@ func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
 	}
 }
 
-func TestNakamaBindingKeepsPublicResultSubmitFailClosed(t *testing.T) {
+func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	source, err := os.ReadFile("module.go")
 	if err != nil {
 		t.Fatalf("read module source: %v", err)
@@ -126,6 +130,15 @@ func TestNakamaBindingKeepsPublicResultSubmitFailClosed(t *testing.T) {
 	}
 	if !strings.Contains(text, "runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID)") {
 		t.Fatalf("Nakama binding must pass user context through runtime/nakamaapi so service-origin result callbacks can reject player-scoped requests")
+	}
+	for _, serviceRPC := range []string{
+		"battle.result.submit",
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+	} {
+		if !strings.Contains(text, serviceRPC) {
+			t.Fatalf("Nakama binding must register service-origin RPC %q", serviceRPC)
+		}
 	}
 }
 

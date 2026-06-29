@@ -197,6 +197,18 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(request.SessionID, matchID) })
 	case "activity.claim":
 		return handler.call(func() (any, error) { return handler.service.ClaimActivity(request.SessionID, body) })
+	case "battle.servers.register":
+		var req core.RegisterBattleServerRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.RegisterBattleServer(req) })
+	case "battle.servers.heartbeat":
+		var req core.BattleServerHeartbeatRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BattleServerHeartbeat(req) })
 	case "battle.servers":
 		return successResponse(handler.service.BattleServers())
 	case "business.envelope.audit.status":
@@ -438,7 +450,12 @@ func rpcSkipsEnvelope(rpcID string) bool {
 }
 
 func rpcRequiresServiceOrigin(rpcID string) bool {
-	return rpcID == "battle.result.submit"
+	switch rpcID {
+	case "battle.result.submit", "battle.servers.register", "battle.servers.heartbeat":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeName(name string) string {
