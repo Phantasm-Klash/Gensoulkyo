@@ -119,6 +119,47 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_match_allocation_audit_match
 CREATE INDEX IF NOT EXISTS ix_match_allocation_audit_server_time
     ON match_allocation_audits (battle_server_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS battle_result_audits (
+    match_id TEXT PRIMARY KEY,
+    mode_id TEXT NOT NULL,
+    battle_server_id TEXT NOT NULL,
+    result_hash TEXT NOT NULL,
+    replay_id TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    player_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    settlement_key TEXT NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL,
+    settled_at TIMESTAMPTZ NOT NULL,
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS ix_battle_result_audit_server_time
+    ON battle_result_audits (battle_server_id, settled_at DESC);
+
+CREATE INDEX IF NOT EXISTS ix_battle_result_audit_replay
+    ON battle_result_audits (replay_id);
+
+CREATE TABLE IF NOT EXISTS replay_audits (
+    replay_id TEXT PRIMARY KEY,
+    match_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    mode_id TEXT NOT NULL,
+    ruleset_version TEXT NOT NULL,
+    mode_ruleset_version TEXT NOT NULL,
+    state_hash TEXT NOT NULL,
+    input_count INTEGER NOT NULL,
+    event_count INTEGER NOT NULL,
+    settlement_key TEXT NOT NULL,
+    settled_at TIMESTAMPTZ NOT NULL,
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS ix_replay_audit_match_user
+    ON replay_audits (match_id, user_id);
+
+CREATE INDEX IF NOT EXISTS ix_replay_audit_user_time
+    ON replay_audits (user_id, settled_at DESC);
+
 INSERT INTO business_envelope_keys (
     key_id,
     protocol_version,
