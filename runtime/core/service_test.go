@@ -1119,6 +1119,72 @@ func TestLobbyLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
 	}
 }
 
+func TestLobbyLifecycleAuditRecordsRoomReadyTransitions(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Ready Audit Host")
+	guest := mustLogin(t, service, "Ready Audit Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "ready_host_deck",
+		DeckSnapshot: validDeck("ready_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "ready_guest_deck",
+		DeckSnapshot: validDeck("ready_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.MatchID == "" {
+		t.Fatalf("pvp room join should allocate a match: %+v", joined)
+	}
+	beforeReadyAudits := len(repo.rooms)
+
+	hostReady, err := service.ReadyMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("host ready: %v", err)
+	}
+	if hostReady.ReadyStatus != "loading" {
+		t.Fatalf("first ready should keep match loading: %+v", hostReady)
+	}
+	guestReady, err := service.ReadyMatch(guest.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("guest ready: %v", err)
+	}
+	if guestReady.ReadyStatus != "running" || guestReady.MatchStart == nil || guestReady.BattleTicket == nil {
+		t.Fatalf("second ready should start room match: %+v", guestReady)
+	}
+	duplicateHostReady, err := service.ReadyMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("duplicate host ready: %v", err)
+	}
+	if duplicateHostReady.ReadyCount != 2 || duplicateHostReady.ReadyStatus != "running" {
+		t.Fatalf("duplicate ready should remain idempotent: %+v", duplicateHostReady)
+	}
+
+	readyAudits := repo.rooms[beforeReadyAudits:]
+	if len(readyAudits) != 2 {
+		t.Fatalf("expected exactly two first-ready audit records, got %+v", readyAudits)
+	}
+	if readyAudits[0].Action != "ready" || readyAudits[0].UserID != host.UserID || readyAudits[0].MatchID != joined.MatchID || readyAudits[0].CurrentPlayers != 1 || readyAudits[0].RequiredPlayers != 2 {
+		t.Fatalf("host ready audit invalid: %+v", readyAudits[0])
+	}
+	if readyAudits[1].Action != "ready" || readyAudits[1].UserID != guest.UserID || readyAudits[1].MatchID != joined.MatchID || readyAudits[1].CurrentPlayers != 2 || readyAudits[1].RequiredPlayers != 2 {
+		t.Fatalf("guest ready audit invalid: %+v", readyAudits[1])
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ReadyRecords != 2 || status.LastSuccessOperation != "ready" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
+		t.Fatalf("ready audit status invalid: %+v", status)
+	}
+}
+
 func TestRoomHostLeavePromotesRemainingParticipantAuthority(t *testing.T) {
 	repo := &captureLobbyLifecycleAuditRepo{}
 	service := NewService(Config{LobbyLifecycleAuditRepo: repo})

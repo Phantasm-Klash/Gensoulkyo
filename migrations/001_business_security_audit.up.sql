@@ -176,7 +176,7 @@ CREATE INDEX IF NOT EXISTS ix_replay_audit_user_time
 CREATE TABLE IF NOT EXISTS lobby_room_audits (
     audit_id BIGSERIAL PRIMARY KEY,
     room_code TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (action IN ('created', 'joined', 'matched', 'left', 'listed', 'snapshot_read', 'rules_read', 'ticket_read', 'create_retry', 'join_retry', 'cancelled', 'unknown')),
+    action TEXT NOT NULL CHECK (action IN ('created', 'joined', 'matched', 'left', 'listed', 'snapshot_read', 'rules_read', 'ticket_read', 'create_retry', 'join_retry', 'cancelled', 'ready', 'unknown')),
     mode_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     ticket_id TEXT NOT NULL DEFAULT '',

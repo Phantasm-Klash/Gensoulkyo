@@ -169,3 +169,9 @@ Status date: 2026-06-28
 - Extended the core lobby audit regression and migration action guard so duplicate lobby lifecycle calls leave a durable non-secret fingerprint without creating extra tickets, rooms, or player authority.
 - This preserves the Nakama/Go authority split: retry audits improve lobby observability only, while battle allocation, ticket issuance, and result submission boundaries remain unchanged.
 - Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
+
+## 2026-06-29 gensoulkyo-lobby room ready audit update
+
+- Added PostgreSQL-compatible `ready` lobby lifecycle audit records for first-time room-backed `match.ready` transitions, with a separate `ready_records` status counter so operators can distinguish player readiness from room mutations and reads.
+- Kept ready retries idempotent: duplicate `match.ready` calls still return the authoritative running state and do not write extra ready audit rows.
+- Extended core and DB-backed Nakama handler regressions so RPC/WSS ready dispatch records durable room lifecycle visibility while battle allocation, ticket issuance, and result submission authority remain unchanged.

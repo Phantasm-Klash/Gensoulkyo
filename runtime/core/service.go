@@ -1402,6 +1402,9 @@ func (s *Service) ReadyMatch(sessionToken string, matchID string) (*ReadyRespons
 	if !wasRunning && match.Status == "running" {
 		appendMatchEventLocked(match, MatchEvent{Type: "match_started", Tick: match.Tick})
 	}
+	if !wasReady {
+		s.recordLobbyReadyAuditLocked(match, user.UserID)
+	}
 	var start *MatchStartEvent
 	if match.Status == "running" {
 		event := s.matchStartLocked(match)
@@ -3131,6 +3134,29 @@ func (s *Service) readyCountLocked(match *matchState) int {
 	return count
 }
 
+func (s *Service) recordLobbyReadyAuditLocked(match *matchState, userID string) {
+	if s.lobbyAuditRepo == nil || match == nil || userID == "" {
+		return
+	}
+	ticketID := s.ticketIDForMatchUserLocked(match.MatchID, userID)
+	if ticketID == "" {
+		return
+	}
+	ticket := s.tickets[ticketID]
+	if ticket == nil || ticket.RoomCode == "" {
+		return
+	}
+	room := s.rooms[normalizeRoomCode(ticket.RoomCode)]
+	if room == nil {
+		return
+	}
+	record := s.lobbyRoomAuditRecordLocked(room, ticket, userID, "ready", s.clock())
+	record.MatchID = match.MatchID
+	record.CurrentPlayers = s.readyCountLocked(match)
+	record.RequiredPlayers = len(match.PlayerIDs)
+	s.recordLobbyRoomAuditRecordLocked(record)
+}
+
 func (s *Service) userBySessionLocked(sessionToken string) (*userState, error) {
 	token := strings.TrimSpace(strings.TrimPrefix(sessionToken, "Bearer "))
 	if token == "" {
@@ -4670,6 +4696,8 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint st
 		s.lobbyAuditStatus.MessageRecords++
 	case "create_retry", "join_retry":
 		s.lobbyAuditStatus.RoomReadRecords++
+	case "ready":
+		s.lobbyAuditStatus.ReadyRecords++
 	default:
 		s.lobbyAuditStatus.RoomRecords++
 	}
