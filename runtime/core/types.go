@@ -91,6 +91,7 @@ type BattleLifecycleAuditStatus struct {
 	ServerLifecycleRecords int       `json:"server_lifecycle_records"`
 	AllocationRecords      int       `json:"allocation_records"`
 	TicketRecords          int       `json:"ticket_records"`
+	TicketExpiredRecords   int       `json:"ticket_expired_records"`
 	ResultRecords          int       `json:"result_records"`
 	ResultDuplicateRecords int       `json:"result_duplicate_records"`
 	ReplayRecords          int       `json:"replay_records"`
@@ -202,6 +203,7 @@ type BattleTicketAuditRecord struct {
 	Status              string    `json:"status"`
 	IssuedAt            time.Time `json:"issued_at"`
 	ExpiresAt           time.Time `json:"expires_at"`
+	ConsumedAt          time.Time `json:"consumed_at,omitempty"`
 	ServerAuthoritative bool      `json:"server_authoritative"`
 }
 

@@ -124,6 +124,28 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            "ticket-a",
+		MatchID:             "match-a",
+		UserID:              "user-a",
+		PlayerID:            "player-a",
+		BattleServerID:      "battle-a",
+		Endpoint:            "127.0.0.1:7901",
+		KeyID:               "dev-ed25519-0",
+		RulesetVersion:      RulesetVersion,
+		ProtocolVersion:     "1",
+		DeckSnapshotHash:    "sha256:deck",
+		ModeConfigHash:      "sha256:mode",
+		Nonce:               "nonce-a",
+		SignaturePrefix:     "0123456789abcdef",
+		Status:              "expired",
+		IssuedAt:            now,
+		ExpiresAt:           now.Add(time.Minute),
+		ConsumedAt:          now.Add(2 * time.Minute),
+		ServerAuthoritative: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.RecordBattleResultAudit(BattleResultAuditRecord{
 		MatchID:             "match-a",
 		ModeID:              "pvp_duel",
@@ -158,8 +180,8 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	}
 
 	calls := battleAuditCaptureCalls()
-	if len(calls) != 4 {
-		t.Fatalf("expected four inserts, got %+v", calls)
+	if len(calls) != 5 {
+		t.Fatalf("expected five inserts, got %+v", calls)
 	}
 	if !strings.Contains(calls[0].query, "INSERT INTO match_allocation_audits") || len(calls[0].args) != 14 {
 		t.Fatalf("allocation insert invalid: %+v", calls[0])
@@ -167,23 +189,29 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	if calls[0].args[0] != "match-a" || calls[0].args[2] != "battle-a" || calls[0].args[10] != `{"match_id":"match-a"}` || calls[0].args[12] != true || calls[0].args[13] != now {
 		t.Fatalf("allocation args invalid: %+v", calls[0].args)
 	}
-	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 17 {
+	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 18 {
 		t.Fatalf("ticket insert invalid: %+v", calls[1])
 	}
-	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" || calls[1].args[16] != true {
+	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" || calls[1].args[16] != true || calls[1].args[17] != nil {
 		t.Fatalf("ticket args invalid: %+v", calls[1].args)
 	}
-	if !strings.Contains(calls[2].query, "INSERT INTO battle_result_audits") || len(calls[2].args) != 12 {
-		t.Fatalf("result insert invalid: %+v", calls[2])
+	if !strings.Contains(calls[2].query, "INSERT INTO battle_ticket_audits") || len(calls[2].args) != 18 {
+		t.Fatalf("expired ticket upsert invalid: %+v", calls[2])
 	}
-	if calls[2].args[0] != "match-a" || calls[2].args[6] != `["player-a","player-b"]` || calls[2].args[8] != "accepted" || calls[2].args[11] != true {
-		t.Fatalf("result args invalid: %+v", calls[2].args)
+	if calls[2].args[0] != "ticket-a" || calls[2].args[15] != "expired" || calls[2].args[17] != now.Add(2*time.Minute) {
+		t.Fatalf("expired ticket args invalid: %+v", calls[2].args)
 	}
-	if !strings.Contains(calls[3].query, "INSERT INTO replay_audits") || len(calls[3].args) != 12 {
-		t.Fatalf("replay insert invalid: %+v", calls[3])
+	if !strings.Contains(calls[3].query, "INSERT INTO battle_result_audits") || len(calls[3].args) != 12 {
+		t.Fatalf("result insert invalid: %+v", calls[3])
 	}
-	if calls[3].args[0] != "replay-a" || calls[3].args[2] != "user-a" || calls[3].args[11] != true {
-		t.Fatalf("replay args invalid: %+v", calls[3].args)
+	if calls[3].args[0] != "match-a" || calls[3].args[6] != `["player-a","player-b"]` || calls[3].args[8] != "accepted" || calls[3].args[11] != true {
+		t.Fatalf("result args invalid: %+v", calls[3].args)
+	}
+	if !strings.Contains(calls[4].query, "INSERT INTO replay_audits") || len(calls[4].args) != 12 {
+		t.Fatalf("replay insert invalid: %+v", calls[4])
+	}
+	if calls[4].args[0] != "replay-a" || calls[4].args[2] != "user-a" || calls[4].args[11] != true {
+		t.Fatalf("replay args invalid: %+v", calls[4].args)
 	}
 }
 

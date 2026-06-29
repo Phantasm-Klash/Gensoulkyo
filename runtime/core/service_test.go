@@ -914,6 +914,46 @@ func TestBattleLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
 	}
 }
 
+func TestBattleTicketExpiryLifecycleAudit(t *testing.T) {
+	now := time.Date(2026, 6, 29, 14, 0, 0, 0, time.UTC)
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                    func() time.Time { return now },
+		BattleLifecycleAuditRepo: repo,
+	})
+	alice := mustLogin(t, service, "Ticket Expiry Alice")
+	bob := mustLogin(t, service, "Ticket Expiry Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	first, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("first ticket: %v", err)
+	}
+	now = first.Ticket.ExpiresAt.Add(time.Second)
+	second, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("replacement ticket: %v", err)
+	}
+	if second.Ticket.TicketID == first.Ticket.TicketID || !second.Ticket.IssuedAt.Equal(now) {
+		t.Fatalf("expired ticket should be replaced with a fresh signed ticket: first=%+v second=%+v", first.Ticket, second.Ticket)
+	}
+
+	var expired BattleTicketAuditRecord
+	for _, record := range repo.tickets {
+		if record.TicketID == first.Ticket.TicketID && record.Status == "expired" {
+			expired = record
+			break
+		}
+	}
+	if expired.TicketID == "" || !expired.ConsumedAt.Equal(now) || expired.ExpiresAt != first.Ticket.ExpiresAt || !expired.ServerAuthoritative {
+		t.Fatalf("expired ticket audit missing authoritative transition: tickets=%+v", repo.tickets)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.TicketExpiredRecords != 1 || status.LastSuccessOperation != "battle_ticket" {
+		t.Fatalf("ticket expiry status should count expired transition and fresh ticket issue: %+v", status)
+	}
+}
+
 type captureBattleLifecycleAuditRepo struct {
 	allocations []BattleAllocationAuditRecord
 	tickets     []BattleTicketAuditRecord

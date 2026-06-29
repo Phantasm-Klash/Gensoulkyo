@@ -4456,8 +4456,11 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 	}
 	cacheKey := battleTicketCacheKey(match.MatchID, user.UserID)
 	now := s.clock()
-	if existing := s.battleTickets[cacheKey]; existing != nil && existing.Ticket.ExpiresAt.After(now) {
-		return existing, nil
+	if existing := s.battleTickets[cacheKey]; existing != nil {
+		if existing.Ticket.ExpiresAt.After(now) {
+			return existing, nil
+		}
+		s.recordBattleTicketExpiredAuditLocked(existing, now)
 	}
 	ticketID := s.nextIDLocked("battle_ticket")
 	issuedAt := now
@@ -4597,6 +4600,38 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 	})
 	fingerprint := lifecycleFingerprint("battle:ticket", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
 	s.recordBattleAuditOutcomeLocked("battle_ticket", fingerprint, ticket.IssuedAt, err)
+}
+
+func (s *Service) recordBattleTicketExpiredAuditLocked(signed *SignedBattleTicket, expiredAt time.Time) {
+	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
+		return
+	}
+	ticket := signed.Ticket
+	if expiredAt.IsZero() {
+		expiredAt = s.clock()
+	}
+	err := s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Endpoint:            ticket.Endpoint,
+		KeyID:               signed.KeyID,
+		RulesetVersion:      ticket.RulesetVersion,
+		ProtocolVersion:     fmt.Sprintf("%d", ticket.Version.ProtocolVersion),
+		DeckSnapshotHash:    ticket.DeckSnapshotHash,
+		ModeConfigHash:      modeConfigHash(ticket.ModeID),
+		Nonce:               ticket.TicketNonceHex,
+		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
+		Status:              "expired",
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ConsumedAt:          expiredAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:ticket:expired", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	s.recordBattleAuditOutcomeLocked("battle_ticket_expired", fingerprint, expiredAt, err)
 }
 
 func (s *Service) recordLobbyRoomAuditLocked(room *roomState, ticket *queueTicket, userID string, action string, createdAt time.Time) {
@@ -4850,6 +4885,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		s.battleAuditStatus.AllocationRecords++
 	case "battle_ticket":
 		s.battleAuditStatus.TicketRecords++
+	case "battle_ticket_expired":
+		s.battleAuditStatus.TicketExpiredRecords++
 	case "battle_result":
 		s.battleAuditStatus.ResultRecords++
 	case "battle_result_duplicate":
