@@ -106,6 +106,7 @@ type Service struct {
 	mu                 sync.Mutex
 	clock              Clock
 	matchDurationTicks int
+	battleAuditRepo    BattleLifecycleAuditRepository
 	signingKeyID       string
 	signingPublicKey   ed25519.PublicKey
 	signingPrivateKey  ed25519.PrivateKey
@@ -387,6 +388,7 @@ func NewService(config Config) *Service {
 	service := &Service{
 		clock:              clock,
 		matchDurationTicks: matchTicks,
+		battleAuditRepo:    config.BattleLifecycleAuditRepo,
 		signingKeyID:       "dev-ed25519-0",
 		signingPublicKey:   publicKey,
 		signingPrivateKey:  privateKey,
@@ -1892,6 +1894,7 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	match.ModeState["battle_result_verified"] = true
 	appendMatchEventLocked(match, MatchEvent{Type: "battle_result_verified", Tick: match.Tick, Status: "accepted"})
 	s.settleMatchLocked(match)
+	s.recordBattleResultAuditLocked(match, allocation, signed, now)
 	return &BattleResultSubmitResponse{
 		OK:                  true,
 		Version:             currentVersionStamp(),
@@ -2578,7 +2581,9 @@ func (s *Service) settleMatchLocked(match *matchState) {
 		settlement := s.buildSettlementLocked(match, player, user, result)
 		key := settlementKey(match.MatchID, userID)
 		s.settlements[key] = settlement
-		s.replays[settlement.ReplayID] = s.buildReplayRecordLocked(match, player, settlement)
+		replay := s.buildReplayRecordLocked(match, player, settlement)
+		s.replays[settlement.ReplayID] = replay
+		s.recordReplayAuditLocked(replay)
 		s.applyRewardsLocked(user, match.MatchID, settlement.RewardJSON)
 		s.applyProgressLocked(user, settlement)
 	}
@@ -4168,6 +4173,7 @@ func (s *Service) ensureBattleAllocationLocked(match *matchState) *BattleServerA
 	}
 	s.battleAllocations[match.MatchID] = alloc
 	match.BattleAllocation = alloc
+	s.recordMatchAllocationAuditLocked(alloc, server)
 	return alloc
 }
 
@@ -4289,7 +4295,107 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 		ServerTime:          now,
 	}
 	s.battleTickets[cacheKey] = signed
+	s.recordBattleTicketAuditLocked(signed)
 	return signed, nil
+}
+
+func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAllocation, server *battleServerState) {
+	if s.battleAuditRepo == nil || allocation == nil {
+		return
+	}
+	allocationJSON := ""
+	if encoded, err := json.Marshal(copyBattleAllocation(allocation)); err == nil {
+		allocationJSON = string(encoded)
+	}
+	region := ""
+	if server != nil {
+		region = server.Region
+	}
+	_ = s.battleAuditRepo.RecordMatchAllocationAudit(BattleAllocationAuditRecord{
+		MatchID:             allocation.MatchID,
+		ModeID:              allocation.ModeID,
+		BattleServerID:      allocation.BattleServerID,
+		Endpoint:            allocation.Endpoint,
+		Region:              region,
+		ProtocolVersion:     fmt.Sprintf("%d", allocation.Version.ProtocolVersion),
+		RulesetVersion:      allocation.Version.RulesetVersion,
+		ModeConfigHash:      allocation.ModeConfigHash,
+		ServerSeedHash:      "sha256:" + shortHash(allocation.ServerSeedHex),
+		PlayerCount:         len(allocation.Players),
+		AllocationJSON:      allocationJSON,
+		Status:              "allocated",
+		CreatedAt:           allocation.AllocatedAt,
+		ServerAuthoritative: true,
+	})
+}
+
+func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
+	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
+		return
+	}
+	ticket := signed.Ticket
+	_ = s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Endpoint:            ticket.Endpoint,
+		KeyID:               signed.KeyID,
+		RulesetVersion:      ticket.RulesetVersion,
+		ProtocolVersion:     fmt.Sprintf("%d", ticket.Version.ProtocolVersion),
+		DeckSnapshotHash:    ticket.DeckSnapshotHash,
+		ModeConfigHash:      modeConfigHash(ticket.ModeID),
+		Nonce:               ticket.TicketNonceHex,
+		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
+		Status:              "issued",
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ServerAuthoritative: true,
+	})
+}
+
+func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *BattleServerAllocation, signed SignedBattleResult, verifiedAt time.Time) {
+	if s.battleAuditRepo == nil || match == nil {
+		return
+	}
+	battleServerID := signed.KeyID
+	if allocation != nil && allocation.BattleServerID != "" {
+		battleServerID = allocation.BattleServerID
+	}
+	_ = s.battleAuditRepo.RecordBattleResultAudit(BattleResultAuditRecord{
+		MatchID:             match.MatchID,
+		ModeID:              match.ModeID,
+		BattleServerID:      battleServerID,
+		ResultHash:          signed.Result.ResultHash,
+		ReplayID:            signed.Result.ReplayID,
+		KeyID:               signed.KeyID,
+		PlayerIDs:           copyStringSlice(signed.Result.PlayerIDs),
+		SettlementKey:       battleResultSettlementKey(match.MatchID),
+		VerifiedAt:          verifiedAt,
+		SettledAt:           match.BattleResultAt,
+		ServerAuthoritative: true,
+	})
+}
+
+func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
+	if s.battleAuditRepo == nil || replay == nil || replay.ReplayID == "" {
+		return
+	}
+	_ = s.battleAuditRepo.RecordReplayAudit(ReplayAuditRecord{
+		ReplayID:            replay.ReplayID,
+		MatchID:             replay.MatchID,
+		UserID:              replay.UserID,
+		ModeID:              replay.ModeID,
+		RulesetVersion:      replay.RulesetVersion,
+		ModeRulesetVersion:  replay.ModeRulesetVersion,
+		StateHash:           replay.StateHash,
+		InputCount:          replay.InputCount,
+		EventCount:          replay.EventCount,
+		SettlementKey:       replay.Settlement.SettlementKey,
+		SettledAt:           replay.SettledAt,
+		ServerAuthoritative: true,
+	})
 }
 
 func validateSignedBattleResultShape(signed SignedBattleResult, now time.Time) error {
@@ -4520,6 +4626,13 @@ func seedFrom(matchID string) int64 {
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:4])
+}
+
+func prefixString(value string, length int) string {
+	if length <= 0 || len(value) <= length {
+		return value
+	}
+	return value[:length]
 }
 
 func settlementKey(matchID string, userID string) string {

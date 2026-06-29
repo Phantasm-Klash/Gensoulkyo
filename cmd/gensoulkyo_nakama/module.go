@@ -46,7 +46,7 @@ var rpcIDs = []string{
 }
 
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	service := core.NewService(core.Config{})
+	var battleAuditRepo core.BattleLifecycleAuditRepository
 	guard := security.NewBusinessEnvelopeGuard()
 	if db != nil {
 		sink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
@@ -54,7 +54,13 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 			return err
 		}
 		guard = security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
+		repo, err := core.NewSQLBattleLifecycleAuditRepository(db)
+		if err != nil {
+			return err
+		}
+		battleAuditRepo = repo
 	}
+	service := core.NewService(core.Config{BattleLifecycleAuditRepo: battleAuditRepo})
 	handler := nakamaapi.New(service, nakamaapi.WithBusinessEnvelopeGuard(guard))
 	for _, id := range rpcIDs {
 		rpcID := id

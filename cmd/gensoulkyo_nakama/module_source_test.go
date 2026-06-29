@@ -17,6 +17,8 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"func InitModule(",
 		"initializer.RegisterRpc",
 		"nakamaapi.New",
+		"core.NewSQLBattleLifecycleAuditRepository",
+		"BattleLifecycleAuditRepo",
 		"runtime.RUNTIME_CTX_SESSION_ID",
 		"runtime.RUNTIME_CTX_USER_ID",
 		"auth.anonymous",

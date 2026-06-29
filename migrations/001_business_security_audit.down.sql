@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS replay_audits;
+DROP TABLE IF EXISTS battle_result_audits;
 DROP TABLE IF EXISTS match_allocation_audits;
 DROP TABLE IF EXISTS battle_ticket_audits;
 DROP TABLE IF EXISTS business_envelope_nonce_windows;
