@@ -250,6 +250,9 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.JoinQueue(message.SessionID, req) })
+	case "matchmaking.ticket":
+		ticketID := fieldString(body, "ticket_id", "ticketId")
+		return handler.call(func() (any, error) { return handler.service.QueueTicket(message.SessionID, ticketID) })
 	case "matchmaking.cancel":
 		ticketID := fieldString(body, "ticket_id", "ticketId")
 		return handler.call(func() (any, error) { return handler.service.CancelTicket(message.SessionID, ticketID) })

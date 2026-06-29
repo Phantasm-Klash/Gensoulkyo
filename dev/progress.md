@@ -99,3 +99,9 @@ Status date: 2026-06-28
 - Extended `BattleLifecycleAuditStatus` and `LobbyLifecycleAuditStatus` with non-secret last-success operation, timestamp, and deterministic fingerprint fields so Nakama status RPC/WSS checks can prove real lifecycle audit writes occurred.
 - Added core and DB-backed Nakama handler regressions covering the fingerprints after allocation/ticket/result/replay writes and after lobby room/read/message/match writes.
 - The fingerprint is derived from existing ids and hashes, not raw payloads, signatures, or secrets; it keeps audit visibility operational while preserving the Nakama/Go business authority split.
+
+## 2026-06-29 gensoulkyo-lobby WSS ticket polling update
+
+- Added SDK-neutral Nakama business WSS dispatch for `matchmaking.ticket`, matching the existing RPC route so room and match progress polling can stay on the intended business socket path.
+- Extended Nakama adapter regressions to prove WSS ticket polling requires the shared business envelope, returns the server-owned match allocation and signed battle ticket, and does not create fake audit progress when durable lobby repositories are not configured.
+- Extended the DB-backed handler regression so configured SQL repositories record WSS room-ticket polling as the existing `ticket_read` lobby lifecycle audit, with status fingerprints reflecting the durable read.

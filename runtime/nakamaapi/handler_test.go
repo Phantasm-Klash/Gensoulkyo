@@ -443,6 +443,22 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("joined room should bind pvp duel match: %+v", found)
 	}
 
+	polledTicket := handler.HandleWSSMessage(WSSMessage{
+		Name:      "matchmaking.ticket",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(3, "nonce-external-guest-ticket-poll", "matchmaking_ticket", map[string]any{
+			"ticket_id": found.TicketID,
+		}),
+	})
+	if !polledTicket.OK || polledTicket.Status != 200 {
+		t.Fatalf("room ticket WSS poll failed: %+v", polledTicket)
+	}
+	polled := polledTicket.Payload.(*core.QueueResponse)
+	if polled.TicketID != found.TicketID || polled.MatchID != found.MatchID || polled.RoomStatus != "found" || polled.BattleAllocation == nil || polled.BattleTicket == nil {
+		t.Fatalf("room ticket WSS poll should return match allocation and signed ticket: %+v", polled)
+	}
+
 	hostReady := handler.HandleRPC(RPCRequest{
 		ID:        "match.ready",
 		SessionID: hostSession,
@@ -458,7 +474,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "match.ready",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(3, "nonce-external-guest-ready", "match_ready", map[string]any{
+		Payload: envelopePayload(4, "nonce-external-guest-ready", "match_ready", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
@@ -485,7 +501,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "presence.heartbeat",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(4, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
+		Payload: envelopePayload(5, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
@@ -551,6 +567,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	lobbyStatus := lobbyAuditStatus.Payload.(core.LobbyLifecycleAuditStatus)
 	if lobbyStatus.Configured || lobbyStatus.OK || !lobbyStatus.ServerAuthoritative {
 		t.Fatalf("default in-memory handler should surface missing durable lobby audit repository: %+v", lobbyStatus)
+	}
+	if lobbyStatus.RoomReadRecords != 0 || lobbyStatus.LastSuccessOperation != "" {
+		t.Fatalf("unconfigured lobby audit repository must not fake ticket-read progress: %+v", lobbyStatus)
 	}
 
 	wssResultSubmit := handler.HandleWSSMessage(WSSMessage{
@@ -875,6 +894,22 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		t.Fatalf("join should create match allocation and guest ticket: %+v", match)
 	}
 
+	polledTicket := handler.HandleWSSMessage(WSSMessage{
+		Name:      "matchmaking.ticket",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(4, "nonce-sql-guest-ticket-poll", "matchmaking_ticket", map[string]any{
+			"ticket_id": match.TicketID,
+		}),
+	})
+	if !polledTicket.OK {
+		t.Fatalf("guest room ticket WSS poll failed: %+v", polledTicket)
+	}
+	polled := polledTicket.Payload.(*core.QueueResponse)
+	if polled.TicketID != match.TicketID || polled.MatchID != match.MatchID || polled.BattleTicket == nil || polled.BattleAllocation == nil {
+		t.Fatalf("guest room ticket WSS poll should preserve match allocation/ticket: %+v", polled)
+	}
+
 	ticket := handler.HandleRPC(RPCRequest{
 		ID:        "battle.ticket",
 		SessionID: host.SessionToken,
@@ -941,17 +976,17 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		Name:      "lobby.audit.status",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload:   envelopePayload(4, "nonce-sql-lobby-status", "lobby_audit_status", map[string]any{}),
+		Payload:   envelopePayload(5, "nonce-sql-lobby-status", "lobby_audit_status", map[string]any{}),
 	})
 	if !lobbyStatus.OK {
 		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
 	}
-	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 1 || status.MessageRecords != 2 || status.LastSuccessOperation != "matched" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 2 || status.RoomReadRecords != 2 || status.MessageRecords != 2 || status.LastSuccessOperation != "ticket_read" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("lobby audit status should reflect SQL repository writes: %+v", status)
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 8 || tableCounts["lobby_room_audits"] != 3 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 1 || tableCounts["replay_audits"] != 2 {
+	if tableCounts["business_envelope_audits"] < 9 || tableCounts["lobby_room_audits"] != 4 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 1 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 1 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasDuplicateLobbyMessageAudit() {
