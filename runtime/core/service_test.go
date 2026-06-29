@@ -737,6 +737,132 @@ func (repo *captureBattleLifecycleAuditRepo) RecordReplayAudit(record ReplayAudi
 	return nil
 }
 
+func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *testing.T) {
+	now := time.Date(2026, 6, 29, 6, 15, 0, 0, time.UTC)
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                   func() time.Time { return now },
+		LobbyLifecycleAuditRepo: repo,
+	})
+	host := mustLogin(t, service, "Lobby Audit Host")
+	guest := mustLogin(t, service, "Lobby Audit Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "audit_host_deck",
+		DeckSnapshot: validDeck("audit_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if len(repo.rooms) != 1 || repo.rooms[0].Action != "created" || repo.rooms[0].RoomCode != created.RoomCode || repo.rooms[0].DeckSnapshotHash == "" {
+		t.Fatalf("create room audit invalid: %+v", repo.rooms)
+	}
+
+	if _, err := service.RoomRules(guest.SessionToken, created.RoomCode); err != nil {
+		t.Fatalf("room rules: %v", err)
+	}
+	if len(repo.rooms) != 2 || repo.rooms[1].Action != "rules_read" || repo.rooms[1].UserID != guest.UserID || repo.rooms[1].ModeConfigHash == "" {
+		t.Fatalf("rules audit invalid: %+v", repo.rooms)
+	}
+
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "audit_guest_deck",
+		DeckSnapshot: validDeck("audit_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if len(repo.rooms) != 3 || repo.rooms[2].Action != "joined" || repo.rooms[2].TicketID != joined.TicketID || repo.rooms[2].CurrentPlayers != 2 {
+		t.Fatalf("join audit invalid: %+v", repo.rooms)
+	}
+
+	chat, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "audit-chat-1",
+		Kind:      "chat",
+		Text:      "audit hello",
+		Metadata:  map[string]any{"client_locale": "en-US"},
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	duplicate, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: chat.MessageID,
+		Kind:      "chat",
+		Text:      "ignored duplicate body",
+	})
+	if err != nil {
+		t.Fatalf("duplicate chat: %v", err)
+	}
+	if !duplicate.Duplicate || len(repo.messages) != 2 || repo.messages[0].MessageID != chat.MessageID || repo.messages[0].MetadataHash == "" || !repo.messages[1].Duplicate {
+		t.Fatalf("message audits invalid: messages=%+v duplicate=%+v", repo.messages, duplicate)
+	}
+
+	left, err := service.LeaveRoom(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("leave room: %v", err)
+	}
+	lastRoomAudit := repo.rooms[len(repo.rooms)-1]
+	if left.RoomStatus != "cancelled" || lastRoomAudit.Action != "left" || lastRoomAudit.UserID != guest.UserID || lastRoomAudit.CurrentPlayers != 1 {
+		t.Fatalf("leave audit invalid: response=%+v audit=%+v", left, lastRoomAudit)
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
+		t.Fatalf("lobby audit status invalid: %+v", status)
+	}
+}
+
+func TestLobbyLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{err: errors.New("lobby audit db offline")}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Lobby Audit Error Host")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "audit_error_deck",
+		DeckSnapshot: validDeck("audit_error_deck"),
+	})
+	if err != nil {
+		t.Fatalf("fallback room creation should remain available while audit failure is surfaced: %v", err)
+	}
+	if created.RoomCode == "" {
+		t.Fatalf("room creation should still return a room: %+v", created)
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if status.OK || !status.Configured || status.RejectedRecords == 0 || status.LastErrorOperation != "created" || !strings.Contains(status.LastError, "lobby audit db offline") {
+		t.Fatalf("lobby audit failure should be visible in status snapshot: %+v", status)
+	}
+	if !status.ServerAuthoritative {
+		t.Fatalf("lobby audit status must stay server authoritative: %+v", status)
+	}
+}
+
+type captureLobbyLifecycleAuditRepo struct {
+	rooms    []LobbyRoomAuditRecord
+	messages []LobbyMessageAuditRecord
+	err      error
+}
+
+func (repo *captureLobbyLifecycleAuditRepo) RecordLobbyRoomAudit(record LobbyRoomAuditRecord) error {
+	if repo.err != nil {
+		return repo.err
+	}
+	repo.rooms = append(repo.rooms, record)
+	return nil
+}
+
+func (repo *captureLobbyLifecycleAuditRepo) RecordLobbyMessageAudit(record LobbyMessageAuditRecord) error {
+	if repo.err != nil {
+		return repo.err
+	}
+	repo.messages = append(repo.messages, record)
+	return nil
+}
+
 func TestInventoryDeckSaveAndMatchUsesServerActiveDeck(t *testing.T) {
 	service := NewService(Config{})
 	alice := mustLogin(t, service, "Deck Alice")

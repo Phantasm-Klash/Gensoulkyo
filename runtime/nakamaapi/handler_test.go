@@ -521,11 +521,25 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("default in-memory handler should surface missing durable audit repository: %+v", status)
 	}
 
+	lobbyAuditStatus := handler.HandleRPC(RPCRequest{
+		ID:        "lobby.audit.status",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload:   envelopePayload(7, "nonce-external-host-lobby-audit-status", "lobby_audit_status", map[string]any{}),
+	})
+	if !lobbyAuditStatus.OK || lobbyAuditStatus.Status != 200 {
+		t.Fatalf("lobby audit status RPC read failed: %+v", lobbyAuditStatus)
+	}
+	lobbyStatus := lobbyAuditStatus.Payload.(core.LobbyLifecycleAuditStatus)
+	if lobbyStatus.Configured || lobbyStatus.OK || !lobbyStatus.ServerAuthoritative {
+		t.Fatalf("default in-memory handler should surface missing durable lobby audit repository: %+v", lobbyStatus)
+	}
+
 	wssResultSubmit := handler.HandleWSSMessage(WSSMessage{
 		Name:      "battle.result.submit",
 		SessionID: hostSession,
 		UserID:    hostUser,
-		Payload: envelopePayload(7, "nonce-external-host-result-submit", "battle_result_submit", map[string]any{
+		Payload: envelopePayload(8, "nonce-external-host-result-submit", "battle_result_submit", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})

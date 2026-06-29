@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,9 +22,13 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	assertMigrationCoversInsertColumns(t, upSQL, insertBattleTicketAuditSQL, "battle_ticket_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertBattleResultAuditSQL, "battle_result_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertReplayAuditSQL, "replay_audits")
+	assertMigrationCoversInsertColumns(t, upSQL, insertLobbyRoomAuditSQL, "lobby_room_audits")
+	assertMigrationCoversInsertColumns(t, upSQL, insertLobbyMessageAuditSQL, "lobby_message_audits")
 	if !strings.Contains(upSQL, "'dev-ed25519-0'") {
 		t.Fatalf("migration must seed dev-ed25519-0 so battle_ticket_audits.key_id foreign key can accept signed ticket audits")
 	}
+	assertDownMigrationDropsTable(t, downSQL, "lobby_room_audits")
+	assertDownMigrationDropsTable(t, downSQL, "lobby_message_audits")
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")
 	assertDownMigrationDropsTable(t, downSQL, "replay_audits")
 }
@@ -153,6 +158,86 @@ func TestSQLBattleLifecycleAuditRepositoryRejectsNilDB(t *testing.T) {
 	}
 	var repo *SQLBattleLifecycleAuditRepository
 	if err := repo.RecordMatchAllocationAudit(BattleAllocationAuditRecord{}); err == nil {
+		t.Fatalf("expected nil repo rejection")
+	}
+}
+
+func TestSQLLobbyLifecycleAuditRepositoryRecordsRoomAndMessage(t *testing.T) {
+	driverName := registerBattleAuditCaptureDriver(t)
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	repo, err := NewSQLLobbyLifecycleAuditRepository(db, withSQLLobbyLifecycleAuditStatements(
+		"INSERT INTO lobby_room_audits VALUES ($1)",
+		"INSERT INTO lobby_message_audits VALUES ($1)",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 29, 6, 10, 0, 0, time.UTC)
+	if err := repo.RecordLobbyRoomAudit(LobbyRoomAuditRecord{
+		RoomCode:            "ABCD12",
+		Action:              "joined",
+		ModeID:              "world_boss",
+		UserID:              "user-a",
+		TicketID:            "ticket-a",
+		MatchID:             "match-a",
+		RoomStatus:          "waiting",
+		HostUserID:          "host-a",
+		CurrentPlayers:      2,
+		RequiredPlayers:     4,
+		StageID:             "lunar_maze",
+		RulesetVersion:      RulesetVersion,
+		ModeRulesetVersion:  "world-boss-s0",
+		ModeConfigHash:      "sha256:mode",
+		DeckSnapshotHash:    "sha256:deck",
+		CreatedAt:           now,
+		ServerAuthoritative: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordLobbyMessageAudit(LobbyMessageAuditRecord{
+		MessageID:           "message-a",
+		RoomCode:            "ABCD12",
+		ModeID:              "world_boss",
+		Kind:                "chat",
+		UserID:              "user-a",
+		Duplicate:           false,
+		TextLength:          12,
+		MetadataHash:        "sha256:metadata",
+		CreatedAt:           now,
+		ServerAuthoritative: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := battleAuditCaptureCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected two lobby audit inserts, got %+v", calls)
+	}
+	if !strings.Contains(calls[0].query, "INSERT INTO lobby_room_audits") || len(calls[0].args) != 17 {
+		t.Fatalf("room insert invalid: %+v", calls[0])
+	}
+	if calls[0].args[0] != "ABCD12" || calls[0].args[1] != "joined" || fmt.Sprint(calls[0].args[8]) != "2" || calls[0].args[16] != true {
+		t.Fatalf("room args invalid: %+v", calls[0].args)
+	}
+	if !strings.Contains(calls[1].query, "INSERT INTO lobby_message_audits") || len(calls[1].args) != 10 {
+		t.Fatalf("message insert invalid: %+v", calls[1])
+	}
+	if calls[1].args[0] != "message-a" || calls[1].args[3] != "chat" || calls[1].args[7] != "sha256:metadata" || calls[1].args[9] != true {
+		t.Fatalf("message args invalid: %+v", calls[1].args)
+	}
+}
+
+func TestSQLLobbyLifecycleAuditRepositoryRejectsNilDB(t *testing.T) {
+	if _, err := NewSQLLobbyLifecycleAuditRepository(nil); err == nil {
+		t.Fatalf("expected nil db rejection")
+	}
+	var repo *SQLLobbyLifecycleAuditRepository
+	if err := repo.RecordLobbyRoomAudit(LobbyRoomAuditRecord{}); err == nil {
 		t.Fatalf("expected nil repo rejection")
 	}
 }
