@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS battle_ticket_audits (
     nonce TEXT NOT NULL,
     signature_prefix TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('issued', 'consumed', 'expired', 'revoked')) DEFAULT 'issued',
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE,
     consumed_at TIMESTAMPTZ,
     CONSTRAINT fk_battle_ticket_key
         FOREIGN KEY (key_id) REFERENCES business_envelope_keys(key_id)
@@ -110,7 +111,8 @@ CREATE TABLE IF NOT EXISTS match_allocation_audits (
     server_seed_hash TEXT NOT NULL,
     player_count INTEGER NOT NULL,
     allocation_json JSONB NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled')) DEFAULT 'allocated'
+    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled')) DEFAULT 'allocated',
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_match_allocation_audit_match
@@ -176,4 +178,22 @@ INSERT INTO business_envelope_keys (
     NULL,
     'local-dev-placeholder',
     'Development scaffold key id used by HTTP fallback tests. Replace before production.'
+) ON CONFLICT (key_id) DO NOTHING;
+
+INSERT INTO business_envelope_keys (
+    key_id,
+    protocol_version,
+    suite,
+    status,
+    public_key_hex,
+    server_key_ref,
+    notes
+) VALUES (
+    'dev-ed25519-0',
+    'battle-ticket-v0-scaffold',
+    'ed25519_battle_ticket_dev_scaffold',
+    'dev_scaffold',
+    NULL,
+    'local-dev-ticket-signing-placeholder',
+    'Development scaffold key id used by signed battle ticket audits. Replace before production.'
 ) ON CONFLICT (key_id) DO NOTHING;

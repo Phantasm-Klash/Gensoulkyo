@@ -17,8 +17,13 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	upSQL := readMigrationFile(t, "001_business_security_audit.up.sql")
 	downSQL := readMigrationFile(t, "001_business_security_audit.down.sql")
 
+	assertMigrationCoversInsertColumns(t, upSQL, insertMatchAllocationAuditSQL, "match_allocation_audits")
+	assertMigrationCoversInsertColumns(t, upSQL, insertBattleTicketAuditSQL, "battle_ticket_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertBattleResultAuditSQL, "battle_result_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertReplayAuditSQL, "replay_audits")
+	if !strings.Contains(upSQL, "'dev-ed25519-0'") {
+		t.Fatalf("migration must seed dev-ed25519-0 so battle_ticket_audits.key_id foreign key can accept signed ticket audits")
+	}
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")
 	assertDownMigrationDropsTable(t, downSQL, "replay_audits")
 }
@@ -42,39 +47,41 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	}
 	now := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	if err := repo.RecordMatchAllocationAudit(BattleAllocationAuditRecord{
-		MatchID:         "match-a",
-		ModeID:          "pvp_duel",
-		BattleServerID:  "battle-a",
-		Endpoint:        "127.0.0.1:7901",
-		Region:          "local",
-		ProtocolVersion: "1",
-		RulesetVersion:  RulesetVersion,
-		ModeConfigHash:  "sha256:mode",
-		ServerSeedHash:  "sha256:seed",
-		PlayerCount:     2,
-		AllocationJSON:  `{"match_id":"match-a"}`,
-		Status:          "allocated",
-		CreatedAt:       now,
+		MatchID:             "match-a",
+		ModeID:              "pvp_duel",
+		BattleServerID:      "battle-a",
+		Endpoint:            "127.0.0.1:7901",
+		Region:              "local",
+		ProtocolVersion:     "1",
+		RulesetVersion:      RulesetVersion,
+		ModeConfigHash:      "sha256:mode",
+		ServerSeedHash:      "sha256:seed",
+		PlayerCount:         2,
+		AllocationJSON:      `{"match_id":"match-a"}`,
+		Status:              "allocated",
+		CreatedAt:           now,
+		ServerAuthoritative: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.RecordBattleTicketAudit(BattleTicketAuditRecord{
-		TicketID:         "ticket-a",
-		MatchID:          "match-a",
-		UserID:           "user-a",
-		PlayerID:         "player-a",
-		BattleServerID:   "battle-a",
-		Endpoint:         "127.0.0.1:7901",
-		KeyID:            "dev-ed25519-0",
-		RulesetVersion:   RulesetVersion,
-		ProtocolVersion:  "1",
-		DeckSnapshotHash: "sha256:deck",
-		ModeConfigHash:   "sha256:mode",
-		Nonce:            "nonce-a",
-		SignaturePrefix:  "0123456789abcdef",
-		Status:           "issued",
-		IssuedAt:         now,
-		ExpiresAt:        now.Add(time.Minute),
+		TicketID:            "ticket-a",
+		MatchID:             "match-a",
+		UserID:              "user-a",
+		PlayerID:            "player-a",
+		BattleServerID:      "battle-a",
+		Endpoint:            "127.0.0.1:7901",
+		KeyID:               "dev-ed25519-0",
+		RulesetVersion:      RulesetVersion,
+		ProtocolVersion:     "1",
+		DeckSnapshotHash:    "sha256:deck",
+		ModeConfigHash:      "sha256:mode",
+		Nonce:               "nonce-a",
+		SignaturePrefix:     "0123456789abcdef",
+		Status:              "issued",
+		IssuedAt:            now,
+		ExpiresAt:           now.Add(time.Minute),
+		ServerAuthoritative: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,16 +121,16 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	if len(calls) != 4 {
 		t.Fatalf("expected four inserts, got %+v", calls)
 	}
-	if !strings.Contains(calls[0].query, "INSERT INTO match_allocation_audits") || len(calls[0].args) != 12 {
+	if !strings.Contains(calls[0].query, "INSERT INTO match_allocation_audits") || len(calls[0].args) != 14 {
 		t.Fatalf("allocation insert invalid: %+v", calls[0])
 	}
-	if calls[0].args[0] != "match-a" || calls[0].args[2] != "battle-a" || calls[0].args[10] != `{"match_id":"match-a"}` {
+	if calls[0].args[0] != "match-a" || calls[0].args[2] != "battle-a" || calls[0].args[10] != `{"match_id":"match-a"}` || calls[0].args[12] != true || calls[0].args[13] != now {
 		t.Fatalf("allocation args invalid: %+v", calls[0].args)
 	}
-	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 16 {
+	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 17 {
 		t.Fatalf("ticket insert invalid: %+v", calls[1])
 	}
-	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" {
+	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" || calls[1].args[16] != true {
 		t.Fatalf("ticket args invalid: %+v", calls[1].args)
 	}
 	if !strings.Contains(calls[2].query, "INSERT INTO battle_result_audits") || len(calls[2].args) != 11 {
