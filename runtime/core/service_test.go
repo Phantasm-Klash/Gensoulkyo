@@ -954,6 +954,75 @@ func TestBattleTicketExpiryLifecycleAudit(t *testing.T) {
 	}
 }
 
+func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
+	now := time.Date(2026, 6, 30, 8, 0, 0, 0, time.UTC)
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                    func() time.Time { return now },
+		BattleLifecycleAuditRepo: repo,
+	})
+	alice := mustLogin(t, service, "Ticket Consume Alice")
+	bob := mustLogin(t, service, "Ticket Consume Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	ticket, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("battle ticket: %v", err)
+	}
+	consume, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       ticket.Ticket.TicketID,
+		MatchID:        matchID,
+		UserID:         alice.UserID,
+		PlayerID:       ticket.Ticket.PlayerID,
+		BattleServerID: ticket.Ticket.BattleServerID,
+		TicketNonceHex: ticket.Ticket.TicketNonceHex,
+	})
+	if err != nil {
+		t.Fatalf("consume ticket: %v", err)
+	}
+	if !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
+		t.Fatalf("consume response invalid: %+v", consume)
+	}
+	if len(repo.tickets) < 2 || repo.tickets[len(repo.tickets)-1].Status != "consumed" || repo.tickets[len(repo.tickets)-1].ConsumedAt != now {
+		t.Fatalf("consumed ticket audit missing: %+v", repo.tickets)
+	}
+	afterConsumeAuditCount := len(repo.tickets)
+	duplicate, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       ticket.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: ticket.Ticket.BattleServerID,
+		TicketNonceHex: ticket.Ticket.TicketNonceHex,
+	})
+	if err != nil {
+		t.Fatalf("duplicate consume ticket: %v", err)
+	}
+	if !duplicate.Consumed || !duplicate.Duplicate || duplicate.ServerTime != now {
+		t.Fatalf("duplicate consume response invalid: %+v", duplicate)
+	}
+	if len(repo.tickets) != afterConsumeAuditCount {
+		t.Fatalf("duplicate consume should not write another ticket audit: %+v", repo.tickets)
+	}
+	replacement, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("replacement battle ticket: %v", err)
+	}
+	if replacement.Ticket.TicketID == ticket.Ticket.TicketID {
+		t.Fatalf("consumed ticket should not be reissued: old=%+v replacement=%+v", ticket.Ticket, replacement.Ticket)
+	}
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: "wrong-nonce",
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected nonce mismatch rejection, got %v", err)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket" {
+		t.Fatalf("ticket consume status invalid: %+v", status)
+	}
+}
+
 type captureBattleLifecycleAuditRepo struct {
 	allocations []BattleAllocationAuditRecord
 	tickets     []BattleTicketAuditRecord

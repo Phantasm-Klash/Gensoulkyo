@@ -194,3 +194,9 @@ Status date: 2026-06-28
 - Extended core and DB-backed Nakama regressions so authenticated RPC/WSS heartbeats write durable lobby audit rows through `runtime/nakamaapi.NewWithDatabase`, while allocation, battle tickets, replay, and service-origin battle result authority remain unchanged.
 - Updated the `lobby_room_audits.action` migration constraint and migration guard to keep the heartbeat audit contract aligned with the SQL repository path.
 - Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
+
+## 2026-06-30 gensoulkyo-lobby battle ticket consume audit update
+
+- Added a service-origin-only Nakama `battle.ticket.consume` RPC for C++ Battle Server ticket acceptance callbacks, reusing the existing signed ticket fields and `consumed` PostgreSQL audit status.
+- Core ticket consumption now validates ticket id, match id, battle server id, nonce, and optional user/player binding, records one durable consumed transition, treats repeated consume callbacks as idempotent, and issues a fresh short-lived ticket on later client reads instead of reusing the consumed ticket.
+- Kept the authority split closed to clients: business RPC/WSS clients can still read allocation/tickets, but public `battle.ticket.consume` calls and all callback names over WSS remain rejected before core dispatch.

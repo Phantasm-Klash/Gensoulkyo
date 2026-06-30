@@ -92,6 +92,7 @@ type BattleLifecycleAuditStatus struct {
 	AllocationRecords      int       `json:"allocation_records"`
 	TicketRecords          int       `json:"ticket_records"`
 	TicketExpiredRecords   int       `json:"ticket_expired_records"`
+	TicketConsumedRecords  int       `json:"ticket_consumed_records"`
 	ResultRecords          int       `json:"result_records"`
 	ResultDuplicateRecords int       `json:"result_duplicate_records"`
 	ReplayRecords          int       `json:"replay_records"`
@@ -345,6 +346,29 @@ type SignedBattleTicket struct {
 	KeyID               string       `json:"key_id"`
 	SignatureHex        string       `json:"signature_hex"`
 	PublicKeyHex        string       `json:"public_key_hex"`
+	ServerAuthoritative bool         `json:"server_authoritative"`
+	ServerTime          time.Time    `json:"server_time"`
+}
+
+type BattleTicketConsumeRequest struct {
+	TicketID       string `json:"ticket_id"`
+	MatchID        string `json:"match_id"`
+	UserID         string `json:"user_id,omitempty"`
+	PlayerID       string `json:"player_id,omitempty"`
+	BattleServerID string `json:"battle_server_id"`
+	TicketNonceHex string `json:"ticket_nonce_hex"`
+}
+
+type BattleTicketConsumeResponse struct {
+	OK                  bool         `json:"ok"`
+	Version             VersionStamp `json:"version"`
+	TicketID            string       `json:"ticket_id"`
+	MatchID             string       `json:"match_id"`
+	UserID              string       `json:"user_id"`
+	PlayerID            string       `json:"player_id"`
+	BattleServerID      string       `json:"battle_server_id"`
+	Consumed            bool         `json:"consumed"`
+	Duplicate           bool         `json:"duplicate"`
 	ServerAuthoritative bool         `json:"server_authoritative"`
 	ServerTime          time.Time    `json:"server_time"`
 }

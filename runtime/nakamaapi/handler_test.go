@@ -1270,6 +1270,54 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		t.Fatalf("host battle ticket failed: %+v", ticket)
 	}
 	allocation := ticket.Payload.(*core.SignedBattleTicket)
+	publicConsume := handler.HandleRPC(RPCRequest{
+		ID:        "battle.ticket.consume",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(11, "nonce-public-ticket-consume", "battle_ticket_consume", map[string]any{
+			"ticket_id":        allocation.Ticket.TicketID,
+			"match_id":         match.MatchID,
+			"battle_server_id": allocation.Ticket.BattleServerID,
+			"ticket_nonce_hex": allocation.Ticket.TicketNonceHex,
+		}),
+	})
+	if publicConsume.OK || publicConsume.Status != 403 || publicConsume.ErrorCode != CodeServiceOriginRequired {
+		t.Fatalf("client-origin ticket consume should fail closed: %+v", publicConsume)
+	}
+	consumedTicket := handler.HandleRPC(RPCRequest{
+		ID:      "battle.ticket.consume",
+		Service: true,
+		Payload: map[string]any{
+			"ticket_id":        allocation.Ticket.TicketID,
+			"match_id":         match.MatchID,
+			"user_id":          allocation.Ticket.UserID,
+			"player_id":        allocation.Ticket.PlayerID,
+			"battle_server_id": allocation.Ticket.BattleServerID,
+			"ticket_nonce_hex": allocation.Ticket.TicketNonceHex,
+		},
+	})
+	if !consumedTicket.OK {
+		t.Fatalf("service-origin battle ticket consume failed: %+v", consumedTicket)
+	}
+	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || receipt.Duplicate || receipt.TicketID != allocation.Ticket.TicketID || !receipt.ServerAuthoritative {
+		t.Fatalf("ticket consume receipt should be accepted and authoritative: %+v", receipt)
+	}
+	duplicateConsumedTicket := handler.HandleRPC(RPCRequest{
+		ID:      "battle.ticket.consume",
+		Service: true,
+		Payload: map[string]any{
+			"ticket_id":        allocation.Ticket.TicketID,
+			"match_id":         match.MatchID,
+			"battle_server_id": allocation.Ticket.BattleServerID,
+			"ticket_nonce_hex": allocation.Ticket.TicketNonceHex,
+		},
+	})
+	if !duplicateConsumedTicket.OK {
+		t.Fatalf("duplicate service-origin battle ticket consume failed: %+v", duplicateConsumedTicket)
+	}
+	if receipt := duplicateConsumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || !receipt.Duplicate || !receipt.ServerAuthoritative {
+		t.Fatalf("duplicate ticket consume receipt should be idempotent and authoritative: %+v", receipt)
+	}
 	playerIDs := []string{}
 	for _, player := range match.BattleAllocation.Players {
 		playerIDs = append(playerIDs, player.PlayerID)
@@ -1351,7 +1399,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
 	}
-	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.ServerLifecycleRecords != 4 || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.ResultRecords != 1 || status.ResultDuplicateRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result_duplicate" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+	if status := battleStatus.Payload.(core.BattleLifecycleAuditStatus); !status.OK || !status.Configured || status.ServerLifecycleRecords != 4 || status.AllocationRecords != 1 || status.TicketRecords < 2 || status.TicketConsumedRecords != 1 || status.ResultRecords != 1 || status.ResultDuplicateRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result_duplicate" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("battle audit status should reflect SQL repository writes: %+v", status)
 	}
 	lobbyStatus := handler.HandleWSSMessage(WSSMessage{
@@ -1368,7 +1416,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 16 || tableCounts["lobby_room_audits"] != 10 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 2 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
+	if tableCounts["business_envelope_audits"] < 16 || tableCounts["lobby_room_audits"] != 10 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 3 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasBattleServerLifecycleAudits() {
@@ -1379,6 +1427,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	if !nakamaSQLHasDuplicateBattleResultAudit() {
 		t.Fatalf("expected duplicate battle result audit row: calls=%+v", nakamaSQLCaptureCalls())
+	}
+	if !nakamaSQLHasConsumedBattleTicketAudit() {
+		t.Fatalf("expected consumed battle ticket audit row: calls=%+v", nakamaSQLCaptureCalls())
 	}
 }
 
@@ -1626,6 +1677,18 @@ func nakamaSQLHasDuplicateBattleResultAudit() bool {
 			continue
 		}
 		if strings.HasPrefix(fmt.Sprint(call.args[0]), "match_") && call.args[3] == "sha256:abcd1234" && call.args[8] == "duplicate" && call.args[11] == true {
+			return true
+		}
+	}
+	return false
+}
+
+func nakamaSQLHasConsumedBattleTicketAudit() bool {
+	for _, call := range nakamaSQLCaptureCalls() {
+		if !strings.Contains(call.query, "INSERT INTO battle_ticket_audits") || len(call.args) < 18 {
+			continue
+		}
+		if strings.HasPrefix(fmt.Sprint(call.args[0]), "battle_ticket_") && call.args[15] == "consumed" && call.args[16] == true && call.args[17] != nil {
 			return true
 		}
 	}

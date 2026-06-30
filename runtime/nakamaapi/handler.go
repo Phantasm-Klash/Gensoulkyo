@@ -235,6 +235,12 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "battle.ticket":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleTicket(request.SessionID, matchID) })
+	case "battle.ticket.consume":
+		var req core.BattleTicketConsumeRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.ConsumeBattleTicket(req) })
 	case "replay.get", "replay":
 		replayID := fieldString(body, "replay_id", "replayId")
 		return handler.call(func() (any, error) { return handler.service.Replay(request.SessionID, replayID) })
@@ -483,7 +489,7 @@ func rpcSkipsEnvelope(rpcID string) bool {
 
 func rpcRequiresServiceOrigin(rpcID string) bool {
 	switch rpcID {
-	case "battle.result.submit", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline":
+	case "battle.result.submit", "battle.ticket.consume", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline":
 		return true
 	default:
 		return false

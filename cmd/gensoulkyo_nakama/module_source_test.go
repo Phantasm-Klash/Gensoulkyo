@@ -46,6 +46,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"lobby.audit.status",
 		"battle.allocation",
 		"battle.ticket",
+		"battle.ticket.consume",
 		"replay.get",
 		"battle.result.submit",
 	} {
@@ -96,6 +97,7 @@ func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
 		"lobby.audit.status",
 		"battle.allocation",
 		"battle.ticket",
+		"battle.ticket.consume",
 		"replay.get",
 		"battle.result.submit",
 	}
@@ -147,6 +149,7 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	}
 	for _, serviceRPC := range []string{
 		"battle.result.submit",
+		"battle.ticket.consume",
 		"battle.servers.register",
 		"battle.servers.heartbeat",
 		"battle.servers.offline",

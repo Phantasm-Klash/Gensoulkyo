@@ -49,6 +49,7 @@ var rpcIDs = []string{
 	"lobby.audit.status",
 	"battle.allocation",
 	"battle.ticket",
+	"battle.ticket.consume",
 	"replay.get",
 	"battle.result.submit",
 }
@@ -57,6 +58,7 @@ var serviceOriginRPCIDs = map[string]struct{}{
 	"battle.servers.register":  {},
 	"battle.servers.heartbeat": {},
 	"battle.servers.offline":   {},
+	"battle.ticket.consume":    {},
 	"battle.result.submit":     {},
 }
 
