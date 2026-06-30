@@ -104,16 +104,28 @@ func isServiceOriginRPC(ctx context.Context, rpcID string) bool {
 	if runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID) != "" || runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID) != "" {
 		return false
 	}
+	expectedMode, ok := serviceCallbackContextExpected(serviceRuntimeModeKey)
+	if !ok {
+		return false
+	}
 	mode := strings.ToLower(strings.TrimSpace(runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)))
-	if mode != serviceCallbackContextValue(serviceRuntimeModeKey) {
+	if mode != expectedMode {
+		return false
+	}
+	expectedOrigin, ok := serviceCallbackContextExpected(serviceOriginVarKey)
+	if !ok {
 		return false
 	}
 	vars := runtimeCtxStringMap(ctx, runtime.RUNTIME_CTX_VARS)
-	if strings.ToLower(strings.TrimSpace(vars[serviceOriginVarKey])) != serviceCallbackContextValue(serviceOriginVarKey) {
+	if strings.ToLower(strings.TrimSpace(vars[serviceOriginVarKey])) != expectedOrigin {
+		return false
+	}
+	expectedCallback, ok := serviceCallbackContextExpected(serviceCallbackVarKey)
+	if !ok {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(vars[serviceCallbackVarKey])) {
-	case "1", "yes", serviceCallbackContextValue(serviceCallbackVarKey):
+	case "1", "yes", expectedCallback:
 		return true
 	default:
 		return false
@@ -129,7 +141,13 @@ func serviceOriginRPCIDSet() map[string]struct{} {
 }
 
 func serviceCallbackContextValue(key string) string {
-	return strings.ToLower(strings.TrimSpace(core.ServiceCallbackContext()[key]))
+	value, _ := serviceCallbackContextExpected(key)
+	return value
+}
+
+func serviceCallbackContextExpected(key string) (string, bool) {
+	value := strings.ToLower(strings.TrimSpace(core.ServiceCallbackContext()[key]))
+	return value, value != ""
 }
 
 func decodePayload(payload string) map[string]any {
