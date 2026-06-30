@@ -206,3 +206,9 @@ Status date: 2026-06-28
 - Hardened `BattleServerOffline` so service-origin offline callbacks always force the canonical `offline` state and cannot preserve or smuggle an `online` status from payload data.
 - Added core and SDK-neutral Nakama adapter regressions proving malicious or misconfigured offline payloads still reset load, preserve discovery metadata, and keep the server out of future allocation eligibility.
 - This stays within the Nakama/Go business lifecycle boundary: clients still cannot call battle server lifecycle callbacks, and no HTTP/Nakama path becomes combat simulation or settlement authority.
+
+## 2026-06-30 gensoulkyo-lobby register heartbeat canonicalization update
+
+- Hardened battle server `register` and `heartbeat` lifecycle callbacks so service-origin payload status is canonicalized to `online`; `offline` remains available only through the explicit `battle.servers.offline` callback.
+- Extended core and SDK-neutral Nakama regressions so malformed `offline`/`draining` register-heartbeat payloads cannot leak into discovery status or PostgreSQL-compatible lifecycle audit metadata.
+- Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.

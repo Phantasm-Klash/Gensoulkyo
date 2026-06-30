@@ -462,10 +462,13 @@ func TestBattleServerOfflineLifecycleSkipsFutureAllocations(t *testing.T) {
 		Region:         "local",
 		BuildID:        "offline-a",
 		Capacity:       8,
-		Status:         "online",
+		Status:         "offline",
 		SupportedModes: []string{"pvp_duel"},
 	}); err != nil {
 		t.Fatalf("register offline candidate: %v", err)
+	}
+	if repo.allocations[0].AllocationJSON == "" || !strings.Contains(repo.allocations[0].AllocationJSON, `"status":"online"`) {
+		t.Fatalf("register audit must canonicalize callback status to online: %+v", repo.allocations[0])
 	}
 	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
 		BattleServerID: "pvp-online-b",
@@ -477,6 +480,18 @@ func TestBattleServerOfflineLifecycleSkipsFutureAllocations(t *testing.T) {
 		SupportedModes: []string{"pvp_duel"},
 	}); err != nil {
 		t.Fatalf("register online candidate: %v", err)
+	}
+	heartbeat, err := service.BattleServerHeartbeat(BattleServerHeartbeatRequest{
+		BattleServerID: "pvp-offline-a",
+		ActiveMatches:  0,
+		Load:           0.5,
+		Status:         "draining",
+	})
+	if err != nil {
+		t.Fatalf("heartbeat offline candidate: %v", err)
+	}
+	if heartbeat.Status != "online" {
+		t.Fatalf("heartbeat must canonicalize payload status to online: %+v", heartbeat)
 	}
 	offline, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "pvp-offline-a", Status: "online"})
 	if err != nil {
@@ -497,11 +512,11 @@ func TestBattleServerOfflineLifecycleSkipsFutureAllocations(t *testing.T) {
 		t.Fatalf("offline server must be skipped for future allocations: %+v", allocation)
 	}
 	status := service.BattleLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.ServerLifecycleRecords != 3 || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.LastSuccessOperation == "" {
+	if !status.OK || !status.Configured || status.ServerLifecycleRecords != 4 || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.LastSuccessOperation == "" {
 		t.Fatalf("offline lifecycle audit status invalid: %+v", status)
 	}
-	if len(repo.allocations) != 4 || repo.allocations[2].Status != "server_offline" || repo.allocations[2].BattleServerID != "pvp-offline-a" {
-		t.Fatalf("expected register/register/offline/allocation audit records, got %+v", repo.allocations)
+	if len(repo.allocations) != 5 || repo.allocations[2].Status != "server_heartbeat" || !strings.Contains(repo.allocations[2].AllocationJSON, `"status":"online"`) || repo.allocations[3].Status != "server_offline" || repo.allocations[3].BattleServerID != "pvp-offline-a" {
+		t.Fatalf("expected register/register/heartbeat/offline/allocation audit records with canonical statuses, got %+v", repo.allocations)
 	}
 	if _, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "missing-battle"}); ErrorCode(err) != codeNotFound {
 		t.Fatalf("missing offline should be not_found, got %v", err)

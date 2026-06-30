@@ -913,7 +913,7 @@ func TestNakamaBattleServerRegisterHeartbeatAndOfflineRequireServiceOrigin(t *te
 			"capacity":         4,
 			"active_matches":   1,
 			"load":             0.25,
-			"status":           "online",
+			"status":           "offline",
 			"supported_modes":  []any{"pvp_duel"},
 		},
 	})
@@ -921,8 +921,8 @@ func TestNakamaBattleServerRegisterHeartbeatAndOfflineRequireServiceOrigin(t *te
 		t.Fatalf("service-origin battle server registration failed: %+v", registered)
 	}
 	status := registered.Payload.(*core.BattleServerStatus)
-	if status.BattleServerID != "nakama-service-battle" || status.Endpoint != "127.0.0.1:7997" || status.ActiveMatches != 1 || status.Load != 0.25 || len(status.SupportedModes) != 1 || status.SupportedModes[0] != "pvp_duel" || !status.ServerAuthoritative {
-		t.Fatalf("registered status invalid: %+v", status)
+	if status.BattleServerID != "nakama-service-battle" || status.Endpoint != "127.0.0.1:7997" || status.ActiveMatches != 1 || status.Load != 0.25 || status.Status != "online" || len(status.SupportedModes) != 1 || status.SupportedModes[0] != "pvp_duel" || !status.ServerAuthoritative {
+		t.Fatalf("registered status should canonicalize callback payload status to online: %+v", status)
 	}
 
 	heartbeat := handler.HandleRPC(RPCRequest{
@@ -932,15 +932,15 @@ func TestNakamaBattleServerRegisterHeartbeatAndOfflineRequireServiceOrigin(t *te
 			"battle_server_id": "nakama-service-battle",
 			"active_matches":   2,
 			"load":             0.5,
-			"status":           "online",
+			"status":           "draining",
 		},
 	})
 	if !heartbeat.OK || heartbeat.Status != 200 {
 		t.Fatalf("service-origin battle server heartbeat failed: %+v", heartbeat)
 	}
 	heartbeatStatus := heartbeat.Payload.(*core.BattleServerStatus)
-	if heartbeatStatus.Endpoint != "127.0.0.1:7997" || heartbeatStatus.Region != "local" || heartbeatStatus.BuildID != "nakama-service-test" || heartbeatStatus.ActiveMatches != 2 || heartbeatStatus.Load != 0.5 || !heartbeatStatus.ServerAuthoritative {
-		t.Fatalf("heartbeat should preserve server metadata while updating load: %+v", heartbeatStatus)
+	if heartbeatStatus.Endpoint != "127.0.0.1:7997" || heartbeatStatus.Region != "local" || heartbeatStatus.BuildID != "nakama-service-test" || heartbeatStatus.ActiveMatches != 2 || heartbeatStatus.Load != 0.5 || heartbeatStatus.Status != "online" || !heartbeatStatus.ServerAuthoritative {
+		t.Fatalf("heartbeat should preserve server metadata while canonicalizing payload status to online: %+v", heartbeatStatus)
 	}
 	offline := handler.HandleRPC(RPCRequest{
 		ID:      "battle.servers.offline",

@@ -1844,6 +1844,7 @@ func (s *Service) RegisterBattleServer(req RegisterBattleServerRequest) (*Battle
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	req.Status = "online"
 	server, err := s.upsertBattleServerLocked(BattleServerHeartbeatRequest{
 		BattleServerID: req.BattleServerID,
 		Endpoint:       req.Endpoint,
@@ -1867,6 +1868,7 @@ func (s *Service) BattleServerHeartbeat(req BattleServerHeartbeatRequest) (*Batt
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	req.Status = "online"
 	server, err := s.upsertBattleServerLocked(req)
 	if err != nil {
 		return nil, err
