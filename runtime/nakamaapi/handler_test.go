@@ -342,6 +342,9 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should expose service-origin callback operations: %+v", rulesPayload)
 	}
+	if !stringSliceContains(rulesPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.ticket") || !stringSliceContains(rulesPayload.BusinessNotifications, "settlement") || stringSliceContains(rulesPayload.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("room rules should expose low-frequency business WSS notifications only: %+v", rulesPayload)
+	}
 
 	battleServersMissingEnvelope := handler.HandleWSSMessage(WSSMessage{
 		Name:      "battle.servers",
@@ -586,6 +589,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
+	}
+	if !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("business event should document low-frequency notification kinds only: %+v", eventPayload)
 	}
 
 	hostReady := handler.HandleRPC(RPCRequest{
@@ -1693,6 +1699,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	if !settlementPayload.BusinessEnvelopeRequired || !stringSliceContains(settlementPayload.ForbiddenFields, "final_result") {
 		t.Fatalf("settlement business event should retain business security contract: %+v", settlementPayload)
+	}
+	if !stringSliceContains(settlementPayload.BusinessNotifications, "settlement") || stringSliceContains(settlementPayload.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("settlement business event should retain low-frequency WSS notification contract: %+v", settlementPayload)
 	}
 	clientAuthoredSettlement := handler.HandleRPC(RPCRequest{
 		ID:        "business.event.settlement",

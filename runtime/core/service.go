@@ -1142,8 +1142,9 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"protobuf",
 			"chacha20_poly1305",
 		},
-		ClientOperations: contractClientOperations(),
-		ServiceCallbacks: serviceCallbackOperations(),
+		ClientOperations:      contractClientOperations(),
+		ServiceCallbacks:      serviceCallbackOperations(),
+		BusinessNotifications: businessNotificationKinds(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -2409,6 +2410,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		UserID:                         user.UserID,
 		AllowedClientOperations:        businessEventClientOperations(),
 		ServiceCallbacks:               serviceCallbackOperations(),
+		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEnvelopeRequired:       true,
 		ForbiddenFields:                sortedForbiddenClientFields(),
 		HighFrequencyBattleTickAllowed: false,
@@ -5773,6 +5775,19 @@ func cloneQueueResponse(source *QueueResponse) *QueueResponse {
 
 func businessEventClientOperations() []string {
 	return contractClientOperations()
+}
+
+func businessNotificationKinds() []string {
+	return []string{
+		"presence",
+		"queue",
+		"room",
+		"matchmaking",
+		"match.ready",
+		"battle.allocation",
+		"battle.ticket",
+		"settlement",
+	}
 }
 
 func contractClientOperations() []string {
