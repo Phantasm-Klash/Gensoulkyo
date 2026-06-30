@@ -119,6 +119,20 @@ func TestNakamaRPCMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
 	if queue.OK || queue.Status != 400 || queue.ErrorCode != "mode_invalid" {
 		t.Fatalf("expected protocol mismatch rejection, got %+v", queue)
 	}
+	partialQueue := handler.HandleRPC(RPCRequest{
+		ID:        "matchmaking.join",
+		SessionID: aliceSession,
+		UserID:    aliceUser,
+		Payload: envelopePayload(2, "nonce-version-queue-partial", "matchmaking_join", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "nakama_version_a_deck",
+			"deck_snapshot":  deckPayload("nakama_version_a_deck"),
+			"client_version": map[string]any{"protocol_version": core.ProtocolVersion},
+		}),
+	})
+	if partialQueue.OK || partialQueue.Status != 400 || partialQueue.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected partial version rejection, got %+v", partialQueue)
+	}
 
 	created := handler.HandleRPC(RPCRequest{
 		ID:        "rooms.create",

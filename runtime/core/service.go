@@ -3655,16 +3655,35 @@ func validateLoadout(modeID string, modeParams map[string]any, profile Certifica
 }
 
 func validateClientMatchVersion(version VersionStamp) error {
+	hasProtocol := version.ProtocolVersion != 0
+	hasBusiness := strings.TrimSpace(version.BusinessAPIVersion) != ""
+	hasBattle := strings.TrimSpace(version.BattleAPIVersion) != ""
+	hasRuleset := strings.TrimSpace(version.RulesetVersion) != ""
+	if !hasProtocol && !hasBusiness && !hasBattle && !hasRuleset {
+		return nil
+	}
+	if !hasProtocol {
+		return newError(codeInvalidMode, "client version.protocol_version is required")
+	}
+	if !hasBusiness {
+		return newError(codeInvalidMode, "client version.business_api_version is required")
+	}
+	if !hasBattle {
+		return newError(codeInvalidMode, "client version.battle_api_version is required")
+	}
+	if !hasRuleset {
+		return newError(codeInvalidMode, "client version.ruleset_version is required")
+	}
 	if version.ProtocolVersion != 0 && version.ProtocolVersion != ProtocolVersion {
 		return newError(codeInvalidMode, "protocol version mismatch")
 	}
-	if trimmed := strings.TrimSpace(version.BusinessAPIVersion); trimmed != "" && trimmed != BusinessAPIVersion {
+	if strings.TrimSpace(version.BusinessAPIVersion) != BusinessAPIVersion {
 		return newError(codeInvalidMode, "business api version mismatch")
 	}
-	if trimmed := strings.TrimSpace(version.BattleAPIVersion); trimmed != "" && trimmed != BattleAPIVersion {
+	if strings.TrimSpace(version.BattleAPIVersion) != BattleAPIVersion {
 		return newError(codeInvalidMode, "battle api version mismatch")
 	}
-	if trimmed := strings.TrimSpace(version.RulesetVersion); trimmed != "" && trimmed != RulesetVersion {
+	if strings.TrimSpace(version.RulesetVersion) != RulesetVersion {
 		return newError(codeInvalidMode, "ruleset version mismatch")
 	}
 	return nil

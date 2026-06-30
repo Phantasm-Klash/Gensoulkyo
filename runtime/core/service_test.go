@@ -1763,6 +1763,13 @@ func TestMatchEntryRejectsIncompatibleClientVersions(t *testing.T) {
 	}); ErrorCode(err) != codeInvalidMode {
 		t.Fatalf("expected protocol mismatch rejection, got %v", err)
 	}
+	if _, err := service.JoinQueue(cara.SessionToken, JoinQueueRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{ProtocolVersion: ProtocolVersion},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected partial client version rejection, got %v", err)
+	}
 	if _, err := service.CreateRoom(bob.SessionToken, CreateRoomRequest{
 		ModeID:        "pvp_duel",
 		ActiveDeckID:  defaultDeckID,
@@ -1778,6 +1785,13 @@ func TestMatchEntryRejectsIncompatibleClientVersions(t *testing.T) {
 	})
 	if err != nil || room.RoomCode == "" {
 		t.Fatalf("current version should create room: resp=%+v err=%v", room, err)
+	}
+	if _, err := service.JoinRoom(cara.SessionToken, room.RoomCode, JoinRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{ProtocolVersion: ProtocolVersion},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected partial room join version rejection, got %v", err)
 	}
 	if _, err := service.JoinRoom(cara.SessionToken, room.RoomCode, JoinRoomRequest{
 		ModeID:        "pvp_duel",
