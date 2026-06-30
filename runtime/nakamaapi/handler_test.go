@@ -1745,6 +1745,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 			"ticket_id":        allocation.Ticket.TicketID,
 			"match_id":         match.MatchID,
 			"battle_server_id": allocation.Ticket.BattleServerID,
+			"mode_config_hash": allocation.Ticket.ModeConfigHash,
 			"ticket_nonce_hex": allocation.Ticket.TicketNonceHex,
 		}),
 	})
@@ -1761,13 +1762,14 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 			"user_id":          allocation.Ticket.UserID,
 			"player_id":        allocation.Ticket.PlayerID,
 			"battle_server_id": allocation.Ticket.BattleServerID,
+			"mode_config_hash": allocation.Ticket.ModeConfigHash,
 			"ticket_nonce_hex": allocation.Ticket.TicketNonceHex,
 		},
 	})
 	if !consumedTicket.OK {
 		t.Fatalf("service-origin battle ticket consume failed: %+v", consumedTicket)
 	}
-	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || receipt.Duplicate || receipt.TicketID != allocation.Ticket.TicketID || !receipt.ServerAuthoritative {
+	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || receipt.Duplicate || receipt.TicketID != allocation.Ticket.TicketID || receipt.ModeConfigHash != allocation.Ticket.ModeConfigHash || !receipt.ServerAuthoritative {
 		t.Fatalf("ticket consume receipt should be accepted and authoritative: %+v", receipt)
 	}
 	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); receipt.IssuedAtMS != allocation.Ticket.IssuedAtMS || receipt.ExpiresAtMS != allocation.Ticket.ExpiresAtMS || receipt.ConsumedAtMS == 0 {
@@ -1781,6 +1783,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 			"ticket_id":        allocation.Ticket.TicketID,
 			"match_id":         match.MatchID,
 			"battle_server_id": allocation.Ticket.BattleServerID,
+			"mode_config_hash": allocation.Ticket.ModeConfigHash,
 			"ticket_nonce_hex": allocation.Ticket.TicketNonceHex,
 		},
 	})

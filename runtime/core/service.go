@@ -2043,6 +2043,9 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 	if ticket.BattleServerID != battleServerID {
 		return nil, newError(codeBattleServer, "battle ticket server mismatch")
 	}
+	if req.ModeConfigHash != "" && strings.TrimSpace(req.ModeConfigHash) != ticket.ModeConfigHash {
+		return nil, newError(codeInvalidRequest, "battle ticket mode config mismatch")
+	}
 	if ticket.TicketNonceHex != nonce {
 		return nil, newError(codeInvalidRequest, "battle ticket nonce mismatch")
 	}
@@ -2065,6 +2068,7 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 			UserID:              ticket.UserID,
 			PlayerID:            ticket.PlayerID,
 			BattleServerID:      ticket.BattleServerID,
+			ModeConfigHash:      ticket.ModeConfigHash,
 			IssuedAt:            ticket.IssuedAt,
 			ExpiresAt:           ticket.ExpiresAt,
 			ConsumedAt:          consumedAt,
@@ -2087,6 +2091,7 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 		UserID:              ticket.UserID,
 		PlayerID:            ticket.PlayerID,
 		BattleServerID:      ticket.BattleServerID,
+		ModeConfigHash:      ticket.ModeConfigHash,
 		IssuedAt:            ticket.IssuedAt,
 		ExpiresAt:           ticket.ExpiresAt,
 		ConsumedAt:          now,
@@ -5008,6 +5013,7 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 		BattleServerID:      allocation.BattleServerID,
 		Endpoint:            allocation.Endpoint,
 		DeckSnapshotHash:    deckSnapshotHash(player.DeckSnapshot),
+		ModeConfigHash:      allocation.ModeConfigHash,
 		RulesetVersion:      match.RulesetVersion,
 		TicketNonceHex:      shortHash(fmt.Sprintf("%s:%s:%s:%d", ticketID, match.MatchID, user.UserID, issuedAt.UnixNano())) + shortHash(user.SessionToken),
 		IssuedAt:            issuedAt,
@@ -5137,7 +5143,7 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		BusinessAPIVersion:  ticket.Version.BusinessAPIVersion,
 		BattleAPIVersion:    ticket.Version.BattleAPIVersion,
 		DeckSnapshotHash:    ticket.DeckSnapshotHash,
-		ModeConfigHash:      modeConfigHash(ticket.ModeID),
+		ModeConfigHash:      ticket.ModeConfigHash,
 		Nonce:               ticket.TicketNonceHex,
 		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
 		Status:              "issued",
@@ -5145,7 +5151,7 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		ExpiresAt:           ticket.ExpiresAt,
 		ServerAuthoritative: true,
 	})
-	fingerprint := lifecycleFingerprint("battle:ticket", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	fingerprint := lifecycleFingerprint("battle:ticket", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.ModeConfigHash, ticket.TicketNonceHex)
 	s.recordBattleAuditOutcomeLocked("battle_ticket", fingerprint, ticket.IssuedAt, err)
 }
 
@@ -5170,7 +5176,7 @@ func (s *Service) recordBattleTicketExpiredAuditLocked(signed *SignedBattleTicke
 		BusinessAPIVersion:  ticket.Version.BusinessAPIVersion,
 		BattleAPIVersion:    ticket.Version.BattleAPIVersion,
 		DeckSnapshotHash:    ticket.DeckSnapshotHash,
-		ModeConfigHash:      modeConfigHash(ticket.ModeID),
+		ModeConfigHash:      ticket.ModeConfigHash,
 		Nonce:               ticket.TicketNonceHex,
 		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
 		Status:              "expired",
@@ -5179,7 +5185,7 @@ func (s *Service) recordBattleTicketExpiredAuditLocked(signed *SignedBattleTicke
 		ConsumedAt:          expiredAt,
 		ServerAuthoritative: true,
 	})
-	fingerprint := lifecycleFingerprint("battle:ticket:expired", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	fingerprint := lifecycleFingerprint("battle:ticket:expired", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.ModeConfigHash, ticket.TicketNonceHex)
 	s.recordBattleAuditOutcomeLocked("battle_ticket_expired", fingerprint, expiredAt, err)
 }
 
@@ -5204,7 +5210,7 @@ func (s *Service) recordBattleTicketConsumedAuditLocked(signed *SignedBattleTick
 		BusinessAPIVersion:  ticket.Version.BusinessAPIVersion,
 		BattleAPIVersion:    ticket.Version.BattleAPIVersion,
 		DeckSnapshotHash:    ticket.DeckSnapshotHash,
-		ModeConfigHash:      modeConfigHash(ticket.ModeID),
+		ModeConfigHash:      ticket.ModeConfigHash,
 		Nonce:               ticket.TicketNonceHex,
 		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
 		Status:              "consumed",
@@ -5213,7 +5219,7 @@ func (s *Service) recordBattleTicketConsumedAuditLocked(signed *SignedBattleTick
 		ConsumedAt:          consumedAt,
 		ServerAuthoritative: true,
 	})
-	fingerprint := lifecycleFingerprint("battle:ticket:consumed", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	fingerprint := lifecycleFingerprint("battle:ticket:consumed", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.ModeConfigHash, ticket.TicketNonceHex)
 	s.recordBattleAuditOutcomeLocked("battle_ticket_consumed", fingerprint, consumedAt, err)
 }
 
