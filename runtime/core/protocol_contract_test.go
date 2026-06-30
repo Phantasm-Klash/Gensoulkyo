@@ -153,6 +153,18 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			}
 		}
 	}
+	callbackContext := ServiceCallbackContext()
+	for key, expected := range map[string]string{
+		"runtime_ctx_mode":               "rpc",
+		"gensoulkyo_service_origin":      "battle_server",
+		"gensoulkyo_battle_callback":     "true",
+		"player_session_context_allowed": "false",
+		"business_envelope_allowed":      "false",
+	} {
+		if callbackContext[key] != expected {
+			t.Fatalf("service callback context %q drifted: got %q want %q in %+v", key, callbackContext[key], expected, callbackContext)
+		}
+	}
 	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
 		if !stringSliceContains(ops, "battle.servers") {
 			t.Fatalf("client operation contract should expose battle server discovery: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)

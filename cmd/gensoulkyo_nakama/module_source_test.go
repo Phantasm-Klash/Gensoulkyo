@@ -136,13 +136,14 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID) != \"\"",
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID) != \"\"",
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)",
-		"mode != \"rpc\"",
+		"mode != serviceCallbackContextValue(serviceRuntimeModeKey)",
 		"runtimeCtxStringMap(ctx, runtime.RUNTIME_CTX_VARS)",
+		"serviceRuntimeModeKey",
 		"serviceOriginVarKey",
 		"gensoulkyo_service_origin",
-		"battle_server",
 		"serviceCallbackVarKey",
 		"gensoulkyo_battle_callback",
+		"core.ServiceCallbackContext()",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("Nakama binding service-origin gate missing %q", expected)
@@ -191,12 +192,13 @@ func TestNakamaBindingServiceOriginContextGateRequiresBattleCallbackVars(t *test
 		"serviceOriginRPCIDs[rpcID]",
 		"RUNTIME_CTX_SESSION_ID",
 		"RUNTIME_CTX_USER_ID",
-		"mode != \"rpc\"",
+		"mode != serviceCallbackContextValue(serviceRuntimeModeKey)",
 		"RUNTIME_CTX_VARS",
 		"vars[serviceOriginVarKey]",
-		"serviceOriginBattle",
+		"serviceCallbackContextValue(serviceOriginVarKey)",
 		"vars[serviceCallbackVarKey]",
-		"case \"1\", \"true\", \"yes\"",
+		"serviceCallbackContextValue(serviceCallbackVarKey)",
+		"case \"1\", \"yes\", serviceCallbackContextValue(serviceCallbackVarKey)",
 	} {
 		if !strings.Contains(gateText, expected) {
 			t.Fatalf("service-origin context gate missing %q in:\n%s", expected, gateText)
@@ -204,6 +206,20 @@ func TestNakamaBindingServiceOriginContextGateRequiresBattleCallbackVars(t *test
 	}
 	if strings.Contains(gateText, "mode != \"\" && mode != \"client\"") {
 		t.Fatalf("service-origin context gate must not treat any non-client mode as trusted:\n%s", gateText)
+	}
+	contextHelper := findFuncDecl(file, "serviceCallbackContextValue")
+	if contextHelper == nil {
+		t.Fatalf("serviceCallbackContextValue helper not found")
+	}
+	contextHelperText := string(source[contextHelper.Pos()-1 : contextHelper.End()-1])
+	for _, expected := range []string{
+		"core.ServiceCallbackContext()[key]",
+		"strings.ToLower",
+		"strings.TrimSpace",
+	} {
+		if !strings.Contains(contextHelperText, expected) {
+			t.Fatalf("service callback context helper missing %q in:\n%s", expected, contextHelperText)
+		}
 	}
 	mapHelper := findFuncDecl(file, "runtimeCtxStringMap")
 	if mapHelper == nil {

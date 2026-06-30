@@ -1142,11 +1142,12 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"protobuf",
 			"chacha20_poly1305",
 		},
-		ClientOperations:      ContractClientOperations(),
-		ClientRPCOperations:   ContractClientRPCOperations(),
-		ClientWSSOperations:   ContractClientWSSOperations(),
-		ServiceCallbacks:      ServiceCallbackOperations(),
-		BusinessNotifications: businessNotificationKinds(),
+		ClientOperations:       ContractClientOperations(),
+		ClientRPCOperations:    ContractClientRPCOperations(),
+		ClientWSSOperations:    ContractClientWSSOperations(),
+		ServiceCallbacks:       ServiceCallbackOperations(),
+		ServiceCallbackContext: ServiceCallbackContext(),
+		BusinessNotifications:  businessNotificationKinds(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -2427,6 +2428,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		AllowedClientRPCOperations:     businessEventClientRPCOperations(),
 		AllowedClientWSSOperations:     businessEventClientWSSOperations(),
 		ServiceCallbacks:               ServiceCallbackOperations(),
+		ServiceCallbackContext:         ServiceCallbackContext(),
 		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEnvelopeRequired:       true,
 		ForbiddenFields:                sortedForbiddenClientFields(),
@@ -6111,6 +6113,16 @@ func serviceCallbackOperations() []string {
 
 func ServiceCallbackOperations() []string {
 	return serviceCallbackOperations()
+}
+
+func ServiceCallbackContext() map[string]string {
+	return map[string]string{
+		"runtime_ctx_mode":               "rpc",
+		"gensoulkyo_service_origin":      "battle_server",
+		"gensoulkyo_battle_callback":     "true",
+		"player_session_context_allowed": "false",
+		"business_envelope_allowed":      "false",
+	}
 }
 
 func IsServiceCallbackOperation(operation string) bool {

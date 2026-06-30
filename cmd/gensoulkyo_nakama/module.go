@@ -60,8 +60,8 @@ var rpcIDs = []string{
 var serviceOriginRPCIDs = serviceOriginRPCIDSet()
 
 const (
+	serviceRuntimeModeKey = "runtime_ctx_mode"
 	serviceOriginVarKey   = "gensoulkyo_service_origin"
-	serviceOriginBattle   = "battle_server"
 	serviceCallbackVarKey = "gensoulkyo_battle_callback"
 )
 
@@ -105,15 +105,15 @@ func isServiceOriginRPC(ctx context.Context, rpcID string) bool {
 		return false
 	}
 	mode := strings.ToLower(strings.TrimSpace(runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)))
-	if mode != "rpc" {
+	if mode != serviceCallbackContextValue(serviceRuntimeModeKey) {
 		return false
 	}
 	vars := runtimeCtxStringMap(ctx, runtime.RUNTIME_CTX_VARS)
-	if strings.ToLower(strings.TrimSpace(vars[serviceOriginVarKey])) != serviceOriginBattle {
+	if strings.ToLower(strings.TrimSpace(vars[serviceOriginVarKey])) != serviceCallbackContextValue(serviceOriginVarKey) {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(vars[serviceCallbackVarKey])) {
-	case "1", "true", "yes":
+	case "1", "yes", serviceCallbackContextValue(serviceCallbackVarKey):
 		return true
 	default:
 		return false
@@ -126,6 +126,10 @@ func serviceOriginRPCIDSet() map[string]struct{} {
 		out[id] = struct{}{}
 	}
 	return out
+}
+
+func serviceCallbackContextValue(key string) string {
+	return strings.ToLower(strings.TrimSpace(core.ServiceCallbackContext()[key]))
 }
 
 func decodePayload(payload string) map[string]any {
