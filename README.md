@@ -8,7 +8,7 @@ It provides the planned authoritative online layer for accounts, sessions, lobbi
 
 This repository now contains the first open-source server MVP:
 
-- a Go runtime core for anonymous sessions, server-owned in-memory inventory/decks/card upgrades/chests, authoritative chest pool opening, matchmaking, ticket cancellation, room-code lobby flow, server-validated deck/stage/character loadouts, session/ticket/match heartbeat presence, ready flow, battle server registration/heartbeat/offline lifecycle, battle allocation, Ed25519-signed battle tickets, battle-ticket consumption audit, tick input ingestion, validated card requests, server-validated mode actions, deterministic stage-aware server-side bullet simulation, active-card snapshots, world-boss state snapshots and settlement HP deduction, instance-boss clear/fail adjudication, cursor-based match event polling, 30-second reconnect restore, server-owned match settlement, post-settlement rematch confirmation, server-generated replay audit records, rewards, tasks, events, leaderboards, and activity claims;
+- a Go runtime core for anonymous sessions, server-owned in-memory inventory/decks/card upgrades/chests, authoritative chest pool opening, matchmaking, ticket cancellation, room-code lobby flow, low-frequency lobby messages, server-validated deck/stage/character loadouts, session/ticket/match heartbeat presence, ready flow, battle server registration/heartbeat/offline lifecycle, battle allocation, Ed25519-signed battle tickets, battle-ticket consumption audit, tick input ingestion, validated card requests, server-validated mode actions, deterministic stage-aware server-side bullet simulation, active-card snapshots, world-boss state snapshots and settlement HP deduction, instance-boss clear/fail adjudication, cursor-based match event polling, 30-second reconnect restore, server-owned match settlement, post-settlement rematch confirmation, server-generated replay audit records, rewards, tasks, events, leaderboards, and activity claims;
 - a small HTTP adapter under `/v1/...` that mirrors the future Nakama RPC, WSS business notification, and battle-allocation contracts;
 - a SDK-neutral Nakama adapter plus a `nakama` build-tagged Go Runtime binding source under `cmd/gensoulkyo_nakama`, so real Nakama RPC registration can stay as a thin outer layer over the tested runtime dispatcher;
 - unit and HTTP integration tests for the server-authority boundary;
@@ -87,10 +87,18 @@ Useful endpoints:
 - `GET /v1/matchmaking/tickets/{ticket_id}`
 - `POST /v1/matchmaking/tickets/{ticket_id}/cancel`
 - `POST /v1/rooms/create`
+- `GET /v1/rooms`
+- `GET /v1/rooms/{room_code}`
+- `GET /v1/rooms/{room_code}/rules`
 - `POST /v1/rooms/{room_code}/join`
+- `POST /v1/rooms/{room_code}/leave`
+- `POST /v1/rooms/{room_code}/messages`
 - `GET /v1/battle/servers`
 - `POST /v1/battle/servers/register`
 - `POST /v1/battle/servers/heartbeat`
+- `POST /v1/battle/servers/offline`
+- `POST /v1/battle/tickets/consume`
+- `POST /v1/battle/results/submit`
 - `POST /v1/matches/{match_id}/ready`
 - `GET /v1/matches/{match_id}/battle-allocation`
 - `POST /v1/matches/{match_id}/battle-ticket`
@@ -111,7 +119,7 @@ Authenticated endpoints accept `Authorization: Bearer <session_token>` or `X-Ses
 
 This repository must not include commercial platform SDK files, private API keys, closed economy parameters, anti-fraud operational secrets, or unlicensed media.
 
-Clients may submit only intent: login metadata, deck-save requests, card-upgrade requests, chest-open requests, queue or room requests, queue-ticket cancellation before a match is created, heartbeat presence hints, stage/character preferences in `mode_params`, ready, tick input, card-slot requests, mode-action requests, event-poll cursors, disconnect/reconnect requests, post-settlement rematch acceptance, replay reads for their own server-generated records, and activity claim requests. The server validates deck saves against its owned inventory, resolves active deck snapshots before matchmaking, validates card ownership/level/cost for upgrades, validates chest pool ownership/cost/pity/result generation, validates loadouts, buckets open matchmaking by mode and stage, keeps room-code matches on the host stage, creates battle allocations, signs short-lived battle tickets, records service-origin ticket consumption, creates rematch matches only after all original participants accept, and echoes server-authoritative loadout/allocation data in queue, heartbeat, match-start, snapshot, settlement, rematch, and replay responses. Score, graze, hits, rewards, rank, Boss HP, active-card state, server mode state, event contents, card ids, energy, drops, replay contents, chest results, card upgrade results, battle result fields, and battle ticket signatures remain server-owned and are rejected when submitted by clients.
+Clients may submit only intent: login metadata, deck-save requests, card-upgrade requests, chest-open requests, queue or room requests, low-frequency lobby chat/announcement text, queue-ticket cancellation before a match is created, heartbeat presence hints, stage/character preferences in `mode_params`, ready, tick input, card-slot requests, mode-action requests, event-poll cursors, disconnect/reconnect requests, post-settlement rematch acceptance, replay reads for their own server-generated records, and activity claim requests. The server validates deck saves against its owned inventory, resolves active deck snapshots before matchmaking, validates card ownership/level/cost for upgrades, validates chest pool ownership/cost/pity/result generation, validates loadouts, buckets open matchmaking by mode and stage, keeps room-code matches on the host stage, stores lobby messages with idempotent message ids and host-only announcements, creates battle allocations, signs short-lived battle tickets, records service-origin ticket consumption, creates rematch matches only after all original participants accept, and echoes server-authoritative loadout/allocation data in queue, heartbeat, match-start, snapshot, settlement, rematch, and replay responses. Score, graze, hits, rewards, rank, Boss HP, active-card state, server mode state, event contents, card ids, energy, drops, replay contents, chest results, card upgrade results, battle result fields, battle ticket signatures, and lobby metadata authority fields remain server-owned and are rejected when submitted by clients.
 
 ## Licensing
 
