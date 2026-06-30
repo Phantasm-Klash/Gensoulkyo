@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -357,6 +358,13 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	topics := ContractBusinessNotificationTopics()
 	if len(topics) == 0 {
 		t.Fatalf("business notification topic contract must not be empty")
+	}
+	requestKinds := ContractBusinessEventRequestKinds()
+	if !reflect.DeepEqual(requestKinds, ContractBusinessNotificationKinds()) {
+		t.Fatalf("business event request kinds must mirror notification kinds: request=%+v notifications=%+v", requestKinds, ContractBusinessNotificationKinds())
+	}
+	if stringSliceContains(requestKinds, "battle.result.submit") || stringSliceContains(requestKinds, "battle.ticket.consume") {
+		t.Fatalf("business event request kinds must not expose service callbacks: %+v", requestKinds)
 	}
 	seenKinds := map[string]bool{}
 	for _, topic := range topics {
