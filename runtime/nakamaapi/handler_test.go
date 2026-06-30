@@ -2417,7 +2417,11 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 		if topic.Kind == "" || topic.Topic != "nakama_wss.business."+strings.ReplaceAll(topic.Kind, ".", "_") || topic.Transport != "nakama_wss" {
 			t.Fatalf("business notification topic shape invalid: %+v", topic)
 		}
-		if topic.ClientEventRequestOperation != "business.event" || !topic.ServerPush || topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
+		expectedRequestOp := "business.event"
+		if topic.Kind == "settlement" {
+			expectedRequestOp = "business.event.settlement"
+		}
+		if topic.ClientEventRequestOperation != expectedRequestOp || !topic.ServerPush || topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
 			t.Fatalf("business notification topic must stay low-frequency and non-authoritative: %+v", topic)
 		}
 		seen[topic.Kind] = true

@@ -338,6 +338,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	if !stringSliceContains(clientOps, "business.contract") || !stringSliceContains(clientRPCOps, "business.contract") || !stringSliceContains(clientWSSOps, "business.contract") {
 		t.Fatalf("client RPC/WSS operation contracts should expose authenticated business contract snapshot: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
 	}
+	if !stringSliceContains(clientOps, "business.event.settlement") || !stringSliceContains(clientRPCOps, "business.event.settlement") || !stringSliceContains(clientWSSOps, "business.event.settlement") {
+		t.Fatalf("client RPC/WSS operation contracts should expose settlement event alias: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
+	}
 	if !stringSliceContains(clientRPCOps, "activity.claim") || stringSliceContains(clientWSSOps, "activity.claim") {
 		t.Fatalf("client RPC/WSS operation contracts should reflect handler transport support: rpc=%+v wss=%+v", clientRPCOps, clientWSSOps)
 	}
@@ -360,7 +363,11 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if topic.Kind == "" || topic.Topic != "nakama_wss.business."+strings.ReplaceAll(topic.Kind, ".", "_") || topic.Transport != "nakama_wss" {
 			t.Fatalf("business notification topic shape invalid: %+v", topic)
 		}
-		if topic.ClientEventRequestOperation != "business.event" || !topic.ServerPush {
+		expectedRequestOp := "business.event"
+		if topic.Kind == "settlement" {
+			expectedRequestOp = "business.event.settlement"
+		}
+		if topic.ClientEventRequestOperation != expectedRequestOp || !topic.ServerPush {
 			t.Fatalf("business notification topic must remain low-frequency business WSS/event contract: %+v", topic)
 		}
 		if topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {

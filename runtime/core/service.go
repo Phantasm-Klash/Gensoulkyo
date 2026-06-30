@@ -6047,7 +6047,7 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 			Kind:                           kind,
 			Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 			Transport:                      "nakama_wss",
-			ClientEventRequestOperation:    "business.event",
+			ClientEventRequestOperation:    businessNotificationRequestOperation(kind),
 			ServerPush:                     true,
 			ServiceCallback:                false,
 			HighFrequencyBattleTickAllowed: false,
@@ -6055,6 +6055,13 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 		})
 	}
 	return topics
+}
+
+func businessNotificationRequestOperation(kind string) string {
+	if kind == "settlement" {
+		return "business.event.settlement"
+	}
+	return "business.event"
 }
 
 func ContractBusinessNotificationTopics() []BusinessNotificationTopic {

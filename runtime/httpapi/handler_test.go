@@ -1489,7 +1489,11 @@ func anyBusinessNotificationTopicValid(topics []any, want string) bool {
 		topicName, _ := fields["topic"].(string)
 		transport, _ := fields["transport"].(string)
 		requestOp, _ := fields["client_event_request_operation"].(string)
-		if topicName != "nakama_wss.business."+strings.ReplaceAll(want, ".", "_") || transport != "nakama_wss" || requestOp != "business.event" {
+		expectedRequestOp := "business.event"
+		if want == "settlement" {
+			expectedRequestOp = "business.event.settlement"
+		}
+		if topicName != "nakama_wss.business."+strings.ReplaceAll(want, ".", "_") || transport != "nakama_wss" || requestOp != expectedRequestOp {
 			return false
 		}
 		return fields["server_push"] == true &&
