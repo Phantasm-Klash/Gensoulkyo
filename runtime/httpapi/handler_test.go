@@ -206,6 +206,9 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if settlementEvent.Topic != "nakama_wss.business.settlement" || settlementEvent.Settlement == nil || settlementEvent.Settlement.ReplayID != settlement.ReplayID || settlementEvent.ClientResultSubmitAllowed || settlementEvent.HighFrequencyBattleTickAllowed {
 		t.Fatalf("settlement business event invalid: %+v", settlementEvent)
 	}
+	if !settlementEvent.BusinessEnvelopeRequired || !stringSliceContains(settlementEvent.ForbiddenFields, "final_result") || !stringSliceContains(settlementEvent.ForbiddenFields, "settlement_key") {
+		t.Fatalf("settlement business event should expose security contract: %+v", settlementEvent)
+	}
 	if settlementEvent.Version.ProtocolVersion != core.ProtocolVersion || settlementEvent.Version.RulesetVersion != core.RulesetVersion || settlementEvent.Version.BusinessAPIVersion != core.BusinessAPIVersion || settlementEvent.Version.BattleAPIVersion != core.BattleAPIVersion {
 		t.Fatalf("settlement business event missing version stamp: %+v", settlementEvent.Version)
 	}

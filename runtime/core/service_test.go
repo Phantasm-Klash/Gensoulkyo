@@ -2422,6 +2422,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !reflect.DeepEqual(event.AllowedClientOperations, rules.ClientOperations) || !reflect.DeepEqual(event.ServiceCallbacks, rules.ServiceCallbacks) {
 		t.Fatalf("room rules and business event contract drifted: rules=%+v callbacks=%+v event=%+v callbacks=%+v", rules.ClientOperations, rules.ServiceCallbacks, event.AllowedClientOperations, event.ServiceCallbacks)
 	}
+	if !event.BusinessEnvelopeRequired || !reflect.DeepEqual(event.ForbiddenFields, rules.ForbiddenFields) {
+		t.Fatalf("room business event should expose the same security contract as room rules: rules=%+v event=%+v", rules.ForbiddenFields, event.ForbiddenFields)
+	}
 	if event.Version.ProtocolVersion != ProtocolVersion || event.Version.RulesetVersion != RulesetVersion || event.Version.BusinessAPIVersion != BusinessAPIVersion || event.Version.BattleAPIVersion != BattleAPIVersion {
 		t.Fatalf("room business event must expose protocol version stamp: %+v", event.Version)
 	}

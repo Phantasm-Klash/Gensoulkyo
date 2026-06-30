@@ -854,6 +854,8 @@ type BusinessEvent struct {
 	Settlement                     *MatchEndEvent          `json:"settlement,omitempty"`
 	AllowedClientOperations        []string                `json:"allowed_client_operations"`
 	ServiceCallbacks               []string                `json:"service_callbacks"`
+	BusinessEnvelopeRequired       bool                    `json:"business_envelope_required"`
+	ForbiddenFields                []string                `json:"forbidden_fields"`
 	HighFrequencyBattleTickAllowed bool                    `json:"high_frequency_battle_tick_allowed"`
 	ClientResultSubmitAllowed      bool                    `json:"client_result_submit_allowed"`
 	ServerTime                     time.Time               `json:"server_time"`

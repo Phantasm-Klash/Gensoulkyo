@@ -1125,11 +1125,6 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 	now := s.clock()
 	snapshot := s.roomSnapshotLocked(room, now)
 	mode := ModeConfigs[room.ModeID]
-	forbiddenFields := make([]string, 0, len(forbiddenClientFields))
-	for field := range forbiddenClientFields {
-		forbiddenFields = append(forbiddenFields, field)
-	}
-	sort.Strings(forbiddenFields)
 	rules := &RoomRulesSnapshot{
 		OK:              true,
 		Version:         currentVersionStamp(),
@@ -1167,7 +1162,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"damage",
 			"reward",
 		},
-		ForbiddenFields:     forbiddenFields,
+		ForbiddenFields:     sortedForbiddenClientFields(),
 		BusinessEnvelope:    true,
 		ClientResultSubmit:  false,
 		ServerTime:          now,
@@ -2414,6 +2409,8 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		UserID:                         user.UserID,
 		AllowedClientOperations:        businessEventClientOperations(),
 		ServiceCallbacks:               serviceCallbackOperations(),
+		BusinessEnvelopeRequired:       true,
+		ForbiddenFields:                sortedForbiddenClientFields(),
 		HighFrequencyBattleTickAllowed: false,
 		ClientResultSubmitAllowed:      false,
 		ServerTime:                     now,
@@ -5780,6 +5777,15 @@ func serviceCallbackOperations() []string {
 		"battle.ticket.consume",
 		"battle.result.submit",
 	}
+}
+
+func sortedForbiddenClientFields() []string {
+	fields := make([]string, 0, len(forbiddenClientFields))
+	for field := range forbiddenClientFields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
 }
 
 func copyDeckRecord(source DeckRecord) DeckRecord {

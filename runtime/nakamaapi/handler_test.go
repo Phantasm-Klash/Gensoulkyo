@@ -581,6 +581,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if eventPayload.HighFrequencyBattleTickAllowed || eventPayload.ClientResultSubmitAllowed || stringSliceContains(eventPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("business event must not authorize high-frequency tick or client result submit: %+v", eventPayload)
 	}
+	if !eventPayload.BusinessEnvelopeRequired || !stringSliceContains(eventPayload.ForbiddenFields, "damage") || !stringSliceContains(eventPayload.ForbiddenFields, "settlement_key") {
+		t.Fatalf("business event should expose envelope and forbidden-field contract: %+v", eventPayload)
+	}
 	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
 	}
@@ -1584,6 +1587,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	if settlementPayload.HighFrequencyBattleTickAllowed || settlementPayload.ClientResultSubmitAllowed || stringSliceContains(settlementPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("settlement business event must not authorize battle tick or client result submit: %+v", settlementPayload)
+	}
+	if !settlementPayload.BusinessEnvelopeRequired || !stringSliceContains(settlementPayload.ForbiddenFields, "final_result") {
+		t.Fatalf("settlement business event should retain business security contract: %+v", settlementPayload)
 	}
 	clientAuthoredSettlement := handler.HandleWSSMessage(WSSMessage{
 		Name:      "business.event",
