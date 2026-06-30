@@ -1049,6 +1049,16 @@ func TestNakamaServiceOriginRPCRejectsDirectBusinessEnvelopeFields(t *testing.T)
 				"signed_result": map[string]any{"match_id": "nested-direct-client-shaped"},
 			},
 		},
+		{
+			"key_id":        "client-dev-key",
+			"signed_result": map[string]any{"match_id": "direct-key-id-client-shaped"},
+		},
+		{
+			"body": map[string]any{
+				"keyID":         "client-dev-key",
+				"signed_result": map[string]any{"match_id": "nested-key-id-client-shaped"},
+			},
+		},
 	} {
 		response := handler.HandleRPC(RPCRequest{
 			ID:      "battle.result.submit",
