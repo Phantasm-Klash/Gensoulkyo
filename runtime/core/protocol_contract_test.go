@@ -92,7 +92,7 @@ func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
 		t.Fatalf("consume request version missing battle gates: %+v", version)
 	}
 	if roundTrip["mode_config_hash"] != "sha256:123456" {
-		t.Fatalf("consume request must expose optional mode_config_hash echo: %s", encoded)
+		t.Fatalf("consume request must expose required mode_config_hash echo: %s", encoded)
 	}
 }
 

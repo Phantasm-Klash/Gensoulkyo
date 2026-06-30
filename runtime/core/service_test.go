@@ -1092,6 +1092,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		TicketID:       ticket.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: ticket.Ticket.BattleServerID,
+		ModeConfigHash: ticket.Ticket.ModeConfigHash,
 		TicketNonceHex: ticket.Ticket.TicketNonceHex,
 	})
 	if err != nil {
@@ -1112,6 +1113,15 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	}
 	if replacement.Ticket.TicketID == ticket.Ticket.TicketID {
 		t.Fatalf("consumed ticket should not be reissued: old=%+v replacement=%+v", ticket.Ticket, replacement.Ticket)
+	}
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        replacement.Ticket.Version,
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected missing mode config hash rejection, got %v", err)
 	}
 	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
 		Version:        replacement.Ticket.Version,

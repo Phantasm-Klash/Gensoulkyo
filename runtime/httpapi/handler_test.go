@@ -853,6 +853,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		"user_id":          alice.UserID,
 		"player_id":        ticket.Ticket.PlayerID,
 		"battle_server_id": ticket.Ticket.BattleServerID,
+		"mode_config_hash": ticket.Ticket.ModeConfigHash,
 		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
 	}, serviceCallbackHeaders())
 	if !consume.OK || !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
@@ -866,6 +867,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
 		"battle_server_id": ticket.Ticket.BattleServerID,
+		"mode_config_hash": ticket.Ticket.ModeConfigHash,
 		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
 	}, serviceCallbackHeaders())
 	if !duplicateConsume.OK || !duplicateConsume.Consumed || !duplicateConsume.Duplicate || !duplicateConsume.ServerAuthoritative {
