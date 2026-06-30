@@ -6048,6 +6048,7 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 			Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 			Transport:                      "nakama_wss",
 			ClientEventRequestOperation:    businessNotificationRequestOperation(kind),
+			ClientEventRequestKind:         kind,
 			ClientRequestFields:            businessNotificationClientRequestFields(kind),
 			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
 			ServerAuthoritativeProjection:  true,

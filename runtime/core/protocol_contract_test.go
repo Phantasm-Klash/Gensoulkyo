@@ -370,6 +370,12 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if topic.ClientEventRequestOperation != expectedRequestOp || !topic.ServerPush {
 			t.Fatalf("business notification topic must remain low-frequency business WSS/event contract: %+v", topic)
 		}
+		if topic.ClientEventRequestKind != topic.Kind {
+			t.Fatalf("business notification topic must publish its fixed read request kind: %+v", topic)
+		}
+		if topic.Kind != "settlement" && topic.ClientEventRequestOperation == "business.event.settlement" {
+			t.Fatalf("settlement alias must not be reused for non-settlement notification topics: %+v", topic)
+		}
 		if !topic.ServerAuthoritativeProjection {
 			t.Fatalf("business notification topic must be a server-authoritative projection: %+v", topic)
 		}
