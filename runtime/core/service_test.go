@@ -478,12 +478,12 @@ func TestBattleServerOfflineLifecycleSkipsFutureAllocations(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register online candidate: %v", err)
 	}
-	offline, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "pvp-offline-a"})
+	offline, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "pvp-offline-a", Status: "online"})
 	if err != nil {
 		t.Fatalf("offline battle server: %v", err)
 	}
 	if offline.Status != "offline" || offline.Load != 0 || !offline.ServerAuthoritative {
-		t.Fatalf("offline status invalid: %+v", offline)
+		t.Fatalf("offline status must be canonical even when payload asks for another state: %+v", offline)
 	}
 
 	alice := mustLogin(t, service, "Offline Alice")

@@ -200,3 +200,9 @@ Status date: 2026-06-28
 - Added a service-origin-only Nakama `battle.ticket.consume` RPC for C++ Battle Server ticket acceptance callbacks, reusing the existing signed ticket fields and `consumed` PostgreSQL audit status.
 - Core ticket consumption now validates ticket id, match id, battle server id, nonce, and optional user/player binding, records one durable consumed transition, treats repeated consume callbacks as idempotent, and issues a fresh short-lived ticket on later client reads instead of reusing the consumed ticket.
 - Kept the authority split closed to clients: business RPC/WSS clients can still read allocation/tickets, but public `battle.ticket.consume` calls and all callback names over WSS remain rejected before core dispatch.
+
+## 2026-06-30 gensoulkyo-lobby offline callback canonicalization update
+
+- Hardened `BattleServerOffline` so service-origin offline callbacks always force the canonical `offline` state and cannot preserve or smuggle an `online` status from payload data.
+- Added core and SDK-neutral Nakama adapter regressions proving malicious or misconfigured offline payloads still reset load, preserve discovery metadata, and keep the server out of future allocation eligibility.
+- This stays within the Nakama/Go business lifecycle boundary: clients still cannot call battle server lifecycle callbacks, and no HTTP/Nakama path becomes combat simulation or settlement authority.

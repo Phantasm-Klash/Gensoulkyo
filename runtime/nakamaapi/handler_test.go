@@ -947,6 +947,7 @@ func TestNakamaBattleServerRegisterHeartbeatAndOfflineRequireServiceOrigin(t *te
 		Service: true,
 		Payload: map[string]any{
 			"battle_server_id": "nakama-service-battle",
+			"status":           "online",
 		},
 	})
 	if !offline.OK || offline.Status != 200 {
@@ -954,7 +955,7 @@ func TestNakamaBattleServerRegisterHeartbeatAndOfflineRequireServiceOrigin(t *te
 	}
 	offlineStatus := offline.Payload.(*core.BattleServerStatus)
 	if offlineStatus.Status != "offline" || offlineStatus.Load != 0 || offlineStatus.Endpoint != "127.0.0.1:7997" || !offlineStatus.ServerAuthoritative {
-		t.Fatalf("offline should preserve server metadata and mark unavailable: %+v", offlineStatus)
+		t.Fatalf("offline should ignore payload status, preserve server metadata, and mark unavailable: %+v", offlineStatus)
 	}
 	audit := handler.HandleRPC(RPCRequest{
 		ID:        "battle.audit.status",

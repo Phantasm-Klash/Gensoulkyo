@@ -1888,11 +1888,7 @@ func (s *Service) BattleServerOffline(req BattleServerOfflineRequest) (*BattleSe
 	if !ok || server == nil {
 		return nil, newError(codeNotFound, "battle server %q not found", serverID)
 	}
-	status := strings.TrimSpace(req.Status)
-	if status == "" {
-		status = "offline"
-	}
-	server.Status = status
+	server.Status = "offline"
 	server.Load = 0
 	server.LastSeenAt = s.clock()
 	s.recordBattleServerLifecycleAuditLocked(server, "server_offline")
