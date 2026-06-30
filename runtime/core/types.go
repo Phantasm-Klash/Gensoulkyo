@@ -367,6 +367,12 @@ type BattleTicketConsumeResponse struct {
 	UserID              string       `json:"user_id"`
 	PlayerID            string       `json:"player_id"`
 	BattleServerID      string       `json:"battle_server_id"`
+	IssuedAt            time.Time    `json:"issued_at"`
+	ExpiresAt           time.Time    `json:"expires_at"`
+	ConsumedAt          time.Time    `json:"consumed_at"`
+	IssuedAtMS          int64        `json:"issued_at_ms"`
+	ExpiresAtMS         int64        `json:"expires_at_ms"`
+	ConsumedAtMS        int64        `json:"consumed_at_ms"`
 	Consumed            bool         `json:"consumed"`
 	Duplicate           bool         `json:"duplicate"`
 	ServerAuthoritative bool         `json:"server_authoritative"`

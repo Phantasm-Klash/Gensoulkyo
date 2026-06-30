@@ -1472,6 +1472,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || receipt.Duplicate || receipt.TicketID != allocation.Ticket.TicketID || !receipt.ServerAuthoritative {
 		t.Fatalf("ticket consume receipt should be accepted and authoritative: %+v", receipt)
 	}
+	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); receipt.IssuedAtMS != allocation.Ticket.IssuedAtMS || receipt.ExpiresAtMS != allocation.Ticket.ExpiresAtMS || receipt.ConsumedAtMS == 0 {
+		t.Fatalf("ticket consume receipt should expose ticket lifecycle timestamps: ticket=%+v receipt=%+v", allocation.Ticket, receipt)
+	}
 	duplicateConsumedTicket := handler.HandleRPC(RPCRequest{
 		ID:      "battle.ticket.consume",
 		Service: true,
@@ -1487,6 +1490,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	if receipt := duplicateConsumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || !receipt.Duplicate || !receipt.ServerAuthoritative {
 		t.Fatalf("duplicate ticket consume receipt should be idempotent and authoritative: %+v", receipt)
+	}
+	if first, duplicate := consumedTicket.Payload.(*core.BattleTicketConsumeResponse), duplicateConsumedTicket.Payload.(*core.BattleTicketConsumeResponse); duplicate.ConsumedAtMS != first.ConsumedAtMS || duplicate.ExpiresAtMS != first.ExpiresAtMS {
+		t.Fatalf("duplicate ticket consume should preserve original lifecycle timestamps: first=%+v duplicate=%+v", first, duplicate)
 	}
 	playerIDs := []string{}
 	for _, player := range match.BattleAllocation.Players {

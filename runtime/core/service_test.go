@@ -999,6 +999,9 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	if !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
 		t.Fatalf("consume response invalid: %+v", consume)
 	}
+	if consume.IssuedAt != ticket.Ticket.IssuedAt || consume.ExpiresAt != ticket.Ticket.ExpiresAt || consume.ConsumedAt != now || consume.IssuedAtMS != ticket.Ticket.IssuedAtMS || consume.ExpiresAtMS != ticket.Ticket.ExpiresAtMS || consume.ConsumedAtMS != now.UnixMilli() {
+		t.Fatalf("consume response should expose ticket lifecycle times: ticket=%+v consume=%+v", ticket.Ticket, consume)
+	}
 	if len(repo.tickets) < 2 || repo.tickets[len(repo.tickets)-1].Status != "consumed" || repo.tickets[len(repo.tickets)-1].ConsumedAt != now {
 		t.Fatalf("consumed ticket audit missing: %+v", repo.tickets)
 	}
@@ -1014,6 +1017,9 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	}
 	if !duplicate.Consumed || !duplicate.Duplicate || duplicate.ServerTime != now {
 		t.Fatalf("duplicate consume response invalid: %+v", duplicate)
+	}
+	if duplicate.ConsumedAt != consume.ConsumedAt || duplicate.ConsumedAtMS != consume.ConsumedAtMS || duplicate.ExpiresAt != ticket.Ticket.ExpiresAt {
+		t.Fatalf("duplicate consume should return original lifecycle times: first=%+v duplicate=%+v", consume, duplicate)
 	}
 	if len(repo.tickets) != afterConsumeAuditCount {
 		t.Fatalf("duplicate consume should not write another ticket audit: %+v", repo.tickets)

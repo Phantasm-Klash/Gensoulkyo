@@ -600,6 +600,9 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	if !consume.OK || !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
 		t.Fatalf("battle ticket consume invalid: %+v", consume)
 	}
+	if consume.IssuedAtMS != ticket.Ticket.IssuedAtMS || consume.ExpiresAtMS != ticket.Ticket.ExpiresAtMS || consume.ConsumedAtMS == 0 {
+		t.Fatalf("battle ticket consume should echo ticket lifecycle timestamps: ticket=%+v consume=%+v", ticket.Ticket, consume)
+	}
 	duplicateConsume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
@@ -608,6 +611,9 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	})
 	if !duplicateConsume.OK || !duplicateConsume.Consumed || !duplicateConsume.Duplicate || !duplicateConsume.ServerAuthoritative {
 		t.Fatalf("duplicate battle ticket consume invalid: %+v", duplicateConsume)
+	}
+	if duplicateConsume.ConsumedAtMS != consume.ConsumedAtMS || duplicateConsume.ExpiresAtMS != consume.ExpiresAtMS {
+		t.Fatalf("duplicate consume should preserve first consume lifecycle timestamps: first=%+v duplicate=%+v", consume, duplicateConsume)
 	}
 	badConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
 		"ticket_id":        ticket.Ticket.TicketID,
