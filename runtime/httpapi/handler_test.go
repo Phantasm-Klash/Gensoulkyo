@@ -460,6 +460,11 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	if !ok || !anySliceContainsString(values, core.ServiceCallbackContext()[serviceCallbackContextKey]) || !anySliceContainsString(values, "1") || !anySliceContainsString(values, "yes") {
 		t.Fatalf("service callback status missing accepted values: %+v", statusBody)
 	}
+	for _, accepted := range core.ServiceCallbackAcceptedValues() {
+		if !anySliceContainsString(values, accepted) {
+			t.Fatalf("service callback status drifted from core accepted values: accepted=%+v status=%+v", core.ServiceCallbackAcceptedValues(), statusBody)
+		}
+	}
 	if statusBody["player_session_context_allowed"] != false || statusBody["business_envelope_allowed"] != false {
 		t.Fatalf("service callback status must keep callbacks out of player/envelope paths: %+v", statusBody)
 	}

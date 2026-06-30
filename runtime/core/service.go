@@ -6208,6 +6208,14 @@ func ServiceCallbackContext() map[string]string {
 	}
 }
 
+func ServiceCallbackAcceptedValues() []string {
+	return []string{
+		ServiceCallbackContext()["gensoulkyo_battle_callback"],
+		"1",
+		"yes",
+	}
+}
+
 func IsServiceCallbackOperation(operation string) bool {
 	operation = strings.ToLower(strings.TrimSpace(operation))
 	for _, callback := range serviceCallbackOperations() {

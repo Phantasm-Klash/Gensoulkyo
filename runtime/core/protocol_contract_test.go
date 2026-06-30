@@ -256,6 +256,17 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("service callback context must not expose blank keys or values: %+v", callbackContext)
 		}
 	}
+	acceptedCallbackValues := ServiceCallbackAcceptedValues()
+	for _, expected := range []string{callbackContext["gensoulkyo_battle_callback"], "1", "yes"} {
+		if !stringSliceContains(acceptedCallbackValues, expected) {
+			t.Fatalf("service callback accepted values missing %q: %+v", expected, acceptedCallbackValues)
+		}
+	}
+	for _, value := range acceptedCallbackValues {
+		if strings.TrimSpace(value) == "" {
+			t.Fatalf("service callback accepted values must not expose blanks: %+v", acceptedCallbackValues)
+		}
+	}
 	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
 		if !stringSliceContains(ops, "battle.servers") {
 			t.Fatalf("client operation contract should expose battle server discovery: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
