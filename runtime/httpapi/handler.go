@@ -623,6 +623,9 @@ func (h *Handler) registerBattleServer(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
 		return
 	}
+	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
+		return
+	}
 	var req core.RegisterBattleServerRequest
 	if !decodeServiceJSON(w, r, &req) {
 		return
@@ -637,6 +640,9 @@ func (h *Handler) registerBattleServer(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) battleServerHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
+	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
 		return
 	}
 	var req core.BattleServerHeartbeatRequest
@@ -655,6 +661,9 @@ func (h *Handler) battleServerOffline(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
 		return
 	}
+	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
+		return
+	}
 	var req core.BattleServerOfflineRequest
 	if !decodeServiceJSON(w, r, &req) {
 		return
@@ -671,6 +680,9 @@ func (h *Handler) consumeBattleTicket(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
 		return
 	}
+	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
+		return
+	}
 	var req core.BattleTicketConsumeRequest
 	if !decodeServiceJSON(w, r, &req) {
 		return
@@ -685,6 +697,9 @@ func (h *Handler) consumeBattleTicket(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
+	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
 		return
 	}
 	var req core.BattleResultSubmitRequest
@@ -842,6 +857,18 @@ func rejectPlayerContextForServiceRoute(w http.ResponseWriter, r *http.Request) 
 		"ok":         false,
 		"error_code": "service_origin_required",
 		"message":    "service-origin callback must not include player session context",
+	})
+	return true
+}
+
+func rejectBusinessEnvelopeHeadersForServiceRoute(w http.ResponseWriter, r *http.Request) bool {
+	if !security.BusinessEnvelopeHeadersPresent(r.Header) {
+		return false
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"ok":         false,
+		"error_code": "invalid_request",
+		"message":    "service-origin callback must not include business envelope headers",
 	})
 	return true
 }

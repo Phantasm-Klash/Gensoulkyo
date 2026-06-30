@@ -557,6 +557,30 @@ func TestHTTPServiceCallbacksBypassPlayerEnvelopeHeaderGuard(t *testing.T) {
 	}
 }
 
+func TestHTTPServiceCallbacksRejectBusinessEnvelopeHeadersWithoutConsumingGuard(t *testing.T) {
+	service := core.NewService(core.Config{})
+	guard := security.NewBusinessEnvelopeGuard()
+	server := httptest.NewServer(NewWithOptions(service, WithBusinessEnvelopeGuard(guard)))
+	defer server.Close()
+
+	routes := []string{
+		"/v1/battle/servers/register",
+		"/v1/battle/servers/heartbeat",
+		"/v1/battle/servers/offline",
+		"/v1/battle/tickets/consume",
+		"/v1/battle/results/submit",
+	}
+	for index, route := range routes {
+		response := postRawWithHeaders(t, server.URL+route, "", map[string]any{}, businessEnvelopeHeaders(int64(index+1), time.Now(), "http-service-no-token-header-"+itoa(index), "service_callback"))
+		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope headers") {
+			t.Fatalf("service callback %s should reject business envelope headers before core validation, got %+v", route, response)
+		}
+	}
+	if snapshot := guard.Snapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 || len(snapshot.Audits) != 0 {
+		t.Fatalf("service callback envelope header rejection must not consume guard state: %+v", snapshot)
+	}
+}
+
 func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	driverName := registerHTTPAuditCaptureDriver(t)
 	db, err := sql.Open(driverName, "")
