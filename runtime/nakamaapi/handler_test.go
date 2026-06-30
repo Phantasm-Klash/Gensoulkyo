@@ -339,8 +339,14 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "business.event") {
 		t.Fatalf("room rules should expose business event WSS/RPC contract: %+v", rulesPayload)
 	}
+	if !stringSliceContains(rulesPayload.ClientOperations, "rooms.chat") || !stringSliceContains(rulesPayload.ClientOperations, "rooms.announcement") {
+		t.Fatalf("room rules should expose registered room message aliases: %+v", rulesPayload.ClientOperations)
+	}
 	if !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should expose service-origin callback operations: %+v", rulesPayload)
+	}
+	if !stringSliceContains(rulesPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.ticket") || !stringSliceContains(rulesPayload.BusinessNotifications, "settlement") || stringSliceContains(rulesPayload.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("room rules should expose low-frequency business WSS notifications only: %+v", rulesPayload)
 	}
 
 	battleServersMissingEnvelope := handler.HandleWSSMessage(WSSMessage{
@@ -584,8 +590,11 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !eventPayload.BusinessEnvelopeRequired || !stringSliceContains(eventPayload.ForbiddenFields, "damage") || !stringSliceContains(eventPayload.ForbiddenFields, "settlement_key") {
 		t.Fatalf("business event should expose envelope and forbidden-field contract: %+v", eventPayload)
 	}
-	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
+	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.chat") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.announcement") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
+	}
+	if !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("business event should document low-frequency notification kinds only: %+v", eventPayload)
 	}
 
 	hostReady := handler.HandleRPC(RPCRequest{
@@ -887,6 +896,22 @@ func TestNakamaRPCRejectsClientOriginBattleResultSubmit(t *testing.T) {
 	}
 }
 
+func TestNakamaBusinessEventSettlementAliasRejectsConflictingKind(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	response := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event.settlement",
+		SessionID: "nakama-settlement-alias-session",
+		UserID:    "nakama-settlement-alias-user",
+		Payload: envelopePayload(1, "nonce-settlement-alias-kind-conflict", "business_event_settlement", map[string]any{
+			"kind":     "matchmaking",
+			"match_id": "match-conflict",
+		}),
+	})
+	if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "requires settlement kind") {
+		t.Fatalf("settlement alias should reject conflicting business event kind, got %+v", response)
+	}
+}
+
 func TestNakamaRPCRejectsServiceOriginBattleResultSubmitWithPlayerContext(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	response := handler.HandleRPC(RPCRequest{
@@ -953,6 +978,7 @@ func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T)
 			id: "battle.ticket.consume",
 			op: "battle_ticket_consume",
 			body: map[string]any{
+				"version":          map[string]any{"protocol_version": core.ProtocolVersion, "business_api_version": core.BusinessAPIVersion, "battle_api_version": core.BattleAPIVersion, "ruleset_version": core.RulesetVersion},
 				"ticket_id":        "ticket-client-shaped",
 				"match_id":         "match-client-shaped",
 				"battle_server_id": "battle-client-shaped",
@@ -982,15 +1008,76 @@ func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T)
 	}
 }
 
+func TestNakamaServiceOriginRPCRejectsNestedBusinessEnvelopePayloadShape(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	for index, wrapper := range []string{"body", "request", "data"} {
+		response := handler.HandleRPC(RPCRequest{
+			ID:      "battle.result.submit",
+			Service: true,
+			Payload: map[string]any{
+				wrapper: envelopePayload(int64(index+1), "nonce-service-origin-nested-envelope-"+wrapper, "battle_result_submit", map[string]any{
+					"signed_result": map[string]any{"match_id": "nested-client-shaped"},
+				}),
+			},
+		})
+		if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "must not include business envelope") {
+			t.Fatalf("service-origin callback with %s wrapper should reject nested envelope before core dispatch: %+v", wrapper, response)
+		}
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
+		t.Fatalf("nested service-origin envelope-shape rejection must not consume replay guard state: %+v", snapshot)
+	}
+}
+
+func TestNakamaServiceOriginRPCRejectsDirectBusinessEnvelopeFields(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	for index, payload := range []map[string]any{
+		{
+			"seq":           1,
+			"timestamp_ms":  time.Now().UnixMilli(),
+			"nonce":         "direct-envelope-fields",
+			"op":            "battle_result_submit",
+			"auth_tag":      strings.Repeat("1", 64),
+			"signed_result": map[string]any{"match_id": "direct-client-shaped"},
+		},
+		{
+			"body": map[string]any{
+				"seq":           2,
+				"timestamp_ms":  time.Now().UnixMilli(),
+				"nonce":         "nested-direct-envelope-fields",
+				"op":            "battle_result_submit",
+				"auth_tag":      strings.Repeat("2", 64),
+				"signed_result": map[string]any{"match_id": "nested-direct-client-shaped"},
+			},
+		},
+		{
+			"key_id":        "client-dev-key",
+			"signed_result": map[string]any{"match_id": "direct-key-id-client-shaped"},
+		},
+		{
+			"body": map[string]any{
+				"keyID":         "client-dev-key",
+				"signed_result": map[string]any{"match_id": "nested-key-id-client-shaped"},
+			},
+		},
+	} {
+		response := handler.HandleRPC(RPCRequest{
+			ID:      "battle.result.submit",
+			Service: true,
+			Payload: payload,
+		})
+		if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "must not include business envelope") {
+			t.Fatalf("service-origin callback payload %d should reject direct envelope fields before core dispatch: %+v", index, response)
+		}
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
+		t.Fatalf("direct service-origin envelope-field rejection must not consume replay guard state: %+v", snapshot)
+	}
+}
+
 func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
-	callbacks := []string{
-		"battle.servers.register",
-		"battle.servers.heartbeat",
-		"battle.servers.offline",
-		"battle.ticket.consume",
-		"battle.result.submit",
-	}
+	callbacks := core.ServiceCallbackOperations()
 	for index, name := range callbacks {
 		response := handler.HandleWSSMessage(WSSMessage{
 			Name:      name,
@@ -1461,6 +1548,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:      "battle.ticket.consume",
 		Service: true,
 		Payload: map[string]any{
+			"version":          allocation.Ticket.Version,
 			"ticket_id":        allocation.Ticket.TicketID,
 			"match_id":         match.MatchID,
 			"user_id":          allocation.Ticket.UserID,
@@ -1482,6 +1570,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:      "battle.ticket.consume",
 		Service: true,
 		Payload: map[string]any{
+			"version":          allocation.Ticket.Version,
 			"ticket_id":        allocation.Ticket.TicketID,
 			"match_id":         match.MatchID,
 			"battle_server_id": allocation.Ticket.BattleServerID,
@@ -1501,6 +1590,37 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	for _, player := range match.BattleAllocation.Players {
 		playerIDs = append(playerIDs, player.PlayerID)
 	}
+	badProjectionSubmit := handler.HandleRPC(RPCRequest{
+		ID:      "battle.result.submit",
+		Service: true,
+		Payload: map[string]any{"signed_result": map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"version": map[string]any{
+					"protocol_version":     core.ProtocolVersion,
+					"business_api_version": core.BusinessAPIVersion,
+					"battle_api_version":   core.BattleAPIVersion,
+					"ruleset_version":      core.RulesetVersion,
+				},
+				"match_id":         match.MatchID,
+				"mode_id":          match.ModeID,
+				"result_hash":      "sha256:abcd1234",
+				"replay_id":        "nakama-replay-forbidden-callback",
+				"player_ids":       playerIDs,
+				"mode_result_json": `{"verified":true,"players":[{"boss_hp":0}]}`,
+				"settled_at_ms":    time.Now().UnixMilli(),
+			},
+			"signature_alg":        "ED25519",
+			"key_id":               match.BattleAllocation.BattleServerID,
+			"signature_hex":        strings.Repeat("c", 128),
+			"public_key_hex":       strings.Repeat("d", 64),
+			"server_authoritative": true,
+		}},
+	})
+	if badProjectionSubmit.OK || badProjectionSubmit.Status != 403 || badProjectionSubmit.ErrorCode != "forbidden_field" {
+		t.Fatalf("service-origin result projection with authority fields should be rejected: %+v", badProjectionSubmit)
+	}
+
 	resultSubmit := handler.HandleRPC(RPCRequest{
 		ID:      "battle.result.submit",
 		Service: true,
@@ -1570,11 +1690,10 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		t.Fatalf("duplicate result submit receipt should be idempotent and authoritative: %+v", receipt)
 	}
 	settlementEvent := handler.HandleWSSMessage(WSSMessage{
-		Name:      "business.event",
+		Name:      "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(12, "nonce-sql-host-settlement-event", "business_event", map[string]any{
-			"kind":     "settlement",
+		Payload: envelopePayload(12, "nonce-sql-host-settlement-event", "business_event_settlement", map[string]any{
 			"match_id": match.MatchID,
 		}),
 	})
@@ -1591,12 +1710,14 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !settlementPayload.BusinessEnvelopeRequired || !stringSliceContains(settlementPayload.ForbiddenFields, "final_result") {
 		t.Fatalf("settlement business event should retain business security contract: %+v", settlementPayload)
 	}
-	clientAuthoredSettlement := handler.HandleWSSMessage(WSSMessage{
-		Name:      "business.event",
+	if !stringSliceContains(settlementPayload.BusinessNotifications, "settlement") || stringSliceContains(settlementPayload.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("settlement business event should retain low-frequency WSS notification contract: %+v", settlementPayload)
+	}
+	clientAuthoredSettlement := handler.HandleRPC(RPCRequest{
+		ID:        "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(13, "nonce-sql-host-settlement-client-authored", "business_event", map[string]any{
-			"kind":        "settlement",
+		Payload: envelopePayload(13, "nonce-sql-host-settlement-client-authored", "business_event_settlement", map[string]any{
 			"match_id":    match.MatchID,
 			"result_hash": "client-authored",
 		}),

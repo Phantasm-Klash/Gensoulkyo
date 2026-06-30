@@ -767,6 +767,36 @@ func TestBattleResultSubmitVerifiesAllocationAndSettlesMatch(t *testing.T) {
 		t.Fatalf("expected player mismatch rejection, got %v", err)
 	}
 
+	badRewardProjection := signedBattleResultForAllocation(allocation)
+	badRewardProjection.Result.RewardProjectionJSON = `{"source":"battle_server","reward":{"gold":999999}}`
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: badRewardProjection}); ErrorCode(err) != codeForbiddenField {
+		t.Fatalf("expected reward projection authority-field rejection, got %v", err)
+	}
+
+	badModeProjection := signedBattleResultForAllocation(allocation)
+	badModeProjection.Result.ModeResultJSON = `{"verified":true,"players":[{"boss_hp":0}]}`
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: badModeProjection}); ErrorCode(err) != codeForbiddenField {
+		t.Fatalf("expected mode projection authority-field rejection, got %v", err)
+	}
+
+	missingBusinessVersion := signedBattleResultForAllocation(allocation)
+	missingBusinessVersion.Result.Version.BusinessAPIVersion = ""
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: missingBusinessVersion}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected missing result business api version rejection, got %v", err)
+	}
+
+	staleBusinessVersion := signedBattleResultForAllocation(allocation)
+	staleBusinessVersion.Result.Version.BusinessAPIVersion = "0.0.0-stale"
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: staleBusinessVersion}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale result business api version rejection, got %v", err)
+	}
+
+	staleRulesetVersion := signedBattleResultForAllocation(allocation)
+	staleRulesetVersion.Result.Version.RulesetVersion = "ruleset-stale"
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: staleRulesetVersion}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale result ruleset version rejection, got %v", err)
+	}
+
 	signed := signedBattleResultForAllocation(allocation)
 	resp, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
 	if err != nil {
@@ -986,6 +1016,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		t.Fatalf("battle ticket: %v", err)
 	}
 	consume, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        ticket.Ticket.Version,
 		TicketID:       ticket.Ticket.TicketID,
 		MatchID:        matchID,
 		UserID:         alice.UserID,
@@ -1007,6 +1038,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	}
 	afterConsumeAuditCount := len(repo.tickets)
 	duplicate, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        ticket.Ticket.Version,
 		TicketID:       ticket.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: ticket.Ticket.BattleServerID,
@@ -1032,12 +1064,43 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		t.Fatalf("consumed ticket should not be reissued: old=%+v replacement=%+v", ticket.Ticket, replacement.Ticket)
 	}
 	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        replacement.Ticket.Version,
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
 		TicketNonceHex: "wrong-nonce",
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected nonce mismatch rejection, got %v", err)
+	}
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected missing consume version rejection, got %v", err)
+	}
+	staleBusinessVersion := replacement.Ticket.Version
+	staleBusinessVersion.BusinessAPIVersion = "0.0.0-stale"
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        staleBusinessVersion,
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale consume business api rejection, got %v", err)
+	}
+	staleVersion := replacement.Ticket.Version
+	staleVersion.RulesetVersion = "ruleset-stale"
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        staleVersion,
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale consume ruleset rejection, got %v", err)
 	}
 	status := service.BattleLifecycleAuditStatus()
 	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket" {
@@ -2336,6 +2399,61 @@ func TestRoomCodeFlowCreatesMatchAndRejectsLateJoin(t *testing.T) {
 	}
 }
 
+func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
+	service := NewService(Config{})
+	user := mustLogin(t, service, "Business Notifications")
+
+	presence, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{})
+	if err != nil {
+		t.Fatalf("default presence business event: %v", err)
+	}
+	if !presence.OK || presence.Kind != "presence" || presence.Topic != "nakama_wss.business.presence" {
+		t.Fatalf("presence business event invalid: %+v", presence)
+	}
+	for _, expected := range []string{"presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket", "settlement"} {
+		if !stringSliceContains(presence.BusinessNotifications, expected) {
+			t.Fatalf("business event notification contract missing %q: %+v", expected, presence.BusinessNotifications)
+		}
+	}
+	if stringSliceContains(presence.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("business notifications must not expose service-origin result submit: %+v", presence.BusinessNotifications)
+	}
+	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "battle.result.submit"}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("service-origin result submit must not be accepted as a business event kind, got %v", err)
+	}
+
+	queued, err := service.JoinQueue(user.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "business_event_queue_deck",
+		DeckSnapshot: validDeck("business_event_queue_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join queue for business event: %v", err)
+	}
+	queueEvent, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{
+		Kind:     "queue",
+		TicketID: queued.TicketID,
+	})
+	if err != nil {
+		t.Fatalf("queue business event: %v", err)
+	}
+	if queueEvent.Queue == nil || queueEvent.Queue.TicketID != queued.TicketID || queueEvent.Room != nil || queueEvent.Ready != nil {
+		t.Fatalf("queue business event should expose queue state only: %+v", queueEvent)
+	}
+	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{
+		Kind:     "room",
+		TicketID: queued.TicketID,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("room business event must require room-bound state, got %v", err)
+	}
+	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{
+		Kind:     "match.ready",
+		TicketID: queued.TicketID,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("match.ready business event must require matched state, got %v", err)
+	}
+}
+
 func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	service := NewService(Config{})
 	host := mustLogin(t, service, "Lobby Host")
@@ -2403,11 +2521,14 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.BusinessTransports, "nakama_https_rpc") || !stringSliceContains(rules.BusinessTransports, "nakama_wss") || !stringSliceContains(rules.BattleTransports, "kcp_udp") {
 		t.Fatalf("room rules should publish business and battle transport contract: %+v", rules)
 	}
-	if !stringSliceContains(rules.ClientOperations, "battle.ticket") || !stringSliceContains(rules.ClientOperations, "match.ready") || !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
+	if !stringSliceContains(rules.ClientOperations, "battle.ticket") || !stringSliceContains(rules.ClientOperations, "match.ready") || !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || !stringSliceContains(rules.ClientOperations, "rooms.chat") || !stringSliceContains(rules.ClientOperations, "rooms.announcement") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
 		t.Fatalf("room rules should keep client operations read/intent only: %+v", rules)
 	}
 	if !stringSliceContains(rules.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rules.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should publish service-only battle callbacks: %+v", rules)
+	}
+	if !stringSliceContains(rules.BusinessNotifications, "battle.allocation") || !stringSliceContains(rules.BusinessNotifications, "battle.ticket") || !stringSliceContains(rules.BusinessNotifications, "settlement") || stringSliceContains(rules.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("room rules should publish low-frequency business WSS notifications only: %+v", rules)
 	}
 	if !stringSliceContains(rules.ForbiddenFields, "damage") || !stringSliceContains(rules.ServerAuthority, "state_snapshot") || !stringSliceContains(rules.ClientAuthority, "input_packet") {
 		t.Fatalf("room authority fields missing: %+v", rules)
@@ -2421,6 +2542,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.AllowedClientOperations, rules.ClientOperations) || !reflect.DeepEqual(event.ServiceCallbacks, rules.ServiceCallbacks) {
 		t.Fatalf("room rules and business event contract drifted: rules=%+v callbacks=%+v event=%+v callbacks=%+v", rules.ClientOperations, rules.ServiceCallbacks, event.AllowedClientOperations, event.ServiceCallbacks)
+	}
+	if !reflect.DeepEqual(event.BusinessNotifications, rules.BusinessNotifications) {
+		t.Fatalf("room rules and business event notification contract drifted: rules=%+v event=%+v", rules.BusinessNotifications, event.BusinessNotifications)
 	}
 	if !event.BusinessEnvelopeRequired || !reflect.DeepEqual(event.ForbiddenFields, rules.ForbiddenFields) {
 		t.Fatalf("room business event should expose the same security contract as room rules: rules=%+v event=%+v", rules.ForbiddenFields, event.ForbiddenFields)

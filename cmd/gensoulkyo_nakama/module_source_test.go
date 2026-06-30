@@ -29,6 +29,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"auth.anonymous",
 		"bootstrap",
 		"business.event",
+		"business.event.settlement",
 		"matchmaking.join",
 		"rooms.list",
 		"rooms.rules",
@@ -74,6 +75,7 @@ func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
 		"chests.open",
 		"presence.heartbeat",
 		"business.event",
+		"business.event.settlement",
 		"matchmaking.join",
 		"matchmaking.ticket",
 		"matchmaking.cancel",
@@ -126,8 +128,10 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"Service:      isServiceOriginRPC(ctx, rpcID)",
-		"var serviceOriginRPCIDs = map[string]struct{}",
+		"var serviceOriginRPCIDs = serviceOriginRPCIDSet()",
 		"func isServiceOriginRPC(ctx context.Context, rpcID string) bool",
+		"func serviceOriginRPCIDSet() map[string]struct{}",
+		"core.ServiceCallbackOperations()",
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID) != \"\"",
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID) != \"\"",
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)",
@@ -158,9 +162,6 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	} {
 		if !strings.Contains(text, serviceRPC) {
 			t.Fatalf("Nakama binding must register service-origin RPC %q", serviceRPC)
-		}
-		if !strings.Contains(text, "\""+serviceRPC+"\":") {
-			t.Fatalf("Nakama binding must explicitly allowlist service-origin RPC %q", serviceRPC)
 		}
 	}
 }

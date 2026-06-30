@@ -1142,8 +1142,9 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"protobuf",
 			"chacha20_poly1305",
 		},
-		ClientOperations: contractClientOperations(),
-		ServiceCallbacks: serviceCallbackOperations(),
+		ClientOperations:      ContractClientOperations(),
+		ServiceCallbacks:      ServiceCallbackOperations(),
+		BusinessNotifications: businessNotificationKinds(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -1480,9 +1481,7 @@ func (s *Service) BusinessEvent(sessionToken string, req BusinessEventRequest) (
 	if kind == "" {
 		kind = "presence"
 	}
-	switch kind {
-	case "presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket", "settlement":
-	default:
+	if !isBusinessNotificationKind(kind) {
 		return nil, newError(codeInvalidRequest, "business event kind %q is not supported", kind)
 	}
 	event, err := s.businessEventLocked(user, kind, req)
@@ -2030,6 +2029,9 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 		return nil, newError(codeNotFound, "battle ticket not found")
 	}
 	ticket := signed.Ticket
+	if err := validateBattleTicketConsumeVersion(req.Version, ticket); err != nil {
+		return nil, err
+	}
 	if ticket.MatchID != matchID {
 		return nil, newError(codeInvalidRequest, "battle ticket match mismatch")
 	}
@@ -2110,8 +2112,8 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	if result.ModeID != match.ModeID {
 		return nil, newError(codeInvalidMode, "battle result mode is %q, match mode is %q", result.ModeID, match.ModeID)
 	}
-	if result.Version.ProtocolVersion != ProtocolVersion || result.Version.RulesetVersion != match.RulesetVersion {
-		return nil, newError(codeInvalidRequest, "battle result version mismatch")
+	if err := validateBattleResultVersion(result.Version, match); err != nil {
+		return nil, err
 	}
 	allocation := s.ensureBattleAllocationLocked(match)
 	if allocation == nil {
@@ -2408,7 +2410,8 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 		UserID:                         user.UserID,
 		AllowedClientOperations:        businessEventClientOperations(),
-		ServiceCallbacks:               serviceCallbackOperations(),
+		ServiceCallbacks:               ServiceCallbackOperations(),
+		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEnvelopeRequired:       true,
 		ForbiddenFields:                sortedForbiddenClientFields(),
 		HighFrequencyBattleTickAllowed: false,
@@ -2544,6 +2547,9 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		event.MatchStatus = "ended"
 		event.MatchID = settlement.MatchID
 		event.ModeID = settlement.Mode
+	}
+	if err := validateBusinessEventPayload(kind, event); err != nil {
+		return nil, err
 	}
 	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && event.Settlement == nil && kind != "presence" {
 		return nil, newError(codeInvalidRequest, "business event requires ticket_id, room_code, or match_id")
@@ -3609,6 +3615,66 @@ func validateClientMatchVersion(version VersionStamp) error {
 	}
 	if trimmed := strings.TrimSpace(version.RulesetVersion); trimmed != "" && trimmed != RulesetVersion {
 		return newError(codeInvalidMode, "ruleset version mismatch")
+	}
+	return nil
+}
+
+func validateBattleTicketConsumeVersion(version VersionStamp, ticket BattleTicket) error {
+	if version.ProtocolVersion == 0 {
+		return newError(codeInvalidRequest, "battle ticket consume version.protocol_version is required")
+	}
+	if version.ProtocolVersion != ticket.Version.ProtocolVersion {
+		return newError(codeInvalidRequest, "battle ticket consume protocol version mismatch")
+	}
+	if strings.TrimSpace(version.BusinessAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle ticket consume version.business_api_version is required")
+	}
+	if version.BusinessAPIVersion != ticket.Version.BusinessAPIVersion {
+		return newError(codeInvalidRequest, "battle ticket consume business api version mismatch")
+	}
+	if strings.TrimSpace(version.BattleAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle ticket consume version.battle_api_version is required")
+	}
+	if version.BattleAPIVersion != ticket.Version.BattleAPIVersion {
+		return newError(codeInvalidRequest, "battle ticket consume battle api version mismatch")
+	}
+	if strings.TrimSpace(version.RulesetVersion) == "" {
+		return newError(codeInvalidRequest, "battle ticket consume version.ruleset_version is required")
+	}
+	if version.RulesetVersion != ticket.RulesetVersion {
+		return newError(codeInvalidRequest, "battle ticket consume ruleset version mismatch")
+	}
+	return nil
+}
+
+func validateBattleResultVersion(version VersionStamp, match *matchState) error {
+	if version.ProtocolVersion == 0 {
+		return newError(codeInvalidRequest, "battle result version.protocol_version is required")
+	}
+	if version.ProtocolVersion != ProtocolVersion {
+		return newError(codeInvalidRequest, "battle result protocol version mismatch")
+	}
+	if strings.TrimSpace(version.BusinessAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle result version.business_api_version is required")
+	}
+	if version.BusinessAPIVersion != BusinessAPIVersion {
+		return newError(codeInvalidRequest, "battle result business api version mismatch")
+	}
+	if strings.TrimSpace(version.BattleAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle result version.battle_api_version is required")
+	}
+	if version.BattleAPIVersion != BattleAPIVersion {
+		return newError(codeInvalidRequest, "battle result battle api version mismatch")
+	}
+	expectedRuleset := RulesetVersion
+	if match != nil && match.RulesetVersion != "" {
+		expectedRuleset = match.RulesetVersion
+	}
+	if strings.TrimSpace(version.RulesetVersion) == "" {
+		return newError(codeInvalidRequest, "battle result version.ruleset_version is required")
+	}
+	if version.RulesetVersion != expectedRuleset {
+		return newError(codeInvalidRequest, "battle result ruleset version mismatch")
 	}
 	return nil
 }
@@ -5344,7 +5410,37 @@ func validateSignedBattleResultShape(signed SignedBattleResult, now time.Time) e
 	if strings.TrimSpace(result.ModeResultJSON) != "" && !json.Valid([]byte(result.ModeResultJSON)) {
 		return newError(codeInvalidRequest, "battle result mode result json is invalid")
 	}
+	if forbidden := firstForbiddenBattleResultProjectionField(result.RewardProjectionJSON); forbidden != "" {
+		return newError(codeForbiddenField, "battle result reward projection cannot include %s", forbidden)
+	}
+	if forbidden := firstForbiddenBattleResultProjectionField(result.ModeResultJSON); forbidden != "" {
+		return newError(codeForbiddenField, "battle result mode projection cannot include %s", forbidden)
+	}
 	return nil
+}
+
+func firstForbiddenBattleResultProjectionField(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return ""
+	}
+	switch typed := decoded.(type) {
+	case map[string]any:
+		return firstForbiddenFieldDeep(typed)
+	case []any:
+		for _, item := range typed {
+			if nestedMap, ok := item.(map[string]any); ok {
+				if nested := firstForbiddenFieldDeep(nestedMap); nested != "" {
+					return nested
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func allocationPlayerIDs(allocation *BattleServerAllocation) []string {
@@ -5742,7 +5838,66 @@ func cloneQueueResponse(source *QueueResponse) *QueueResponse {
 }
 
 func businessEventClientOperations() []string {
-	return contractClientOperations()
+	return ContractClientOperations()
+}
+
+func businessNotificationKinds() []string {
+	return []string{
+		"presence",
+		"queue",
+		"room",
+		"matchmaking",
+		"match.ready",
+		"battle.allocation",
+		"battle.ticket",
+		"settlement",
+	}
+}
+
+func isBusinessNotificationKind(kind string) bool {
+	for _, allowed := range businessNotificationKinds() {
+		if kind == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func validateBusinessEventPayload(kind string, event *BusinessEvent) error {
+	if event == nil {
+		return newError(codeInvalidRequest, "business event payload is unavailable")
+	}
+	switch kind {
+	case "presence":
+		return nil
+	case "queue", "matchmaking":
+		if event.Queue == nil {
+			return newError(codeInvalidRequest, "%s business event requires ticket_id or room_code", kind)
+		}
+	case "room":
+		if event.Room == nil {
+			return newError(codeInvalidRequest, "room business event requires room_code or room-bound ticket_id")
+		}
+	case "match.ready":
+		if event.Ready == nil {
+			return newError(codeInvalidRequest, "match.ready business event requires match_id or matched ticket_id")
+		}
+	case "battle.allocation":
+		if event.BattleAllocation == nil {
+			return newError(codeInvalidRequest, "battle allocation event requires match_id or matched ticket_id")
+		}
+	case "battle.ticket":
+		if event.BattleTicket == nil {
+			return newError(codeInvalidRequest, "battle ticket event requires match_id or matched ticket_id")
+		}
+	case "settlement":
+		if event.Settlement == nil {
+			return newError(codeInvalidRequest, "settlement event requires settled match_id or matched ticket_id")
+		}
+	default:
+		return newError(codeInvalidRequest, "business event kind %q is not supported", kind)
+	}
+	return nil
 }
 
 func contractClientOperations() []string {
@@ -5758,6 +5913,8 @@ func contractClientOperations() []string {
 		"rooms.join",
 		"rooms.leave",
 		"rooms.message",
+		"rooms.chat",
+		"rooms.announcement",
 		"business.event",
 		"business.event.settlement",
 		"match.ready",
@@ -5769,6 +5926,10 @@ func contractClientOperations() []string {
 	}
 }
 
+func ContractClientOperations() []string {
+	return contractClientOperations()
+}
+
 func serviceCallbackOperations() []string {
 	return []string{
 		"battle.servers.register",
@@ -5777,6 +5938,20 @@ func serviceCallbackOperations() []string {
 		"battle.ticket.consume",
 		"battle.result.submit",
 	}
+}
+
+func ServiceCallbackOperations() []string {
+	return serviceCallbackOperations()
+}
+
+func IsServiceCallbackOperation(operation string) bool {
+	operation = strings.ToLower(strings.TrimSpace(operation))
+	for _, callback := range serviceCallbackOperations() {
+		if operation == callback {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedForbiddenClientFields() []string {

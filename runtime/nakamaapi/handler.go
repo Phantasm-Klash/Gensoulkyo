@@ -102,7 +102,7 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		if strings.TrimSpace(request.SessionID) != "" || strings.TrimSpace(request.UserID) != "" {
 			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q service-origin callback must not include player session context", request.ID))
 		}
-		if _, ok := request.Payload[security.BusinessEnvelopePayloadKey]; ok {
+		if serviceOriginPayloadHasBusinessEnvelope(request.Payload) {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("rpc %q service-origin callback must not include business envelope payload", request.ID))
 		}
 	} else {
@@ -153,13 +153,13 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(request.SessionID, req) })
-	case "business.event":
+	case "business.event", "business.event.settlement":
 		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
 			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
 		}
-		var req core.BusinessEventRequest
-		if err := decodeBody(body, &req); err != nil {
-			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		req, response := businessEventRequest(body, rpcID)
+		if !response.OK {
+			return response
 		}
 		return handler.call(func() (any, error) { return handler.service.BusinessEvent(request.SessionID, req) })
 	case "matchmaking.join":
@@ -290,13 +290,13 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(message.SessionID, req) })
-	case "business.event":
+	case "business.event", "business.event.settlement":
 		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
 			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
 		}
-		var req core.BusinessEventRequest
-		if err := decodeBody(body, &req); err != nil {
-			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		req, response := businessEventRequest(body, name)
+		if !response.OK {
+			return response
 		}
 		return handler.call(func() (any, error) { return handler.service.BusinessEvent(message.SessionID, req) })
 	case "matchmaking.join":
@@ -509,12 +509,7 @@ func rpcSkipsEnvelope(rpcID string) bool {
 }
 
 func rpcRequiresServiceOrigin(rpcID string) bool {
-	switch rpcID {
-	case "battle.result.submit", "battle.ticket.consume", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline":
-		return true
-	default:
-		return false
-	}
+	return core.IsServiceCallbackOperation(rpcID)
 }
 
 func normalizeName(name string) string {
@@ -547,6 +542,35 @@ func requestBody(payload map[string]any) map[string]any {
 		body[key] = value
 	}
 	return body
+}
+
+func serviceOriginPayloadHasBusinessEnvelope(payload map[string]any) bool {
+	if _, ok := payload[security.BusinessEnvelopePayloadKey]; ok {
+		return true
+	}
+	if serviceOriginPayloadContainsEnvelopeField(payload) {
+		return true
+	}
+	for _, key := range []string{"body", "request", "data"} {
+		if body, ok := mapValue(payload[key]); ok {
+			if _, nested := body[security.BusinessEnvelopePayloadKey]; nested {
+				return true
+			}
+			if serviceOriginPayloadContainsEnvelopeField(body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func serviceOriginPayloadContainsEnvelopeField(payload map[string]any) bool {
+	for _, key := range []string{"seq", "timestamp_ms", "timestampMS", "nonce", "op_code", "op", "key_id", "keyID", "auth_tag", "tag", "ciphertext_mode", "body_hash", "bodyHash"} {
+		if _, ok := payload[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeBody(body map[string]any, target any) error {
@@ -602,6 +626,20 @@ func lobbyMessageRequest(body map[string]any, name string) (core.LobbyMessageReq
 		req.Kind = "chat"
 	case "rooms.announcement":
 		req.Kind = "announcement"
+	}
+	return req, successResponse(nil)
+}
+
+func businessEventRequest(body map[string]any, name string) (core.BusinessEventRequest, Response) {
+	var req core.BusinessEventRequest
+	if err := decodeBody(body, &req); err != nil {
+		return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+	}
+	if normalizeName(name) == "business.event.settlement" {
+		if kind := strings.TrimSpace(req.Kind); kind != "" && kind != "settlement" {
+			return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, "business.event.settlement requires settlement kind")
+		}
+		req.Kind = "settlement"
 	}
 	return req, successResponse(nil)
 }

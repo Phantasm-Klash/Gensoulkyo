@@ -427,6 +427,98 @@ func TestHTTPBusinessEnvelopeFallbackGuard(t *testing.T) {
 	}
 }
 
+func TestHTTPServiceCallbacksRejectPlayerSessionContext(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	player := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-service-player", "display_name": "HTTP Service Player"})
+	routes := []string{
+		"/v1/battle/servers/register",
+		"/v1/battle/servers/heartbeat",
+		"/v1/battle/servers/offline",
+		"/v1/battle/tickets/consume",
+		"/v1/battle/results/submit",
+	}
+	for _, route := range routes {
+		response := postRaw(t, server.URL+route, player.SessionToken, map[string]any{})
+		if response.Code != http.StatusForbidden || response.ErrorCode != "service_origin_required" || !strings.Contains(response.Message, "player session context") {
+			t.Fatalf("service callback %s should reject player session context before core validation, got %+v", route, response)
+		}
+	}
+}
+
+func TestHTTPServiceCallbacksRejectBusinessEnvelopePayloadShape(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	routes := []string{
+		"/v1/battle/servers/register",
+		"/v1/battle/servers/heartbeat",
+		"/v1/battle/servers/offline",
+		"/v1/battle/tickets/consume",
+		"/v1/battle/results/submit",
+	}
+	for index, route := range routes {
+		response := postRaw(t, server.URL+route, "", map[string]any{
+			security.BusinessEnvelopePayloadKey: map[string]any{
+				"version":      security.BusinessEnvelopeVersion,
+				"seq":          index + 1,
+				"timestamp_ms": time.Now().UnixMilli(),
+				"nonce":        "http-service-envelope-" + route,
+				"op":           "service_callback",
+				"key_id":       "dev-business-envelope-v0",
+				"auth_tag":     strings.Repeat("0", 64),
+				"mode":         "not_encrypted_http_fallback",
+			},
+		})
+		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope") {
+			t.Fatalf("service callback %s should reject envelope-shaped JSON before core validation, got %+v", route, response)
+		}
+	}
+
+	for _, wrapper := range []string{"body", "request", "data"} {
+		response := postRaw(t, server.URL+"/v1/battle/results/submit", "", map[string]any{
+			wrapper: map[string]any{
+				security.BusinessEnvelopePayloadKey: map[string]any{
+					"version": security.BusinessEnvelopeVersion,
+					"seq":     1,
+				},
+			},
+		})
+		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope") {
+			t.Fatalf("service callback should reject nested %s envelope before core validation, got %+v", wrapper, response)
+		}
+	}
+
+	for _, payload := range []map[string]any{
+		{
+			"seq":           1,
+			"timestamp_ms":  time.Now().UnixMilli(),
+			"nonce":         "http-service-direct-envelope",
+			"op":            "battle_result_submit",
+			"auth_tag":      strings.Repeat("1", 64),
+			"signed_result": map[string]any{"match_id": "direct-client-shaped"},
+		},
+		{
+			"body": map[string]any{
+				"seq":           2,
+				"timestamp_ms":  time.Now().UnixMilli(),
+				"nonce":         "http-service-nested-direct-envelope",
+				"op":            "battle_result_submit",
+				"auth_tag":      strings.Repeat("2", 64),
+				"signed_result": map[string]any{"match_id": "nested-direct-client-shaped"},
+			},
+		},
+	} {
+		response := postRaw(t, server.URL+"/v1/battle/results/submit", "", payload)
+		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope") {
+			t.Fatalf("service callback should reject direct envelope fields before core validation, got %+v", response)
+		}
+	}
+}
+
 func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	driverName := registerHTTPAuditCaptureDriver(t)
 	db, err := sql.Open(driverName, "")
@@ -593,6 +685,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		t.Fatalf("explicit battle ticket invalid: %+v", ticket)
 	}
 	consume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          ticket.Ticket.Version,
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
 		"user_id":          alice.UserID,
@@ -607,6 +700,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		t.Fatalf("battle ticket consume should echo ticket lifecycle timestamps: ticket=%+v consume=%+v", ticket.Ticket, consume)
 	}
 	duplicateConsume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          ticket.Ticket.Version,
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
 		"battle_server_id": ticket.Ticket.BattleServerID,
@@ -619,6 +713,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		t.Fatalf("duplicate consume should preserve first consume lifecycle timestamps: first=%+v duplicate=%+v", consume, duplicateConsume)
 	}
 	badConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          ticket.Ticket.Version,
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
 		"battle_server_id": ticket.Ticket.BattleServerID,
@@ -626,6 +721,18 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	})
 	if badConsume.Code != http.StatusBadRequest || badConsume.ErrorCode != "invalid_request" {
 		t.Fatalf("expected bad ticket consume rejection, got %+v", badConsume)
+	}
+	staleVersion := ticket.Ticket.Version
+	staleVersion.RulesetVersion = "ruleset-stale"
+	staleConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          staleVersion,
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
+	})
+	if staleConsume.Code != http.StatusBadRequest || staleConsume.ErrorCode != "invalid_request" {
+		t.Fatalf("expected stale ticket consume version rejection, got %+v", staleConsume)
 	}
 
 	postJSON[core.ReadyResponse](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/ready", alice.SessionToken, map[string]any{})
@@ -655,6 +762,13 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		PublicKeyHex:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ServerAuthoritative: true,
 	}
+	badProjection := result
+	badProjection.Result.RewardProjectionJSON = `{"source":"battle_server","reward":{"gold":999999}}`
+	forbiddenProjection := postRaw(t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: badProjection})
+	if forbiddenProjection.Code != http.StatusForbidden || forbiddenProjection.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden battle result projection rejection, got %+v", forbiddenProjection)
+	}
+
 	submit := postJSON[core.BattleResultSubmitResponse](t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: result})
 	if !submit.OK || !submit.Accepted || submit.MatchID != queueBob.MatchID {
 		t.Fatalf("battle result submit invalid: %+v", submit)

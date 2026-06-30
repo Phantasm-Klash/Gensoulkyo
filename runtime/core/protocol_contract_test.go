@@ -67,6 +67,90 @@ func TestMatchEntryRequestsExposeClientVersionContract(t *testing.T) {
 	}
 }
 
+func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
+	req := BattleTicketConsumeRequest{
+		Version:        currentVersionStamp(),
+		TicketID:       "ticket-contract",
+		MatchID:        "match-contract",
+		BattleServerID: "battle-contract",
+		TicketNonceHex: "abcdef",
+	}
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal consume request: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal consume request: %v", err)
+	}
+	version, ok := roundTrip["version"].(map[string]any)
+	if !ok {
+		t.Fatalf("consume request must expose version stamp: %s", encoded)
+	}
+	if version["protocol_version"] == nil || version["business_api_version"] == "" || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
+		t.Fatalf("consume request version missing battle gates: %+v", version)
+	}
+}
+
+func TestBattleResultExposesFullServiceVersionContract(t *testing.T) {
+	result := BattleResult{
+		Version:     currentVersionStamp(),
+		MatchID:     "match-contract",
+		ModeID:      "pvp_duel",
+		ResultHash:  "sha256:abc123",
+		ReplayID:    "replay-contract",
+		PlayerIDs:   []string{"p1", "p2"},
+		SettledAtMS: 1782800000000,
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal battle result: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal battle result: %v", err)
+	}
+	version, ok := roundTrip["version"].(map[string]any)
+	if !ok {
+		t.Fatalf("battle result must expose version stamp: %s", encoded)
+	}
+	if version["protocol_version"] == nil || version["business_api_version"] == "" || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
+		t.Fatalf("battle result version missing service gates: %+v", version)
+	}
+}
+
+func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testing.T) {
+	clientOps := ContractClientOperations()
+	serviceCallbacks := ServiceCallbackOperations()
+	if len(clientOps) == 0 || len(serviceCallbacks) == 0 {
+		t.Fatalf("business operation contracts must not be empty: client=%+v service=%+v", clientOps, serviceCallbacks)
+	}
+	for _, callback := range serviceCallbacks {
+		if !IsServiceCallbackOperation(callback) {
+			t.Fatalf("service callback helper does not recognize %q", callback)
+		}
+		if stringSliceContains(clientOps, callback) {
+			t.Fatalf("service callback %q must not be exposed as a client operation: client=%+v service=%+v", callback, clientOps, serviceCallbacks)
+		}
+	}
+	for _, expected := range []string{
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+		"battle.servers.offline",
+		"battle.ticket.consume",
+		"battle.result.submit",
+	} {
+		if !IsServiceCallbackOperation(expected) {
+			t.Fatalf("service callback contract missing %q: %+v", expected, serviceCallbacks)
+		}
+	}
+	for _, clientOp := range clientOps {
+		if IsServiceCallbackOperation(clientOp) {
+			t.Fatalf("client operation %q must not require service origin: client=%+v service=%+v", clientOp, clientOps, serviceCallbacks)
+		}
+	}
+}
+
 func TestBattleModeActionFixtureContract(t *testing.T) {
 	action := struct {
 		Version                   int    `json:"version"`

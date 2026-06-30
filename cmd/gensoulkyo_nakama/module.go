@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/nakamaapi"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -25,6 +26,7 @@ var rpcIDs = []string{
 	"chests.open",
 	"presence.heartbeat",
 	"business.event",
+	"business.event.settlement",
 	"matchmaking.join",
 	"matchmaking.ticket",
 	"matchmaking.cancel",
@@ -55,13 +57,7 @@ var rpcIDs = []string{
 	"battle.result.submit",
 }
 
-var serviceOriginRPCIDs = map[string]struct{}{
-	"battle.servers.register":  {},
-	"battle.servers.heartbeat": {},
-	"battle.servers.offline":   {},
-	"battle.ticket.consume":    {},
-	"battle.result.submit":     {},
-}
+var serviceOriginRPCIDs = serviceOriginRPCIDSet()
 
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	handler := nakamaapi.New(nil)
@@ -104,6 +100,14 @@ func isServiceOriginRPC(ctx context.Context, rpcID string) bool {
 	}
 	mode := strings.ToLower(strings.TrimSpace(runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)))
 	return mode != "" && mode != "client"
+}
+
+func serviceOriginRPCIDSet() map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, id := range core.ServiceCallbackOperations() {
+		out[id] = struct{}{}
+	}
+	return out
 }
 
 func decodePayload(payload string) map[string]any {
