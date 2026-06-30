@@ -302,6 +302,15 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 	if !chat.ServerAuthoritative || chat.RoomCode != created.RoomCode || chat.Kind != "chat" || chat.UserID != host.UserID || chat.Duplicate {
 		t.Fatalf("chat lobby message invalid: %+v", chat)
 	}
+	pathScopedChat := postJSON[core.LobbyMessage](t, server.URL+"/v1/rooms/"+created.RoomCode+"/messages", host.SessionToken, map[string]any{
+		"room_code":  "wrong-room",
+		"message_id": "http-room-chat-path-scoped",
+		"kind":       "chat",
+		"text":       "path scoped",
+	})
+	if pathScopedChat.RoomCode != created.RoomCode || pathScopedChat.MessageID != "http-room-chat-path-scoped" {
+		t.Fatalf("path room code should be authoritative for HTTP lobby messages: %+v", pathScopedChat)
+	}
 	duplicateChat := postJSON[core.LobbyMessage](t, server.URL+"/v1/rooms/"+created.RoomCode+"/messages", host.SessionToken, map[string]any{
 		"message_id": "http-room-chat-1",
 		"kind":       "chat",
@@ -335,7 +344,7 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 		t.Fatalf("host announcement invalid: %+v", announcement)
 	}
 	roomSnapshot := getJSON[core.RoomSnapshot](t, server.URL+"/v1/rooms/"+created.RoomCode, guest.SessionToken)
-	if len(roomSnapshot.Messages) != 2 || roomSnapshot.Messages[0].MessageID != chat.MessageID || roomSnapshot.Messages[1].MessageID != announcement.MessageID {
+	if len(roomSnapshot.Messages) != 3 || roomSnapshot.Messages[0].MessageID != chat.MessageID || roomSnapshot.Messages[1].MessageID != pathScopedChat.MessageID || roomSnapshot.Messages[2].MessageID != announcement.MessageID {
 		t.Fatalf("room snapshot should include accepted lobby messages only: %+v", roomSnapshot.Messages)
 	}
 

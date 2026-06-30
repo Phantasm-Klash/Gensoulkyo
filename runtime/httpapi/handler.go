@@ -477,9 +477,7 @@ func (h *Handler) lobbyMessage(w http.ResponseWriter, r *http.Request, roomCode 
 	if !decodeJSON(w, r, &raw) {
 		return
 	}
-	if _, ok := raw["room_code"]; !ok {
-		raw["room_code"] = roomCode
-	}
+	raw["room_code"] = roomCode
 	var req core.LobbyMessageRequest
 	encoded, err := json.Marshal(raw)
 	if err != nil {
