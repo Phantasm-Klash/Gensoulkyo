@@ -178,15 +178,24 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		}
 	}
 	callbackContext := ServiceCallbackContext()
-	for key, expected := range map[string]string{
+	expectedCallbackContext := map[string]string{
 		"runtime_ctx_mode":               "rpc",
 		"gensoulkyo_service_origin":      "battle_server",
 		"gensoulkyo_battle_callback":     "true",
 		"player_session_context_allowed": "false",
 		"business_envelope_allowed":      "false",
-	} {
+	}
+	if len(callbackContext) != len(expectedCallbackContext) {
+		t.Fatalf("service callback context must expose only required non-secret gates: got %+v want keys %+v", callbackContext, expectedCallbackContext)
+	}
+	for key, expected := range expectedCallbackContext {
 		if callbackContext[key] != expected {
 			t.Fatalf("service callback context %q drifted: got %q want %q in %+v", key, callbackContext[key], expected, callbackContext)
+		}
+	}
+	for key, value := range callbackContext {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			t.Fatalf("service callback context must not expose blank keys or values: %+v", callbackContext)
 		}
 	}
 	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {

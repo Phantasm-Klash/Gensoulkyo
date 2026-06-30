@@ -255,3 +255,9 @@ Status date: 2026-06-28
 - Kept the gate tied to explicit Nakama `rpc` mode, no player session/user context, allowlisted callback names, and `gensoulkyo_service_origin=battle_server` plus accepted callback markers; this does not create any high-frequency tick or client settlement authority path.
 - Dispositioned the legacy checkout dirty set in `/root/gotouhou/Gensoulkyo`: those four Nakama callback-gate edits were valuable but already superseded by the current managed branch implementation and this narrower hardening.
 - Verified `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
+
+## 2026-06-30 gensoulkyo-lobby service callback context contract update
+
+- Tightened the core operation-contract regression so `ServiceCallbackContext()` must expose exactly the required non-secret gate fields and no blank keys or values.
+- This keeps room rules/business-event callback metadata aligned with the build-tagged Nakama service-origin gate without broadening client RPC/WSS authority.
+- Verified `go test ./runtime/core -run TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList -count=1`, `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
