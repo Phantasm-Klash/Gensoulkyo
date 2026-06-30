@@ -120,16 +120,17 @@ func isServiceOriginRPC(ctx context.Context, rpcID string) bool {
 	if strings.ToLower(strings.TrimSpace(vars[serviceOriginVarKey])) != expectedOrigin {
 		return false
 	}
-	expectedCallback, ok := serviceCallbackContextExpected(serviceCallbackVarKey)
+	_, ok = serviceCallbackContextExpected(serviceCallbackVarKey)
 	if !ok {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(vars[serviceCallbackVarKey])) {
-	case "1", "yes", expectedCallback:
-		return true
-	default:
-		return false
+	callbackValue := strings.ToLower(strings.TrimSpace(vars[serviceCallbackVarKey]))
+	for _, accepted := range core.ServiceCallbackAcceptedValues() {
+		if callbackValue == strings.ToLower(strings.TrimSpace(accepted)) {
+			return true
+		}
 	}
+	return false
 }
 
 func serviceOriginRPCIDSet() map[string]struct{} {

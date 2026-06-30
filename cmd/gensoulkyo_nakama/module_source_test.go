@@ -202,8 +202,8 @@ func TestNakamaBindingServiceOriginContextGateRequiresBattleCallbackVars(t *test
 		"expectedOrigin",
 		"serviceCallbackContextExpected(serviceCallbackVarKey)",
 		"vars[serviceCallbackVarKey]",
-		"expectedCallback",
-		"case \"1\", \"yes\", expectedCallback",
+		"core.ServiceCallbackAcceptedValues()",
+		"callbackValue",
 	} {
 		if !strings.Contains(gateText, expected) {
 			t.Fatalf("service-origin context gate missing %q in:\n%s", expected, gateText)

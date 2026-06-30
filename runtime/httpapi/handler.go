@@ -776,11 +776,7 @@ func (h *Handler) serviceCallbackStatus(w http.ResponseWriter, r *http.Request) 
 				"service_origin":  headerServiceOrigin,
 				"battle_callback": headerBattleCallback,
 			},
-			"accepted_callback_values": []string{
-				serviceCallbackContextValue(serviceCallbackContextKey),
-				"1",
-				"yes",
-			},
+			"accepted_callback_values":       core.ServiceCallbackAcceptedValues(),
 			"player_session_context_allowed": false,
 			"business_envelope_allowed":      false,
 		},
@@ -949,13 +945,13 @@ func normalizeServiceCallbackValue(value string) string {
 }
 
 func truthyHeader(value string) bool {
-	expected := serviceCallbackContextValue(serviceCallbackContextKey)
-	switch normalizeServiceCallbackValue(value) {
-	case "1", "yes", expected:
-		return true
-	default:
-		return false
+	normalized := normalizeServiceCallbackValue(value)
+	for _, accepted := range core.ServiceCallbackAcceptedValues() {
+		if normalized == normalizeServiceCallbackValue(accepted) {
+			return true
+		}
 	}
+	return false
 }
 
 func servicePayloadHasBusinessEnvelope(payload map[string]any) bool {
