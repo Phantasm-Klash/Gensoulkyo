@@ -563,6 +563,25 @@ func TestHTTPServiceCallbacksRequireDevelopmentBattleCallbackHeaders(t *testing.
 		if response.Code != http.StatusForbidden || response.ErrorCode != "service_origin_required" || !strings.Contains(response.Message, "development battle callback headers") {
 			t.Fatalf("service callback %s should require development battle callback headers before core validation, got %+v", route, response)
 		}
+		for name, headers := range map[string]map[string]string{
+			"wrong origin":     {headerServiceOrigin: "player", headerBattleCallback: "true"},
+			"missing callback": {headerServiceOrigin: serviceOriginBattle},
+			"false callback":   {headerServiceOrigin: serviceOriginBattle, headerBattleCallback: "false"},
+		} {
+			response := postRawWithHeaders(t, server.URL+route, "", map[string]any{}, headers)
+			if response.Code != http.StatusForbidden || response.ErrorCode != "service_origin_required" || !strings.Contains(response.Message, "development battle callback headers") {
+				t.Fatalf("service callback %s should reject %s callback headers, got %+v", route, name, response)
+			}
+		}
+		for _, callbackHeader := range []string{"true", "1", "yes"} {
+			response := postRawWithHeaders(t, server.URL+route, "", map[string]any{}, map[string]string{
+				headerServiceOrigin:  serviceOriginBattle,
+				headerBattleCallback: callbackHeader,
+			})
+			if response.Code == http.StatusForbidden && response.ErrorCode == "service_origin_required" {
+				t.Fatalf("service callback %s should accept development callback header %q before core validation, got %+v", route, callbackHeader, response)
+			}
+		}
 	}
 }
 
