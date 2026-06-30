@@ -271,6 +271,9 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 	if rules.Room.Participants[0].DeckSnapshotHash == "" || len(rules.ForbiddenFields) == 0 {
 		t.Fatalf("room rules should expose hashes and forbidden fields: %+v", rules)
 	}
+	if !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
+		t.Fatalf("room rules should expose client ticket cancellation without result submit: %+v", rules)
+	}
 
 	joined := postJSON[core.QueueResponse](t, server.URL+"/v1/rooms/"+created.RoomCode+"/join", guest.SessionToken, map[string]any{
 		"mode_id":        "certification",
@@ -960,6 +963,15 @@ func httpAuditTableCounts() map[string]int {
 		}
 	}
 	return counts
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 type httpAuditCaptureDriver struct{}

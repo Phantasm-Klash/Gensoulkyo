@@ -1138,6 +1138,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"rooms.leave",
 			"rooms.message",
 			"matchmaking.ticket",
+			"matchmaking.cancel",
 			"match.ready",
 			"match.disconnect",
 			"match.reconnect",

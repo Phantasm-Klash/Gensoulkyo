@@ -271,7 +271,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.BusinessTransports, "nakama_wss") || !stringSliceContains(rulesPayload.BattleTransports, "kcp_udp") {
 		t.Fatalf("room rules should expose transport split contract: %+v", rulesPayload)
 	}
-	if !stringSliceContains(rulesPayload.ClientOperations, "battle.ticket") || stringSliceContains(rulesPayload.ClientOperations, "battle.result.submit") {
+	if !stringSliceContains(rulesPayload.ClientOperations, "battle.ticket") || !stringSliceContains(rulesPayload.ClientOperations, "matchmaking.cancel") || stringSliceContains(rulesPayload.ClientOperations, "battle.result.submit") {
 		t.Fatalf("room rules should expose client RPC/WSS operations without result submit: %+v", rulesPayload)
 	}
 	if !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.ticket.consume") {

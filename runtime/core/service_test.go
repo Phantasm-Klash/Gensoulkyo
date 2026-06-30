@@ -2341,7 +2341,7 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.BusinessTransports, "nakama_https_rpc") || !stringSliceContains(rules.BusinessTransports, "nakama_wss") || !stringSliceContains(rules.BattleTransports, "kcp_udp") {
 		t.Fatalf("room rules should publish business and battle transport contract: %+v", rules)
 	}
-	if !stringSliceContains(rules.ClientOperations, "battle.ticket") || !stringSliceContains(rules.ClientOperations, "match.ready") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
+	if !stringSliceContains(rules.ClientOperations, "battle.ticket") || !stringSliceContains(rules.ClientOperations, "match.ready") || !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
 		t.Fatalf("room rules should keep client operations read/intent only: %+v", rules)
 	}
 	if !stringSliceContains(rules.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rules.ServiceCallbacks, "battle.ticket.consume") {
