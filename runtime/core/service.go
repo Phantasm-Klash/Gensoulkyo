@@ -3626,6 +3626,12 @@ func validateBattleTicketConsumeVersion(version VersionStamp, ticket BattleTicke
 	if version.ProtocolVersion != ticket.Version.ProtocolVersion {
 		return newError(codeInvalidRequest, "battle ticket consume protocol version mismatch")
 	}
+	if strings.TrimSpace(version.BusinessAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle ticket consume version.business_api_version is required")
+	}
+	if version.BusinessAPIVersion != ticket.Version.BusinessAPIVersion {
+		return newError(codeInvalidRequest, "battle ticket consume business api version mismatch")
+	}
 	if strings.TrimSpace(version.BattleAPIVersion) == "" {
 		return newError(codeInvalidRequest, "battle ticket consume version.battle_api_version is required")
 	}

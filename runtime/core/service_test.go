@@ -1062,6 +1062,17 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected missing consume version rejection, got %v", err)
 	}
+	staleBusinessVersion := replacement.Ticket.Version
+	staleBusinessVersion.BusinessAPIVersion = "0.0.0-stale"
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        staleBusinessVersion,
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale consume business api rejection, got %v", err)
+	}
 	staleVersion := replacement.Ticket.Version
 	staleVersion.RulesetVersion = "ruleset-stale"
 	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{

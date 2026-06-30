@@ -87,7 +87,7 @@ func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
 	if !ok {
 		t.Fatalf("consume request must expose version stamp: %s", encoded)
 	}
-	if version["protocol_version"] == nil || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
+	if version["protocol_version"] == nil || version["business_api_version"] == "" || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
 		t.Fatalf("consume request version missing battle gates: %+v", version)
 	}
 }

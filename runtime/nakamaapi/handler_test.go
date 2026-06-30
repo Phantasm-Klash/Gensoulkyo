@@ -978,7 +978,7 @@ func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T)
 			id: "battle.ticket.consume",
 			op: "battle_ticket_consume",
 			body: map[string]any{
-				"version":          map[string]any{"protocol_version": core.ProtocolVersion, "battle_api_version": core.BattleAPIVersion, "ruleset_version": core.RulesetVersion},
+				"version":          map[string]any{"protocol_version": core.ProtocolVersion, "business_api_version": core.BusinessAPIVersion, "battle_api_version": core.BattleAPIVersion, "ruleset_version": core.RulesetVersion},
 				"ticket_id":        "ticket-client-shaped",
 				"match_id":         "match-client-shaped",
 				"battle_server_id": "battle-client-shaped",
