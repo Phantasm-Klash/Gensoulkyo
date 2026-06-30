@@ -359,6 +359,9 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "business.event") {
 		t.Fatalf("room rules should expose business event WSS/RPC contract: %+v", rulesPayload)
 	}
+	if rulesPayload.ServiceCallbackContext["runtime_ctx_mode"] != "rpc" || rulesPayload.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" || rulesPayload.ServiceCallbackContext["gensoulkyo_battle_callback"] != "true" {
+		t.Fatalf("room rules should expose service callback context requirements: %+v", rulesPayload.ServiceCallbackContext)
+	}
 	if !stringSliceContains(rulesPayload.ClientOperations, "rooms.chat") || !stringSliceContains(rulesPayload.ClientOperations, "rooms.announcement") {
 		t.Fatalf("room rules should expose registered room message aliases: %+v", rulesPayload.ClientOperations)
 	}
@@ -612,6 +615,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.chat") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.announcement") || !stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers") || stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers.register") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
+	}
+	if eventPayload.ServiceCallbackContext["runtime_ctx_mode"] != "rpc" || eventPayload.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" || eventPayload.ServiceCallbackContext["gensoulkyo_battle_callback"] != "true" {
+		t.Fatalf("business event should document service callback context requirements: %+v", eventPayload.ServiceCallbackContext)
 	}
 	if !stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.allocation") || !stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket") || stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.result.submit") || stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket.consume") {
 		t.Fatalf("business event should document split client RPC/WSS operations without service callbacks: %+v", eventPayload)

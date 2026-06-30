@@ -746,28 +746,29 @@ type RoomListResponse struct {
 }
 
 type RoomRulesSnapshot struct {
-	OK                             bool         `json:"ok"`
-	Version                        VersionStamp `json:"version"`
-	Room                           RoomSnapshot `json:"room"`
-	Mode                           ModeConfig   `json:"mode"`
-	TickRate                       int          `json:"tick_rate"`
-	InputDelayTicks                int          `json:"input_delay_ticks"`
-	BattleTicketTTL                int          `json:"battle_ticket_ttl_seconds"`
-	BusinessTransports             []string     `json:"business_transports"`
-	BattleTransports               []string     `json:"battle_transports"`
-	ClientOperations               []string     `json:"client_operations"`
-	ClientRPCOperations            []string     `json:"client_rpc_operations"`
-	ClientWSSOperations            []string     `json:"client_wss_operations"`
-	ServiceCallbacks               []string     `json:"service_callbacks"`
-	BusinessNotifications          []string     `json:"business_notifications"`
-	ClientAuthority                []string     `json:"client_authority"`
-	ServerAuthority                []string     `json:"server_authority"`
-	ForbiddenFields                []string     `json:"forbidden_fields"`
-	BusinessEnvelope               bool         `json:"business_envelope_required"`
-	ClientResultSubmit             bool         `json:"client_result_submit_allowed"`
-	HighFrequencyBattleTickAllowed bool         `json:"high_frequency_battle_tick_allowed"`
-	ServerTime                     time.Time    `json:"server_time"`
-	ServerAuthoritative            bool         `json:"server_authoritative"`
+	OK                             bool              `json:"ok"`
+	Version                        VersionStamp      `json:"version"`
+	Room                           RoomSnapshot      `json:"room"`
+	Mode                           ModeConfig        `json:"mode"`
+	TickRate                       int               `json:"tick_rate"`
+	InputDelayTicks                int               `json:"input_delay_ticks"`
+	BattleTicketTTL                int               `json:"battle_ticket_ttl_seconds"`
+	BusinessTransports             []string          `json:"business_transports"`
+	BattleTransports               []string          `json:"battle_transports"`
+	ClientOperations               []string          `json:"client_operations"`
+	ClientRPCOperations            []string          `json:"client_rpc_operations"`
+	ClientWSSOperations            []string          `json:"client_wss_operations"`
+	ServiceCallbacks               []string          `json:"service_callbacks"`
+	ServiceCallbackContext         map[string]string `json:"service_callback_context"`
+	BusinessNotifications          []string          `json:"business_notifications"`
+	ClientAuthority                []string          `json:"client_authority"`
+	ServerAuthority                []string          `json:"server_authority"`
+	ForbiddenFields                []string          `json:"forbidden_fields"`
+	BusinessEnvelope               bool              `json:"business_envelope_required"`
+	ClientResultSubmit             bool              `json:"client_result_submit_allowed"`
+	HighFrequencyBattleTickAllowed bool              `json:"high_frequency_battle_tick_allowed"`
+	ServerTime                     time.Time         `json:"server_time"`
+	ServerAuthoritative            bool              `json:"server_authoritative"`
 }
 
 type QueueResponse struct {
@@ -863,6 +864,7 @@ type BusinessEvent struct {
 	AllowedClientRPCOperations     []string                `json:"allowed_client_rpc_operations"`
 	AllowedClientWSSOperations     []string                `json:"allowed_client_wss_operations"`
 	ServiceCallbacks               []string                `json:"service_callbacks"`
+	ServiceCallbackContext         map[string]string       `json:"service_callback_context"`
 	BusinessNotifications          []string                `json:"business_notifications"`
 	BusinessEnvelopeRequired       bool                    `json:"business_envelope_required"`
 	ForbiddenFields                []string                `json:"forbidden_fields"`

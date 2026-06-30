@@ -2611,6 +2611,12 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rules.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should publish service-only battle callbacks: %+v", rules)
 	}
+	if rules.ServiceCallbackContext["runtime_ctx_mode"] != "rpc" || rules.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" || rules.ServiceCallbackContext["gensoulkyo_battle_callback"] != "true" {
+		t.Fatalf("room rules should publish trusted service callback context requirements: %+v", rules.ServiceCallbackContext)
+	}
+	if rules.ServiceCallbackContext["player_session_context_allowed"] != "false" || rules.ServiceCallbackContext["business_envelope_allowed"] != "false" {
+		t.Fatalf("room rules should keep service callbacks out of player/envelope paths: %+v", rules.ServiceCallbackContext)
+	}
 	if !stringSliceContains(rules.BusinessNotifications, "battle.allocation") || !stringSliceContains(rules.BusinessNotifications, "battle.ticket") || !stringSliceContains(rules.BusinessNotifications, "settlement") || stringSliceContains(rules.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("room rules should publish low-frequency business WSS notifications only: %+v", rules)
 	}
@@ -2626,6 +2632,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.AllowedClientOperations, rules.ClientOperations) || !reflect.DeepEqual(event.ServiceCallbacks, rules.ServiceCallbacks) {
 		t.Fatalf("room rules and business event contract drifted: rules=%+v callbacks=%+v event=%+v callbacks=%+v", rules.ClientOperations, rules.ServiceCallbacks, event.AllowedClientOperations, event.ServiceCallbacks)
+	}
+	if !reflect.DeepEqual(event.ServiceCallbackContext, rules.ServiceCallbackContext) {
+		t.Fatalf("room rules and business event service callback context drifted: rules=%+v event=%+v", rules.ServiceCallbackContext, event.ServiceCallbackContext)
 	}
 	if !reflect.DeepEqual(event.AllowedClientRPCOperations, rules.ClientRPCOperations) || !reflect.DeepEqual(event.AllowedClientWSSOperations, rules.ClientWSSOperations) {
 		t.Fatalf("room rules and business event split client operation contract drifted: rules rpc=%+v wss=%+v event rpc=%+v wss=%+v", rules.ClientRPCOperations, rules.ClientWSSOperations, event.AllowedClientRPCOperations, event.AllowedClientWSSOperations)
