@@ -553,11 +553,26 @@ func serviceOriginPayloadHasBusinessEnvelope(payload map[string]any) bool {
 	if _, ok := payload[security.BusinessEnvelopePayloadKey]; ok {
 		return true
 	}
+	if serviceOriginPayloadContainsEnvelopeField(payload) {
+		return true
+	}
 	for _, key := range []string{"body", "request", "data"} {
 		if body, ok := mapValue(payload[key]); ok {
 			if _, nested := body[security.BusinessEnvelopePayloadKey]; nested {
 				return true
 			}
+			if serviceOriginPayloadContainsEnvelopeField(body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func serviceOriginPayloadContainsEnvelopeField(payload map[string]any) bool {
+	for _, key := range []string{"seq", "timestamp_ms", "timestampMS", "nonce", "op_code", "op", "auth_tag", "tag", "ciphertext_mode", "body_hash", "bodyHash"} {
+		if _, ok := payload[key]; ok {
+			return true
 		}
 	}
 	return false

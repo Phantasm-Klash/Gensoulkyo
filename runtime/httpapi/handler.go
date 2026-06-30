@@ -624,7 +624,7 @@ func (h *Handler) registerBattleServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req core.RegisterBattleServerRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
 	resp, err := h.service.RegisterBattleServer(req)
@@ -640,7 +640,7 @@ func (h *Handler) battleServerHeartbeat(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req core.BattleServerHeartbeatRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
 	resp, err := h.service.BattleServerHeartbeat(req)
@@ -656,7 +656,7 @@ func (h *Handler) battleServerOffline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req core.BattleServerOfflineRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
 	resp, err := h.service.BattleServerOffline(req)
@@ -672,7 +672,7 @@ func (h *Handler) consumeBattleTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req core.BattleTicketConsumeRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
 	resp, err := h.service.ConsumeBattleTicket(req)
@@ -688,7 +688,7 @@ func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req core.BattleResultSubmitRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
 	resp, err := h.service.SubmitBattleResult(req)
@@ -748,6 +748,34 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 
+func decodeServiceJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	var raw map[string]any
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&raw); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return false
+	}
+	if servicePayloadHasBusinessEnvelope(raw) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":         false,
+			"error_code": "invalid_request",
+			"message":    "service-origin callback must not include business envelope payload",
+		})
+		return false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return false
+	}
+	if err := json.Unmarshal(encoded, target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return false
+	}
+	return true
+}
+
 func sessionToken(r *http.Request) string {
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	if strings.HasPrefix(header, "Bearer ") {
@@ -797,6 +825,35 @@ func rejectPlayerContextForServiceRoute(w http.ResponseWriter, r *http.Request) 
 		"message":    "service-origin callback must not include player session context",
 	})
 	return true
+}
+
+func servicePayloadHasBusinessEnvelope(payload map[string]any) bool {
+	if _, ok := payload[security.BusinessEnvelopePayloadKey]; ok {
+		return true
+	}
+	if servicePayloadContainsEnvelopeField(payload) {
+		return true
+	}
+	for _, key := range []string{"body", "request", "data"} {
+		if nested, ok := payload[key].(map[string]any); ok {
+			if _, hasEnvelope := nested[security.BusinessEnvelopePayloadKey]; hasEnvelope {
+				return true
+			}
+			if servicePayloadContainsEnvelopeField(nested) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func servicePayloadContainsEnvelopeField(payload map[string]any) bool {
+	for _, key := range []string{"seq", "timestamp_ms", "timestampMS", "nonce", "op_code", "op", "auth_tag", "tag", "ciphertext_mode", "body_hash", "bodyHash"} {
+		if _, ok := payload[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) validateBusinessEnvelopeHeaders(r *http.Request) (int, string, string) {

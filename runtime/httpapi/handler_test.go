@@ -448,6 +448,77 @@ func TestHTTPServiceCallbacksRejectPlayerSessionContext(t *testing.T) {
 	}
 }
 
+func TestHTTPServiceCallbacksRejectBusinessEnvelopePayloadShape(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	routes := []string{
+		"/v1/battle/servers/register",
+		"/v1/battle/servers/heartbeat",
+		"/v1/battle/servers/offline",
+		"/v1/battle/tickets/consume",
+		"/v1/battle/results/submit",
+	}
+	for index, route := range routes {
+		response := postRaw(t, server.URL+route, "", map[string]any{
+			security.BusinessEnvelopePayloadKey: map[string]any{
+				"version":      security.BusinessEnvelopeVersion,
+				"seq":          index + 1,
+				"timestamp_ms": time.Now().UnixMilli(),
+				"nonce":        "http-service-envelope-" + route,
+				"op":           "service_callback",
+				"key_id":       "dev-business-envelope-v0",
+				"auth_tag":     strings.Repeat("0", 64),
+				"mode":         "not_encrypted_http_fallback",
+			},
+		})
+		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope") {
+			t.Fatalf("service callback %s should reject envelope-shaped JSON before core validation, got %+v", route, response)
+		}
+	}
+
+	for _, wrapper := range []string{"body", "request", "data"} {
+		response := postRaw(t, server.URL+"/v1/battle/results/submit", "", map[string]any{
+			wrapper: map[string]any{
+				security.BusinessEnvelopePayloadKey: map[string]any{
+					"version": security.BusinessEnvelopeVersion,
+					"seq":     1,
+				},
+			},
+		})
+		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope") {
+			t.Fatalf("service callback should reject nested %s envelope before core validation, got %+v", wrapper, response)
+		}
+	}
+
+	for _, payload := range []map[string]any{
+		{
+			"seq":           1,
+			"timestamp_ms":  time.Now().UnixMilli(),
+			"nonce":         "http-service-direct-envelope",
+			"op":            "battle_result_submit",
+			"auth_tag":      strings.Repeat("1", 64),
+			"signed_result": map[string]any{"match_id": "direct-client-shaped"},
+		},
+		{
+			"body": map[string]any{
+				"seq":           2,
+				"timestamp_ms":  time.Now().UnixMilli(),
+				"nonce":         "http-service-nested-direct-envelope",
+				"op":            "battle_result_submit",
+				"auth_tag":      strings.Repeat("2", 64),
+				"signed_result": map[string]any{"match_id": "nested-direct-client-shaped"},
+			},
+		},
+	} {
+		response := postRaw(t, server.URL+"/v1/battle/results/submit", "", payload)
+		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope") {
+			t.Fatalf("service callback should reject direct envelope fields before core validation, got %+v", response)
+		}
+	}
+}
+
 func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	driverName := registerHTTPAuditCaptureDriver(t)
 	db, err := sql.Open(driverName, "")

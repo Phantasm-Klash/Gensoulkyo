@@ -1019,6 +1019,42 @@ func TestNakamaServiceOriginRPCRejectsNestedBusinessEnvelopePayloadShape(t *test
 	}
 }
 
+func TestNakamaServiceOriginRPCRejectsDirectBusinessEnvelopeFields(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	for index, payload := range []map[string]any{
+		{
+			"seq":           1,
+			"timestamp_ms":  time.Now().UnixMilli(),
+			"nonce":         "direct-envelope-fields",
+			"op":            "battle_result_submit",
+			"auth_tag":      strings.Repeat("1", 64),
+			"signed_result": map[string]any{"match_id": "direct-client-shaped"},
+		},
+		{
+			"body": map[string]any{
+				"seq":           2,
+				"timestamp_ms":  time.Now().UnixMilli(),
+				"nonce":         "nested-direct-envelope-fields",
+				"op":            "battle_result_submit",
+				"auth_tag":      strings.Repeat("2", 64),
+				"signed_result": map[string]any{"match_id": "nested-direct-client-shaped"},
+			},
+		},
+	} {
+		response := handler.HandleRPC(RPCRequest{
+			ID:      "battle.result.submit",
+			Service: true,
+			Payload: payload,
+		})
+		if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "must not include business envelope") {
+			t.Fatalf("service-origin callback payload %d should reject direct envelope fields before core dispatch: %+v", index, response)
+		}
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
+		t.Fatalf("direct service-origin envelope-field rejection must not consume replay guard state: %+v", snapshot)
+	}
+}
+
 func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	callbacks := []string{
