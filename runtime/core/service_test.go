@@ -1301,6 +1301,64 @@ func TestLobbyLifecycleAuditRecordsRoomReconnectTransitions(t *testing.T) {
 	}
 }
 
+func TestLobbyLifecycleAuditRecordsRoomHeartbeatTransitions(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Audit Heartbeat Host")
+	guest := mustLogin(t, service, "Audit Heartbeat Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "audit_heartbeat_host_deck",
+		DeckSnapshot: validDeck("audit_heartbeat_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "starlit_lanes", "character_id": "balanced"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if _, err := service.Heartbeat(host.SessionToken, PresenceHeartbeatRequest{
+		TicketID:        created.TicketID,
+		LastEventCursor: 0,
+		ClientTick:      7,
+	}); err != nil {
+		t.Fatalf("room heartbeat: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "audit_heartbeat_guest_deck",
+		DeckSnapshot: validDeck("audit_heartbeat_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.MatchID == "" {
+		t.Fatalf("join should create match: %+v", joined)
+	}
+	if _, err := service.Heartbeat(host.SessionToken, PresenceHeartbeatRequest{
+		TicketID:        created.TicketID,
+		MatchID:         joined.MatchID,
+		LastEventCursor: 1,
+		ClientTick:      11,
+	}); err != nil {
+		t.Fatalf("match heartbeat: %v", err)
+	}
+
+	heartbeatAudits := filterLobbyRoomAudits(repo.rooms, "heartbeat")
+	if len(heartbeatAudits) != 2 {
+		t.Fatalf("expected queued and matched heartbeat audit records, got %+v", heartbeatAudits)
+	}
+	if heartbeatAudits[0].RoomCode != created.RoomCode || heartbeatAudits[0].MatchID != "" || heartbeatAudits[0].TicketID != created.TicketID || heartbeatAudits[0].CurrentPlayers != 1 {
+		t.Fatalf("queued heartbeat audit invalid: %+v", heartbeatAudits[0])
+	}
+	if heartbeatAudits[1].RoomCode != created.RoomCode || heartbeatAudits[1].MatchID != joined.MatchID || heartbeatAudits[1].TicketID != created.TicketID || heartbeatAudits[1].CurrentPlayers != 2 {
+		t.Fatalf("matched heartbeat audit invalid: %+v", heartbeatAudits[1])
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ConnectionRecords != 2 || status.LastSuccessOperation != "heartbeat" || status.RoomRecords != 2 || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
+		t.Fatalf("heartbeat audit status invalid: %+v", status)
+	}
+}
+
 func TestRoomHostLeavePromotesRemainingParticipantAuthority(t *testing.T) {
 	repo := &captureLobbyLifecycleAuditRepo{}
 	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
@@ -1373,6 +1431,16 @@ type captureLobbyLifecycleAuditRepo struct {
 	rooms    []LobbyRoomAuditRecord
 	messages []LobbyMessageAuditRecord
 	err      error
+}
+
+func filterLobbyRoomAudits(records []LobbyRoomAuditRecord, action string) []LobbyRoomAuditRecord {
+	out := []LobbyRoomAuditRecord{}
+	for _, record := range records {
+		if record.Action == action {
+			out = append(out, record)
+		}
+	}
+	return out
 }
 
 func (repo *captureLobbyLifecycleAuditRepo) RecordLobbyRoomAudit(record LobbyRoomAuditRecord) error {

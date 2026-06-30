@@ -1346,6 +1346,7 @@ func (s *Service) Heartbeat(sessionToken string, req PresenceHeartbeatRequest) (
 		ticket.LastSeenAt = now
 		matchID = ticket.MatchID
 		if matchID == "" {
+			s.recordLobbyHeartbeatAuditLocked(user.UserID, ticket, nil, now)
 			return s.heartbeatTicketResponseLocked(user, ticket, req, now), nil
 		}
 	}
@@ -1358,6 +1359,7 @@ func (s *Service) Heartbeat(sessionToken string, req PresenceHeartbeatRequest) (
 		if player.Connected {
 			player.DisconnectedAt = time.Time{}
 		}
+		s.recordLobbyHeartbeatAuditLocked(user.UserID, s.tickets[ticketID], match, now)
 		return s.heartbeatMatchResponseLocked(user, match, player, ticketID, req, now), nil
 	}
 	return &PresenceHeartbeatResponse{
@@ -4755,6 +4757,25 @@ func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
 	s.recordLobbyAuditOutcomeLocked("message", fingerprint, message.CreatedAt, err)
 }
 
+func (s *Service) recordLobbyHeartbeatAuditLocked(userID string, ticket *queueTicket, match *matchState, occurredAt time.Time) {
+	if ticket == nil && match != nil {
+		if ticketID := s.ticketIDForMatchUserLocked(match.MatchID, userID); ticketID != "" {
+			ticket = s.tickets[ticketID]
+		}
+	}
+	if ticket == nil || ticket.RoomCode == "" {
+		return
+	}
+	room := s.rooms[normalizeRoomCode(ticket.RoomCode)]
+	record := s.lobbyRoomAuditRecordLocked(room, ticket, userID, "heartbeat", occurredAt)
+	record.CurrentPlayers = s.ticketDepthLocked(ticket)
+	if match != nil {
+		record.MatchID = match.MatchID
+		record.CurrentPlayers = connectedPlayerCount(match)
+	}
+	s.recordLobbyRoomAuditRecordLocked(record)
+}
+
 func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint string, occurredAt time.Time, err error) {
 	s.lobbyAuditStatus.Configured = s.lobbyAuditRepo != nil
 	s.lobbyAuditStatus.ServerAuthoritative = true
@@ -4777,7 +4798,7 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint st
 		s.lobbyAuditStatus.RoomReadRecords++
 	case "ready":
 		s.lobbyAuditStatus.ReadyRecords++
-	case "disconnected", "reconnected":
+	case "disconnected", "reconnected", "heartbeat":
 		s.lobbyAuditStatus.ConnectionRecords++
 	default:
 		s.lobbyAuditStatus.RoomRecords++

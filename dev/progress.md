@@ -187,3 +187,10 @@ Status date: 2026-06-28
 - Kept service-origin-only Nakama WSS callback names fail-closed before player session mapping, envelope validation, or core dispatch, so clients still cannot register battle servers, heartbeat/offline them, or submit settlement callbacks through WSS.
 - Added a synthetic non-secret rejected business-envelope audit for those forbidden WSS attempts, preserving operational visibility without accepting the supplied envelope or consuming the player's replay seq/nonce state.
 - Verified the focused SDK-neutral Nakama adapter regression with `go test ./runtime/nakamaapi -run TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState -count=1`; broader Go, Docker Compose, Nakama tag-build, and protocol audit checks are rerun for this final sample.
+
+## 2026-06-30 gensoulkyo-lobby presence heartbeat audit update
+
+- Added PostgreSQL-compatible `heartbeat` lobby lifecycle audit records for room-backed and match-backed `presence.heartbeat` calls, counted under `connection_records` so liveness visibility stays separate from room mutations and ready transitions.
+- Extended core and DB-backed Nakama regressions so authenticated RPC/WSS heartbeats write durable lobby audit rows through `runtime/nakamaapi.NewWithDatabase`, while allocation, battle tickets, replay, and service-origin battle result authority remain unchanged.
+- Updated the `lobby_room_audits.action` migration constraint and migration guard to keep the heartbeat audit contract aligned with the SQL repository path.
+- Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
