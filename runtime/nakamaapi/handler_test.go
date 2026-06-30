@@ -998,6 +998,27 @@ func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T)
 	}
 }
 
+func TestNakamaServiceOriginRPCRejectsNestedBusinessEnvelopePayloadShape(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	for index, wrapper := range []string{"body", "request", "data"} {
+		response := handler.HandleRPC(RPCRequest{
+			ID:      "battle.result.submit",
+			Service: true,
+			Payload: map[string]any{
+				wrapper: envelopePayload(int64(index+1), "nonce-service-origin-nested-envelope-"+wrapper, "battle_result_submit", map[string]any{
+					"signed_result": map[string]any{"match_id": "nested-client-shaped"},
+				}),
+			},
+		})
+		if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "must not include business envelope") {
+			t.Fatalf("service-origin callback with %s wrapper should reject nested envelope before core dispatch: %+v", wrapper, response)
+		}
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
+		t.Fatalf("nested service-origin envelope-shape rejection must not consume replay guard state: %+v", snapshot)
+	}
+}
+
 func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	callbacks := []string{

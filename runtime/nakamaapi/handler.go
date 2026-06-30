@@ -102,7 +102,7 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		if strings.TrimSpace(request.SessionID) != "" || strings.TrimSpace(request.UserID) != "" {
 			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q service-origin callback must not include player session context", request.ID))
 		}
-		if _, ok := request.Payload[security.BusinessEnvelopePayloadKey]; ok {
+		if serviceOriginPayloadHasBusinessEnvelope(request.Payload) {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("rpc %q service-origin callback must not include business envelope payload", request.ID))
 		}
 	} else {
@@ -547,6 +547,20 @@ func requestBody(payload map[string]any) map[string]any {
 		body[key] = value
 	}
 	return body
+}
+
+func serviceOriginPayloadHasBusinessEnvelope(payload map[string]any) bool {
+	if _, ok := payload[security.BusinessEnvelopePayloadKey]; ok {
+		return true
+	}
+	for _, key := range []string{"body", "request", "data"} {
+		if body, ok := mapValue(payload[key]); ok {
+			if _, nested := body[security.BusinessEnvelopePayloadKey]; nested {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func decodeBody(body map[string]any, target any) error {
