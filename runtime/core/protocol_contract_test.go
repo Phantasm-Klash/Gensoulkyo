@@ -226,6 +226,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if !IsServiceCallbackOperation(callback) {
 			t.Fatalf("service callback helper does not recognize %q", callback)
 		}
+		if !stringSliceContains(disallowedClientOps, callback) {
+			t.Fatalf("service callback %q must also be explicitly disallowed for clients: disallowed=%+v service=%+v", callback, disallowedClientOps, serviceCallbacks)
+		}
 		if stringSliceContains(clientOps, callback) || stringSliceContains(clientRPCOps, callback) || stringSliceContains(clientWSSOps, callback) {
 			t.Fatalf("service callback %q must not be exposed as a client operation: client=%+v rpc=%+v wss=%+v service=%+v", callback, clientOps, clientRPCOps, clientWSSOps, serviceCallbacks)
 		}
