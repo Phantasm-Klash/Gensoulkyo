@@ -2582,10 +2582,14 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		event.MatchID = settlement.MatchID
 		event.ModeID = settlement.Mode
 	}
+	if kind == "activity" {
+		activity := s.activitySnapshotLocked(user)
+		event.Activity = &activity
+	}
 	if err := validateBusinessEventPayload(kind, event); err != nil {
 		return nil, err
 	}
-	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && event.Settlement == nil && kind != "presence" {
+	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && event.Settlement == nil && event.Activity == nil && kind != "presence" {
 		return nil, newError(codeInvalidRequest, "business event requires ticket_id, room_code, or match_id")
 	}
 	s.recordBusinessEventLobbyAuditLocked(kind, user.UserID, ticket, event, match, now)
@@ -3453,6 +3457,33 @@ func (s *Service) buildActivityClaimResultLocked(user *userState, req ActivityCl
 		SettlementKey:       activityClaimKey(req.ClaimKind, req.ClaimID, user.UserID),
 		SettledAt:           now,
 	}
+}
+
+func (s *Service) activitySnapshotLocked(user *userState) ActivitySnapshot {
+	snapshot := ActivitySnapshot{
+		OK:                  true,
+		UserID:              user.UserID,
+		Tasks:               copyTasks(user.Tasks),
+		Events:              copyEvents(user.Events),
+		Leaderboards:        copyLeaderboards(user.Leaderboards),
+		ServerAuthoritative: true,
+	}
+	for id, task := range user.Tasks {
+		if err := claimEligibility(user, ActivityClaimRequest{ClaimKind: "task", ClaimID: id}); err == nil && !task.Claimed {
+			snapshot.ClaimableTasks++
+		}
+	}
+	for id := range user.Events {
+		if err := claimEligibility(user, ActivityClaimRequest{ClaimKind: "event", ClaimID: id}); err == nil {
+			snapshot.ClaimableEvents++
+		}
+	}
+	for id := range user.Leaderboards {
+		if err := claimEligibility(user, ActivityClaimRequest{ClaimKind: "leaderboard", ClaimID: id}); err == nil {
+			snapshot.ClaimableLeaderboards++
+		}
+	}
+	return snapshot
 }
 
 func (s *Service) applyActivityProjectionLocked(user *userState, result *ActivityClaimResult) {
@@ -5998,6 +6029,7 @@ func businessNotificationKinds() []string {
 		"room",
 		"matchmaking",
 		"match.ready",
+		"activity",
 		"battle.allocation",
 		"battle.ticket",
 		"settlement",
@@ -6031,6 +6063,10 @@ func validateBusinessEventPayload(kind string, event *BusinessEvent) error {
 	case "match.ready":
 		if event.Ready == nil {
 			return newError(codeInvalidRequest, "match.ready business event requires match_id or matched ticket_id")
+		}
+	case "activity":
+		if event.Activity == nil {
+			return newError(codeInvalidRequest, "activity business event requires server activity snapshot")
 		}
 	case "battle.allocation":
 		if event.BattleAllocation == nil {
