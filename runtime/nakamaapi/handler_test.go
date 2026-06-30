@@ -2424,6 +2424,12 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 		if topic.ClientEventRequestOperation != expectedRequestOp || !topic.ServerPush || topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
 			t.Fatalf("business notification topic must stay low-frequency and non-authoritative: %+v", topic)
 		}
+		if topic.ClientEventRequestKind != topic.Kind {
+			t.Fatalf("business notification topic must publish its fixed read request kind: %+v", topic)
+		}
+		if topic.Kind != "settlement" && topic.ClientEventRequestOperation == "business.event.settlement" {
+			t.Fatalf("settlement alias must not be reused for non-settlement notification topics: %+v", topic)
+		}
 		if !topic.ServerAuthoritativeProjection || !stringSliceContains(topic.ClientRequestFields, "match_id") || !stringSliceContains(topic.ClientRequestFields, "ticket_id") {
 			t.Fatalf("business notification topic must expose read-only client lookup fields: %+v", topic)
 		}

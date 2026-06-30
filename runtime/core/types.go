@@ -767,6 +767,7 @@ type BusinessNotificationTopic struct {
 	Topic                          string   `json:"topic"`
 	Transport                      string   `json:"transport"`
 	ClientEventRequestOperation    string   `json:"client_event_request_operation"`
+	ClientEventRequestKind         string   `json:"client_event_request_kind"`
 	ClientRequestFields            []string `json:"client_request_fields"`
 	ForbiddenClientRequestFields   []string `json:"forbidden_client_request_fields"`
 	ServerAuthoritativeProjection  bool     `json:"server_authoritative_projection"`
