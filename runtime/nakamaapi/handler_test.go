@@ -2417,8 +2417,20 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 		if topic.Kind == "" || topic.Topic != "nakama_wss.business."+strings.ReplaceAll(topic.Kind, ".", "_") || topic.Transport != "nakama_wss" {
 			t.Fatalf("business notification topic shape invalid: %+v", topic)
 		}
-		if topic.ClientEventRequestOperation != "business.event" || !topic.ServerPush || topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
+		expectedRequestOp := "business.event"
+		if topic.Kind == "settlement" {
+			expectedRequestOp = "business.event.settlement"
+		}
+		if topic.ClientEventRequestOperation != expectedRequestOp || !topic.ServerPush || topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
 			t.Fatalf("business notification topic must stay low-frequency and non-authoritative: %+v", topic)
+		}
+		if !topic.ServerAuthoritativeProjection || !stringSliceContains(topic.ClientRequestFields, "match_id") || !stringSliceContains(topic.ClientRequestFields, "ticket_id") {
+			t.Fatalf("business notification topic must expose read-only client lookup fields: %+v", topic)
+		}
+		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
+			if !stringSliceContains(topic.ForbiddenClientRequestFields, forbiddenField) {
+				t.Fatalf("business notification topic missing forbidden request field %q: %+v", forbiddenField, topic)
+			}
 		}
 		seen[topic.Kind] = true
 	}
