@@ -152,6 +152,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.leaveRoom(w, r, segments[2])
 		return
 	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "messages" && r.Method == http.MethodPost {
+		h.lobbyMessage(w, r, segments[2])
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "activity" && segments[2] == "claim" && r.Method == http.MethodPost {
 		h.claimActivity(w, r)
 		return
@@ -461,6 +465,32 @@ func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request, roomCode stri
 
 func (h *Handler) leaveRoom(w http.ResponseWriter, r *http.Request, roomCode string) {
 	resp, err := h.service.LeaveRoom(sessionToken(r), roomCode)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) lobbyMessage(w http.ResponseWriter, r *http.Request, roomCode string) {
+	raw := map[string]any{}
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
+	if _, ok := raw["room_code"]; !ok {
+		raw["room_code"] = roomCode
+	}
+	var req core.LobbyMessageRequest
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return
+	}
+	if err := json.Unmarshal(encoded, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return
+	}
+	resp, err := h.service.LobbyMessage(sessionToken(r), req)
 	if err != nil {
 		writeError(w, err)
 		return

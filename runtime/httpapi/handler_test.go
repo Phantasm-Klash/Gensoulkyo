@@ -289,6 +289,55 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 	if !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
 		t.Fatalf("room rules should expose client ticket cancellation without result submit: %+v", rules)
 	}
+	if !stringSliceContains(rules.ClientOperations, "rooms.message") {
+		t.Fatalf("room rules should expose lobby message contract: %+v", rules)
+	}
+
+	chat := postJSON[core.LobbyMessage](t, server.URL+"/v1/rooms/"+created.RoomCode+"/messages", host.SessionToken, map[string]any{
+		"message_id": "http-room-chat-1",
+		"kind":       "chat",
+		"text":       "ready in lobby",
+		"metadata":   map[string]any{"intent": "ready_check"},
+	})
+	if !chat.ServerAuthoritative || chat.RoomCode != created.RoomCode || chat.Kind != "chat" || chat.UserID != host.UserID || chat.Duplicate {
+		t.Fatalf("chat lobby message invalid: %+v", chat)
+	}
+	duplicateChat := postJSON[core.LobbyMessage](t, server.URL+"/v1/rooms/"+created.RoomCode+"/messages", host.SessionToken, map[string]any{
+		"message_id": "http-room-chat-1",
+		"kind":       "chat",
+		"text":       "duplicate should not replace",
+	})
+	if !duplicateChat.Duplicate || duplicateChat.Text != chat.Text {
+		t.Fatalf("duplicate lobby message should return original: %+v", duplicateChat)
+	}
+	guestAnnouncement := postRaw(t, server.URL+"/v1/rooms/"+created.RoomCode+"/messages", guest.SessionToken, map[string]any{
+		"message_id": "http-room-announcement-denied",
+		"kind":       "announcement",
+		"text":       "client announcement",
+	})
+	if guestAnnouncement.Code != http.StatusUnauthorized || guestAnnouncement.ErrorCode != "unauthorized" {
+		t.Fatalf("non-host announcement should be rejected, got %+v", guestAnnouncement)
+	}
+	forbiddenMessage := postRaw(t, server.URL+"/v1/rooms/"+created.RoomCode+"/messages", host.SessionToken, map[string]any{
+		"message_id": "http-room-forbidden-1",
+		"text":       "bad metadata",
+		"metadata":   map[string]any{"result_hash": "client-authored"},
+	})
+	if forbiddenMessage.Code != http.StatusForbidden || forbiddenMessage.ErrorCode != "forbidden_field" {
+		t.Fatalf("lobby message must reject client-authored authority fields, got %+v", forbiddenMessage)
+	}
+	announcement := postJSON[core.LobbyMessage](t, server.URL+"/v1/rooms/"+created.RoomCode+"/messages", host.SessionToken, map[string]any{
+		"message_id": "http-room-announcement-1",
+		"kind":       "announcement",
+		"text":       "match starting",
+	})
+	if announcement.Kind != "announcement" || announcement.UserID != host.UserID || !announcement.ServerAuthoritative {
+		t.Fatalf("host announcement invalid: %+v", announcement)
+	}
+	roomSnapshot := getJSON[core.RoomSnapshot](t, server.URL+"/v1/rooms/"+created.RoomCode, guest.SessionToken)
+	if len(roomSnapshot.Messages) != 2 || roomSnapshot.Messages[0].MessageID != chat.MessageID || roomSnapshot.Messages[1].MessageID != announcement.MessageID {
+		t.Fatalf("room snapshot should include accepted lobby messages only: %+v", roomSnapshot.Messages)
+	}
 
 	joined := postJSON[core.QueueResponse](t, server.URL+"/v1/rooms/"+created.RoomCode+"/join", guest.SessionToken, map[string]any{
 		"mode_id":        "certification",
