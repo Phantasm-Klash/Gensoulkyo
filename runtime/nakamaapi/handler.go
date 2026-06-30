@@ -565,7 +565,7 @@ func serviceOriginPayloadHasBusinessEnvelope(payload map[string]any) bool {
 }
 
 func serviceOriginPayloadContainsEnvelopeField(payload map[string]any) bool {
-	for _, key := range []string{"seq", "timestamp_ms", "timestampMS", "nonce", "op_code", "op", "key_id", "keyID", "auth_tag", "tag", "ciphertext_mode", "body_hash", "bodyHash"} {
+	for _, key := range security.BusinessEnvelopeServiceCallbackFieldAliases() {
 		if _, ok := payload[key]; ok {
 			return true
 		}

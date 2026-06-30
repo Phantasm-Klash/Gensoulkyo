@@ -524,6 +524,20 @@ func TestHTTPServiceCallbacksRejectBusinessEnvelopePayloadShape(t *testing.T) {
 				"signed_result": map[string]any{"match_id": "nested-key-id-client-shaped"},
 			},
 		},
+		{
+			"keyId":         "dev-business-envelope-v0",
+			"signed_result": map[string]any{"match_id": "key-id-camel-client-shaped"},
+		},
+		{
+			"business_session_id": "player-session",
+			"signed_result":       map[string]any{"match_id": "business-session-client-shaped"},
+		},
+		{
+			"data": map[string]any{
+				"envelope_version": "business-v0-scaffold",
+				"signed_result":    map[string]any{"match_id": "nested-envelope-version-client-shaped"},
+			},
+		},
 	} {
 		response := postRaw(t, server.URL+"/v1/battle/results/submit", "", payload)
 		if response.Code != http.StatusBadRequest || response.ErrorCode != "invalid_request" || !strings.Contains(response.Message, "business envelope") {
