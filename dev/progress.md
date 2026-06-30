@@ -20,6 +20,12 @@ Status date: 2026-06-28
 - Exposed the snapshot through authenticated, business-envelope-protected `battle.audit.status` RPC/WSS dispatch in `runtime/nakamaapi`, and registered the RPC in the build-tagged Nakama binding.
 - Kept HTTP/local fallback battle lifecycle behavior permissive: audit repository failures are surfaced for operations/CI visibility but do not make the development fallback path the production combat authority.
 
+## 2026-06-30 nakama-server-agent business event lobby audit update
+
+- Added lobby lifecycle audit writes for SDK-neutral Nakama `business.event` room and room-ticket state reads, so low-frequency business WSS projections leave the same durable trace as `rooms.get` and `matchmaking.ticket`.
+- Extended core and DB-backed Nakama regressions to prove `business.event` room snapshots remain business-envelope protected, server-authoritative, and excluded from high-frequency battle tick or client-authored result authority.
+- Verified `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
+
 ## 2026-06-29 gensoulkyo-lobby lobby audit update
 
 - Added an injected lobby lifecycle audit repository for room create/join/match/leave/rules-read and lobby message/duplicate-message events, plus a `database/sql` PostgreSQL writer and migration tables for `lobby_room_audits` and `lobby_message_audits`.

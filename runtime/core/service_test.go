@@ -1236,6 +1236,27 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("ticket read audit invalid: response=%+v audits=%+v", polled, repo.rooms)
 	}
 
+	roomEvent, err := service.BusinessEvent(host.SessionToken, BusinessEventRequest{
+		Kind:     "room",
+		RoomCode: created.RoomCode,
+	})
+	if err != nil {
+		t.Fatalf("room business event: %v", err)
+	}
+	if roomEvent.Room == nil || len(repo.rooms) != 9 || repo.rooms[8].Action != "snapshot_read" || repo.rooms[8].UserID != host.UserID || repo.rooms[8].CurrentPlayers != 2 {
+		t.Fatalf("room business event audit invalid: event=%+v audits=%+v", roomEvent, repo.rooms)
+	}
+	queueEvent, err := service.BusinessEvent(guest.SessionToken, BusinessEventRequest{
+		Kind:     "matchmaking",
+		TicketID: joined.TicketID,
+	})
+	if err != nil {
+		t.Fatalf("matchmaking business event: %v", err)
+	}
+	if queueEvent.Queue == nil || len(repo.rooms) != 10 || repo.rooms[9].Action != "ticket_read" || repo.rooms[9].TicketID != joined.TicketID || repo.rooms[9].CurrentPlayers != 2 {
+		t.Fatalf("matchmaking business event audit invalid: event=%+v audits=%+v", queueEvent, repo.rooms)
+	}
+
 	chat, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
 		RoomCode:  created.RoomCode,
 		MessageID: "audit-chat-1",
@@ -1280,7 +1301,7 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("leave audit invalid: response=%+v audit=%+v", left, lastRoomAudit)
 	}
 	status := service.LobbyLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 5 || status.RulesReadRecords != 1 || status.MessageRecords != 3 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 7 || status.RulesReadRecords != 1 || status.MessageRecords != 3 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
 	}
 	if status.LastSuccessOperation != "left" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
