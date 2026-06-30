@@ -1119,6 +1119,10 @@ func TestNakamaServiceOriginRPCRejectsDirectBusinessEnvelopeFields(t *testing.T)
 	handler := New(core.NewService(core.Config{}))
 	for index, payload := range []map[string]any{
 		{
+			"version":       security.BusinessEnvelopeVersion,
+			"signed_result": map[string]any{"match_id": "direct-version-client-shaped"},
+		},
+		{
 			"seq":           1,
 			"timestamp_ms":  time.Now().UnixMilli(),
 			"nonce":         "direct-envelope-fields",
@@ -1170,7 +1174,7 @@ func TestNakamaServiceOriginRPCRejectsDirectBusinessEnvelopeFields(t *testing.T)
 			t.Fatalf("service-origin callback payload %d should reject direct envelope fields before core dispatch: %+v", index, response)
 		}
 	}
-	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 7 || snapshot.SessionCount != 0 || len(snapshot.Audits) != 7 {
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 8 || snapshot.SessionCount != 0 || len(snapshot.Audits) != 8 {
 		t.Fatalf("direct service-origin envelope-field rejection should audit without accepted replay state: %+v", snapshot)
 	}
 }

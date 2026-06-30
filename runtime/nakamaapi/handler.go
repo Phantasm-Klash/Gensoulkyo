@@ -583,6 +583,14 @@ func serviceOriginPayloadContainsEnvelopeField(payload map[string]any) bool {
 			return true
 		}
 	}
+	if value, ok := payload["version"]; ok {
+		switch typed := value.(type) {
+		case string:
+			return strings.TrimSpace(typed) != ""
+		case []byte:
+			return strings.TrimSpace(string(typed)) != ""
+		}
+	}
 	return false
 }
 
