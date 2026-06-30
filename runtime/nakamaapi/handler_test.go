@@ -811,6 +811,26 @@ func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *
 	}
 }
 
+func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	response := handler.HandleRPC(RPCRequest{
+		ID:      "battle.ticket.consume",
+		Service: true,
+		Payload: envelopePayload(1, "nonce-service-origin-envelope", "battle_ticket_consume", map[string]any{
+			"ticket_id":        "ticket-client-shaped",
+			"match_id":         "match-client-shaped",
+			"battle_server_id": "battle-client-shaped",
+			"ticket_nonce_hex": "nonce-client-shaped",
+		}),
+	})
+	if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "must not include business envelope") {
+		t.Fatalf("service-origin callback should reject envelope-shaped payload before core dispatch: %+v", response)
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
+		t.Fatalf("service-origin envelope-shape rejection must not consume replay guard state: %+v", snapshot)
+	}
+}
+
 func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	callbacks := []string{

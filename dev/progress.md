@@ -218,3 +218,9 @@ Status date: 2026-06-28
 - Extended the SDK-neutral Nakama WSS callback regression so `battle.ticket.consume` is covered with the other service-origin-only callback names.
 - This pins the intended boundary after ticket-consume wiring: clients may read battle tickets through business RPC/WSS, but ticket acceptance callbacks remain RPC service-origin-only and WSS attempts are rejected before envelope replay state is consumed.
 - Verified `go test ./runtime/nakamaapi -run TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState -count=1`, `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
+
+## 2026-06-30 gensoulkyo-lobby service callback envelope-shape guard update
+
+- Hardened service-origin-only Nakama RPC callbacks so payloads carrying the client/business `business_envelope` wrapper are rejected before core dispatch.
+- Added SDK-neutral regression coverage proving an envelope-shaped service callback does not consume business replay guard seq/nonce state and cannot reach ticket/result/battle-server callback validation as if it were a C++ Battle Server message.
+- This preserves the split: authenticated clients still use envelope-protected business RPC/WSS reads and lobby actions, while service callbacks stay a separate Nakama RPC origin path.

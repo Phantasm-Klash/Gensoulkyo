@@ -102,6 +102,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		if strings.TrimSpace(request.SessionID) != "" || strings.TrimSpace(request.UserID) != "" {
 			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q service-origin callback must not include player session context", request.ID))
 		}
+		if _, ok := request.Payload[security.BusinessEnvelopePayloadKey]; ok {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("rpc %q service-origin callback must not include business envelope payload", request.ID))
+		}
 	} else {
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
 			return response
