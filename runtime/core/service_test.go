@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -2404,6 +2405,19 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !stringSliceContains(rules.ForbiddenFields, "damage") || !stringSliceContains(rules.ServerAuthority, "state_snapshot") || !stringSliceContains(rules.ClientAuthority, "input_packet") {
 		t.Fatalf("room authority fields missing: %+v", rules)
+	}
+	event, err := service.BusinessEvent(host.SessionToken, BusinessEventRequest{
+		Kind:     "room",
+		RoomCode: created.RoomCode,
+	})
+	if err != nil {
+		t.Fatalf("room business event: %v", err)
+	}
+	if !reflect.DeepEqual(event.AllowedClientOperations, rules.ClientOperations) || !reflect.DeepEqual(event.ServiceCallbacks, rules.ServiceCallbacks) {
+		t.Fatalf("room rules and business event contract drifted: rules=%+v callbacks=%+v event=%+v callbacks=%+v", rules.ClientOperations, rules.ServiceCallbacks, event.AllowedClientOperations, event.ServiceCallbacks)
+	}
+	if event.HighFrequencyBattleTickAllowed || event.ClientResultSubmitAllowed || stringSliceContains(event.AllowedClientOperations, "battle.result.submit") {
+		t.Fatalf("room business event must not authorize battle tick or client result submit: %+v", event)
 	}
 
 	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{

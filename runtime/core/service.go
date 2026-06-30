@@ -1147,33 +1147,8 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"protobuf",
 			"chacha20_poly1305",
 		},
-		ClientOperations: []string{
-			"rooms.create",
-			"rooms.list",
-			"rooms.get",
-			"rooms.rules",
-			"rooms.join",
-			"rooms.leave",
-			"rooms.message",
-			"business.event",
-			"business.event.settlement",
-			"matchmaking.ticket",
-			"matchmaking.cancel",
-			"match.ready",
-			"match.disconnect",
-			"match.reconnect",
-			"presence.heartbeat",
-			"battle.allocation",
-			"battle.ticket",
-			"replay.get",
-		},
-		ServiceCallbacks: []string{
-			"battle.servers.register",
-			"battle.servers.heartbeat",
-			"battle.servers.offline",
-			"battle.ticket.consume",
-			"battle.result.submit",
-		},
+		ClientOperations: contractClientOperations(),
+		ServiceCallbacks: serviceCallbackOperations(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -5757,10 +5732,17 @@ func cloneQueueResponse(source *QueueResponse) *QueueResponse {
 }
 
 func businessEventClientOperations() []string {
+	return contractClientOperations()
+}
+
+func contractClientOperations() []string {
 	return []string{
 		"presence.heartbeat",
+		"matchmaking.join",
 		"matchmaking.ticket",
 		"matchmaking.cancel",
+		"rooms.create",
+		"rooms.list",
 		"rooms.get",
 		"rooms.rules",
 		"rooms.join",
@@ -5773,6 +5755,7 @@ func businessEventClientOperations() []string {
 		"match.reconnect",
 		"battle.allocation",
 		"battle.ticket",
+		"replay.get",
 	}
 }
 
