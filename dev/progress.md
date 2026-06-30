@@ -181,3 +181,9 @@ Status date: 2026-06-28
 - Exposed `match.disconnect` and `match.reconnect` through the SDK-neutral Nakama RPC/WSS adapter and registered the build-tagged Nakama RPC ids, using the existing server-owned reconnect methods.
 - Added PostgreSQL-compatible `disconnected` and `reconnected` lobby lifecycle audit records for room-backed running matches, plus a `connection_records` status counter; duplicate disconnect/reconnect calls do not inflate lifecycle audit counts.
 - Kept the authority split intact: clients can request reconnect lifecycle changes through business envelope-protected Nakama RPC/WSS, while snapshots, signed battle tickets, allocation, replay, and settlement remain server-owned.
+
+## 2026-06-30 gensoulkyo-lobby WSS callback security audit update
+
+- Kept service-origin-only Nakama WSS callback names fail-closed before player session mapping, envelope validation, or core dispatch, so clients still cannot register battle servers, heartbeat/offline them, or submit settlement callbacks through WSS.
+- Added a synthetic non-secret rejected business-envelope audit for those forbidden WSS attempts, preserving operational visibility without accepting the supplied envelope or consuming the player's replay seq/nonce state.
+- Verified the focused SDK-neutral Nakama adapter regression with `go test ./runtime/nakamaapi -run TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState -count=1`; broader Go, Docker Compose, Nakama tag-build, and protocol audit checks are rerun for this final sample.

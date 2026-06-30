@@ -255,6 +255,7 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 		return errorResponse(http.StatusBadRequest, CodeInvalidRequest, "message name is required")
 	}
 	if rpcRequiresServiceOrigin(name) {
+		handler.auditRejectedServiceOnlyWSS(message, name)
 		return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("wss message %q is service-origin RPC only", message.Name))
 	}
 	if response := handler.ensureExternalWSSSession(message); !response.OK {
@@ -413,6 +414,16 @@ func (handler *Handler) auditMissingEnvelope(sessionID string, userID string, tr
 		Endpoint:  endpoint,
 		UserID:    strings.TrimSpace(userID),
 		Op:        endpoint,
+	})
+}
+
+func (handler *Handler) auditRejectedServiceOnlyWSS(message WSSMessage, name string) {
+	_ = security.ValidateBusinessEnvelopeRequest(handler.envelopeGuard, security.BusinessEnvelopeRequest{
+		SessionID: "blocked-service-wss:" + name,
+		Transport: security.BusinessEnvelopeTransportNakamaWSS,
+		Endpoint:  endpointName("wss", name),
+		UserID:    strings.TrimSpace(message.UserID),
+		Op:        endpointName("wss", name),
 	})
 }
 

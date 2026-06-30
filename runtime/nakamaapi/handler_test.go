@@ -811,14 +811,15 @@ func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *
 	}
 }
 
-func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeEnvelopeAudit(t *testing.T) {
+func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
-	for index, name := range []string{
+	callbacks := []string{
 		"battle.servers.register",
 		"battle.servers.heartbeat",
 		"battle.servers.offline",
 		"battle.result.submit",
-	} {
+	}
+	for index, name := range callbacks {
 		response := handler.HandleWSSMessage(WSSMessage{
 			Name:      name,
 			SessionID: "player-session",
@@ -832,8 +833,14 @@ func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeEnvelopeAudit(t *testin
 			t.Fatalf("WSS %s should fail as service-origin RPC only before dispatch, got %+v", name, response)
 		}
 	}
-	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
-		t.Fatalf("service-origin WSS rejections should not consume envelope audit state: %+v", snapshot)
+	snapshot := handler.EnvelopeSnapshot()
+	if snapshot.Accepted != 0 || snapshot.Rejected != int64(len(callbacks)) || snapshot.SessionCount != 0 {
+		t.Fatalf("service-origin WSS rejections should be rejected audits without accepted replay state: %+v", snapshot)
+	}
+	for _, audit := range snapshot.Audits {
+		if audit.Accepted || audit.Transport != security.BusinessEnvelopeTransportNakamaWSS || audit.Reason != security.ReasonVersion || !strings.HasPrefix(audit.Endpoint, "wss.battle.") || audit.SessionIDHint == "player-session" || audit.UserID != "player-user" {
+			t.Fatalf("service-origin WSS rejection audit should be non-secret and synthetic: %+v", audit)
+		}
 	}
 }
 
