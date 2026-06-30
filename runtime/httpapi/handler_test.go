@@ -461,6 +461,25 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	if !registered.OK || registered.BattleServerID != "aaa-http-battle" || registered.Endpoint != "127.0.0.1:7911" {
 		t.Fatalf("registered battle server invalid: %+v", registered)
 	}
+	registeredPVP := postJSON[core.BattleServerStatus](t, server.URL+"/v1/battle/servers/register", "", map[string]any{
+		"battle_server_id": "aaa-http-pvp",
+		"endpoint":         "127.0.0.1:7912",
+		"region":           "local",
+		"build_id":         "http-pvp-test",
+		"capacity":         16,
+		"status":           "online",
+		"supported_modes":  []string{"pvp_duel"},
+	})
+	if !registeredPVP.OK || registeredPVP.Status != "online" {
+		t.Fatalf("registered pvp battle server invalid: %+v", registeredPVP)
+	}
+	offlinePVP := postJSON[core.BattleServerStatus](t, server.URL+"/v1/battle/servers/offline", "", map[string]any{
+		"battle_server_id": "aaa-http-pvp",
+		"status":           "online",
+	})
+	if !offlinePVP.OK || offlinePVP.Status != "offline" || offlinePVP.Load != 0 || !offlinePVP.ServerAuthoritative {
+		t.Fatalf("offline pvp battle server invalid: %+v", offlinePVP)
+	}
 	list := getJSON[core.BattleServerListResponse](t, server.URL+"/v1/battle/servers", "")
 	if !list.OK || len(list.Servers) < 2 {
 		t.Fatalf("battle server list invalid: %+v", list)
@@ -483,6 +502,22 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	}
 	if queueBob.BattleAllocation.BattleServerID != "aaa-http-battle" || queueBob.BattleTicket.Ticket.Endpoint != "127.0.0.1:7911" {
 		t.Fatalf("queue battle allocation/ticket mismatch: alloc=%+v ticket=%+v", queueBob.BattleAllocation, queueBob.BattleTicket)
+	}
+
+	pvpAlice := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "battle-http-pvp-a", "display_name": "Battle HTTP PvP A"})
+	pvpBob := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "battle-http-pvp-b", "display_name": "Battle HTTP PvP B"})
+	postJSON[core.QueueResponse](t, server.URL+"/v1/matchmaking/join", pvpAlice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_pvp_alice_deck",
+		"deck_snapshot":  validDeck("http_pvp_alice_deck"),
+	})
+	pvpMatch := postJSON[core.QueueResponse](t, server.URL+"/v1/matchmaking/join", pvpBob.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_pvp_bob_deck",
+		"deck_snapshot":  validDeck("http_pvp_bob_deck"),
+	})
+	if pvpMatch.MatchID == "" || pvpMatch.BattleAllocation == nil || pvpMatch.BattleAllocation.BattleServerID == "aaa-http-pvp" {
+		t.Fatalf("offline pvp battle server must be skipped for future allocation: %+v", pvpMatch)
 	}
 
 	allocation := getJSON[core.BattleServerAllocation](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/battle-allocation", alice.SessionToken)
