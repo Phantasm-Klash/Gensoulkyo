@@ -612,6 +612,9 @@ func businessEventRequest(body map[string]any, name string) (core.BusinessEventR
 		return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 	}
 	if normalizeName(name) == "business.event.settlement" {
+		if kind := strings.TrimSpace(req.Kind); kind != "" && kind != "settlement" {
+			return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, "business.event.settlement requires settlement kind")
+		}
 		req.Kind = "settlement"
 	}
 	return req, successResponse(nil)

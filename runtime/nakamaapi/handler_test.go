@@ -887,6 +887,22 @@ func TestNakamaRPCRejectsClientOriginBattleResultSubmit(t *testing.T) {
 	}
 }
 
+func TestNakamaBusinessEventSettlementAliasRejectsConflictingKind(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	response := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event.settlement",
+		SessionID: "nakama-settlement-alias-session",
+		UserID:    "nakama-settlement-alias-user",
+		Payload: envelopePayload(1, "nonce-settlement-alias-kind-conflict", "business_event_settlement", map[string]any{
+			"kind":     "matchmaking",
+			"match_id": "match-conflict",
+		}),
+	})
+	if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "requires settlement kind") {
+		t.Fatalf("settlement alias should reject conflicting business event kind, got %+v", response)
+	}
+}
+
 func TestNakamaRPCRejectsServiceOriginBattleResultSubmitWithPlayerContext(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	response := handler.HandleRPC(RPCRequest{
