@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"gensoulkyo/runtime/core"
 )
 
 func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
@@ -254,6 +256,34 @@ func TestNakamaBindingServiceOriginContextGateRequiresBattleCallbackVars(t *test
 	} {
 		if !strings.Contains(mapHelperText, expected) {
 			t.Fatalf("runtime context vars helper missing %q in:\n%s", expected, mapHelperText)
+		}
+	}
+}
+
+func TestNakamaBindingDocumentsCoreServiceCallbackContext(t *testing.T) {
+	readme, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read Nakama binding README: %v", err)
+	}
+	text := string(readme)
+	context := core.ServiceCallbackContext()
+	for _, expected := range []string{
+		core.ServiceCallbackOriginKey + "=" + context[core.ServiceCallbackOriginKey],
+		core.ServiceCallbackFlagKey + "=" + context[core.ServiceCallbackFlagKey],
+		"`runtime.RUNTIME_CTX_MODE` is `" + context[core.ServiceCallbackRuntimeModeKey],
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("Nakama binding README must document core service callback context %q", expected)
+		}
+	}
+	for _, accepted := range core.ServiceCallbackAcceptedValues() {
+		if !strings.Contains(text, accepted) {
+			t.Fatalf("Nakama binding README must document accepted service callback flag %q", accepted)
+		}
+	}
+	for _, callback := range core.ServiceCallbackOperations() {
+		if !strings.Contains(text, callback) {
+			t.Fatalf("Nakama binding README must document service callback operation %q", callback)
 		}
 	}
 }
