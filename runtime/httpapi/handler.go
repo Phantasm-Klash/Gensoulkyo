@@ -66,6 +66,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.businessEnvelopeStatus(w, r)
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "battle-audit" && r.Method == http.MethodGet {
+		h.battleAuditStatus(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "lobby-audit" && r.Method == http.MethodGet {
+		h.lobbyAuditStatus(w, r)
+		return
+	}
 	if routeUsesBusinessEnvelope(r.Method, segments) {
 		if status, code, message := h.validateBusinessEnvelopeHeaders(r); code != "" {
 			writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
@@ -608,6 +616,20 @@ func (h *Handler) businessEnvelopeStatus(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (h *Handler) battleAuditStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": h.service.BattleLifecycleAuditStatus(),
+	})
+}
+
+func (h *Handler) lobbyAuditStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": h.service.LobbyLifecycleAuditStatus(),
+	})
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
@@ -649,6 +671,9 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 		return false
 	}
 	if len(segments) == 3 && segments[1] == "security" && segments[2] == "business-envelope" && method == http.MethodGet {
+		return false
+	}
+	if len(segments) == 3 && segments[1] == "security" && (segments[2] == "battle-audit" || segments[2] == "lobby-audit") && method == http.MethodGet {
 		return false
 	}
 	return true

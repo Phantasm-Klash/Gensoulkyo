@@ -407,6 +407,23 @@ func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	if tableCounts["business_envelope_audits"] != 2 || tableCounts["lobby_room_audits"] != 2 || tableCounts["match_allocation_audits"] != 2 || tableCounts["battle_ticket_audits"] < 1 {
 		t.Fatalf("unexpected HTTP SQL audit writes: counts=%+v calls=%+v", tableCounts, httpAuditCaptureCalls())
 	}
+
+	battleAuditEndpoint := getJSON[map[string]any](t, server.URL+"/v1/security/battle-audit", "")
+	if !battleAuditEndpoint["ok"].(bool) {
+		t.Fatalf("battle audit endpoint should be public status: %+v", battleAuditEndpoint)
+	}
+	battleAuditStatus := battleAuditEndpoint["status"].(map[string]any)
+	if !battleAuditStatus["configured"].(bool) || int(battleAuditStatus["allocation_records"].(float64)) != 1 || int(battleAuditStatus["server_lifecycle_records"].(float64)) != 1 {
+		t.Fatalf("battle audit endpoint status invalid: %+v", battleAuditEndpoint)
+	}
+	lobbyAuditEndpoint := getJSON[map[string]any](t, server.URL+"/v1/security/lobby-audit", "")
+	if !lobbyAuditEndpoint["ok"].(bool) {
+		t.Fatalf("lobby audit endpoint should be public status: %+v", lobbyAuditEndpoint)
+	}
+	lobbyAuditStatus := lobbyAuditEndpoint["status"].(map[string]any)
+	if !lobbyAuditStatus["configured"].(bool) || int(lobbyAuditStatus["room_records"].(float64)) != 2 {
+		t.Fatalf("lobby audit endpoint status invalid: %+v", lobbyAuditEndpoint)
+	}
 }
 
 func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {

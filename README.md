@@ -12,7 +12,7 @@ This repository now contains the first open-source server MVP:
 - a small HTTP adapter under `/v1/...` that mirrors the future Nakama RPC, WSS business notification, and battle-allocation contracts;
 - a SDK-neutral Nakama adapter plus a `nakama` build-tagged Go Runtime binding source under `cmd/gensoulkyo_nakama`, so real Nakama RPC registration can stay as a thin outer layer over the tested runtime dispatcher;
 - unit and HTTP integration tests for the server-authority boundary;
-- an optional standard-library database configuration path, `.up.sql` migration runner, and business-envelope audit sink wiring point for future PostgreSQL-backed Nakama deployment.
+- an optional standard-library database configuration path, `.up.sql` migration runner, business-envelope audit sink, and battle/lobby lifecycle audit repository wiring for future PostgreSQL-backed Nakama deployment.
 
 The MVP is intentionally in-memory by default. PostgreSQL repository persistence, production deployment, real business WSS streaming, C++ Battle Server KCP/protobuf transport, production X25519/AEAD/sign envelope handling, and full shared client/server bullet-card rules are still pending. The current binary registers the open-source pgx `database/sql` driver and can run migrations when a database URL is explicitly provided.
 
@@ -71,6 +71,9 @@ go build -tags nakama -buildmode=plugin -o gensoulkyo.so ./cmd/gensoulkyo_nakama
 Useful endpoints:
 
 - `GET /health`
+- `GET /v1/security/business-envelope`
+- `GET /v1/security/battle-audit`
+- `GET /v1/security/lobby-audit`
 - `POST /v1/auth/anonymous`
 - `GET /v1/bootstrap`
 - `GET /v1/inventory`
