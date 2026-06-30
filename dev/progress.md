@@ -219,6 +219,12 @@ Status date: 2026-06-28
 - This pins the intended boundary after ticket-consume wiring: clients may read battle tickets through business RPC/WSS, but ticket acceptance callbacks remain RPC service-origin-only and WSS attempts are rejected before envelope replay state is consumed.
 - Verified `go test ./runtime/nakamaapi -run TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState -count=1`, `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
 
+## 2026-06-30 gensoulkyo-lobby Nakama tag-build validation refresh
+
+- Re-ran the disposable Docker Compose `nakama-tag-build` profile against `github.com/heroiclabs/nakama-common/runtime@v1.34.0`, keeping the temporary SDK pin outside repository `go.mod`/`go.sum` while validating the real `nakama` build tag path.
+- Confirmed the profile completes `go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...` and `go build -tags nakama -buildmode=plugin` when the runner uses the documented disposable module-fetch override `GOPROXY=https://goproxy.cn,direct` with `GOSUMDB=off`; the default `proxy.golang.org` path timed out before compilation in this runner.
+- This refresh only validates the business-server Nakama SDK binding and plugin artifact path. It does not add a production HTTP combat authority path, and the durable dependency pin/Go baseline decision remains outside this scope's allowed files.
+
 ## 2026-06-30 gensoulkyo-lobby service callback envelope-shape guard update
 
 - Hardened service-origin-only Nakama RPC callbacks so payloads carrying the client/business `business_envelope` wrapper are rejected before core dispatch.
