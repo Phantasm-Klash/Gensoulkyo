@@ -1142,12 +1142,13 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"protobuf",
 			"chacha20_poly1305",
 		},
-		ClientOperations:       ContractClientOperations(),
-		ClientRPCOperations:    ContractClientRPCOperations(),
-		ClientWSSOperations:    ContractClientWSSOperations(),
-		ServiceCallbacks:       ServiceCallbackOperations(),
-		ServiceCallbackContext: ServiceCallbackContext(),
-		BusinessNotifications:  businessNotificationKinds(),
+		ClientOperations:           ContractClientOperations(),
+		ClientRPCOperations:        ContractClientRPCOperations(),
+		ClientWSSOperations:        ContractClientWSSOperations(),
+		DisallowedClientOperations: ContractDisallowedClientOperations(),
+		ServiceCallbacks:           ServiceCallbackOperations(),
+		ServiceCallbackContext:     ServiceCallbackContext(),
+		BusinessNotifications:      businessNotificationKinds(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -2427,6 +2428,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		AllowedClientOperations:        businessEventClientOperations(),
 		AllowedClientRPCOperations:     businessEventClientRPCOperations(),
 		AllowedClientWSSOperations:     businessEventClientWSSOperations(),
+		DisallowedClientOperations:     ContractDisallowedClientOperations(),
 		ServiceCallbacks:               ServiceCallbackOperations(),
 		ServiceCallbackContext:         ServiceCallbackContext(),
 		BusinessNotifications:          businessNotificationKinds(),
@@ -6099,6 +6101,27 @@ func contractClientWSSOperations() []string {
 
 func ContractClientWSSOperations() []string {
 	return contractClientWSSOperations()
+}
+
+func disallowedClientOperations() []string {
+	return []string{
+		"match.input",
+		"match.snapshot",
+		"match.events",
+		"match.settle",
+		"battle.input",
+		"battle.snapshot",
+		"battle.events",
+		"battle.result.submit",
+		"battle.ticket.consume",
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+		"battle.servers.offline",
+	}
+}
+
+func ContractDisallowedClientOperations() []string {
+	return disallowedClientOperations()
 }
 
 func serviceCallbackOperations() []string {

@@ -123,9 +123,10 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	clientOps := ContractClientOperations()
 	clientRPCOps := ContractClientRPCOperations()
 	clientWSSOps := ContractClientWSSOperations()
+	disallowedClientOps := ContractDisallowedClientOperations()
 	serviceCallbacks := ServiceCallbackOperations()
-	if len(clientOps) == 0 || len(clientRPCOps) == 0 || len(clientWSSOps) == 0 || len(serviceCallbacks) == 0 {
-		t.Fatalf("business operation contracts must not be empty: client=%+v rpc=%+v wss=%+v service=%+v", clientOps, clientRPCOps, clientWSSOps, serviceCallbacks)
+	if len(clientOps) == 0 || len(clientRPCOps) == 0 || len(clientWSSOps) == 0 || len(disallowedClientOps) == 0 || len(serviceCallbacks) == 0 {
+		t.Fatalf("business operation contracts must not be empty: client=%+v rpc=%+v wss=%+v disallowed=%+v service=%+v", clientOps, clientRPCOps, clientWSSOps, disallowedClientOps, serviceCallbacks)
 	}
 	for _, callback := range serviceCallbacks {
 		if !IsServiceCallbackOperation(callback) {
@@ -151,6 +152,29 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			if IsServiceCallbackOperation(clientOp) {
 				t.Fatalf("client operation %q must not require service origin: client=%+v rpc=%+v wss=%+v service=%+v", clientOp, clientOps, clientRPCOps, clientWSSOps, serviceCallbacks)
 			}
+		}
+	}
+	for _, disallowed := range disallowedClientOps {
+		if stringSliceContains(clientOps, disallowed) || stringSliceContains(clientRPCOps, disallowed) || stringSliceContains(clientWSSOps, disallowed) {
+			t.Fatalf("disallowed client operation %q must not be exposed: client=%+v rpc=%+v wss=%+v disallowed=%+v", disallowed, clientOps, clientRPCOps, clientWSSOps, disallowedClientOps)
+		}
+	}
+	for _, expected := range []string{
+		"match.input",
+		"match.snapshot",
+		"match.events",
+		"match.settle",
+		"battle.input",
+		"battle.snapshot",
+		"battle.events",
+		"battle.result.submit",
+		"battle.ticket.consume",
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+		"battle.servers.offline",
+	} {
+		if !stringSliceContains(disallowedClientOps, expected) {
+			t.Fatalf("disallowed client operation contract missing %q: %+v", expected, disallowedClientOps)
 		}
 	}
 	callbackContext := ServiceCallbackContext()
