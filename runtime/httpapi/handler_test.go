@@ -512,6 +512,50 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	}
 }
 
+func TestHTTPMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	alice := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-version-a", "display_name": "HTTP Version A"})
+	rejected := postRaw(t, server.URL+"/v1/matchmaking/join", alice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_version_a_deck",
+		"deck_snapshot":  validDeck("http_version_a_deck"),
+		"client_version": map[string]any{"protocol_version": core.ProtocolVersion + 1},
+	})
+	if rejected.Code != http.StatusBadRequest || rejected.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected protocol mismatch rejection, got %+v", rejected)
+	}
+
+	host := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-version-host", "display_name": "HTTP Version Host"})
+	room := postJSON[core.QueueResponse](t, server.URL+"/v1/rooms/create", host.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_version_host_deck",
+		"deck_snapshot":  validDeck("http_version_host_deck"),
+		"client_version": map[string]any{
+			"protocol_version":     core.ProtocolVersion,
+			"business_api_version": core.BusinessAPIVersion,
+			"battle_api_version":   core.BattleAPIVersion,
+			"ruleset_version":      core.RulesetVersion,
+		},
+	})
+	if room.RoomCode == "" {
+		t.Fatalf("expected compatible room create, got %+v", room)
+	}
+
+	guest := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-version-guest", "display_name": "HTTP Version Guest"})
+	roomJoin := postRaw(t, server.URL+"/v1/rooms/"+room.RoomCode+"/join", guest.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_version_guest_deck",
+		"deck_snapshot":  validDeck("http_version_guest_deck"),
+		"client_version": map[string]any{"ruleset_version": "ruleset-old"},
+	})
+	if roomJoin.Code != http.StatusBadRequest || roomJoin.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected ruleset mismatch rejection, got %+v", roomJoin)
+	}
+}
+
 func TestHTTPCancelTicketFlow(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := httptest.NewServer(New(service))

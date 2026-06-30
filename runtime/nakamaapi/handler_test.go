@@ -96,6 +96,68 @@ func TestNakamaRPCMapsExternalSessionBeforeBusinessDispatch(t *testing.T) {
 	}
 }
 
+func TestNakamaRPCMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	aliceSession := "nakama-version-a-session"
+	aliceUser := "nakama-version-a-user"
+	hostSession := "nakama-version-host-session"
+	hostUser := "nakama-version-host-user"
+	guestSession := "nakama-version-guest-session"
+	guestUser := "nakama-version-guest-user"
+
+	queue := handler.HandleRPC(RPCRequest{
+		ID:        "matchmaking.join",
+		SessionID: aliceSession,
+		UserID:    aliceUser,
+		Payload: envelopePayload(1, "nonce-version-queue", "matchmaking_join", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "nakama_version_a_deck",
+			"deck_snapshot":  deckPayload("nakama_version_a_deck"),
+			"client_version": map[string]any{"protocol_version": core.ProtocolVersion + 1},
+		}),
+	})
+	if queue.OK || queue.Status != 400 || queue.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected protocol mismatch rejection, got %+v", queue)
+	}
+
+	created := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.create",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(1, "nonce-version-room-create", "rooms_create", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "nakama_version_host_deck",
+			"deck_snapshot":  deckPayload("nakama_version_host_deck"),
+			"client_version": map[string]any{
+				"protocol_version":     core.ProtocolVersion,
+				"business_api_version": core.BusinessAPIVersion,
+				"battle_api_version":   core.BattleAPIVersion,
+				"ruleset_version":      core.RulesetVersion,
+			},
+		}),
+	})
+	if !created.OK {
+		t.Fatalf("compatible room create failed: %+v", created)
+	}
+	room := created.Payload.(*core.QueueResponse)
+
+	joined := handler.HandleRPC(RPCRequest{
+		ID:        "rooms.join",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(1, "nonce-version-room-join", "rooms_join", map[string]any{
+			"room_code":      room.RoomCode,
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "nakama_version_guest_deck",
+			"deck_snapshot":  deckPayload("nakama_version_guest_deck"),
+			"client_version": map[string]any{"ruleset_version": "ruleset-old"},
+		}),
+	})
+	if joined.OK || joined.Status != 400 || joined.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected ruleset mismatch rejection, got %+v", joined)
+	}
+}
+
 func TestNakamaWSSUsesSharedEnvelopeGuardForPresenceHeartbeat(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	login := handler.HandleRPC(RPCRequest{
