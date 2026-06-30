@@ -306,6 +306,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("client operation contract should expose battle server discovery: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
 		}
 	}
+	if !stringSliceContains(clientOps, "business.contract") || !stringSliceContains(clientRPCOps, "business.contract") || !stringSliceContains(clientWSSOps, "business.contract") {
+		t.Fatalf("client RPC/WSS operation contracts should expose authenticated business contract snapshot: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
+	}
 	if !stringSliceContains(clientRPCOps, "activity.claim") || stringSliceContains(clientWSSOps, "activity.claim") {
 		t.Fatalf("client RPC/WSS operation contracts should reflect handler transport support: rpc=%+v wss=%+v", clientRPCOps, clientWSSOps)
 	}
@@ -317,6 +320,31 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	for _, serviceOnly := range []string{"battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline"} {
 		if stringSliceContains(clientOps, serviceOnly) || stringSliceContains(clientRPCOps, serviceOnly) || stringSliceContains(clientWSSOps, serviceOnly) {
 			t.Fatalf("client operation contract must not expose service-only battle server callback %q: client=%+v rpc=%+v wss=%+v", serviceOnly, clientOps, clientRPCOps, clientWSSOps)
+		}
+	}
+	topics := ContractBusinessNotificationTopics()
+	if len(topics) == 0 {
+		t.Fatalf("business notification topic contract must not be empty")
+	}
+	seenKinds := map[string]bool{}
+	for _, topic := range topics {
+		if topic.Kind == "" || topic.Topic != "nakama_wss.business."+strings.ReplaceAll(topic.Kind, ".", "_") || topic.Transport != "nakama_wss" {
+			t.Fatalf("business notification topic shape invalid: %+v", topic)
+		}
+		if topic.ClientEventRequestOperation != "business.event" || !topic.ServerPush {
+			t.Fatalf("business notification topic must remain low-frequency business WSS/event contract: %+v", topic)
+		}
+		if topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
+			t.Fatalf("business notification topic must not authorize service callbacks, tick, or client result submit: %+v", topic)
+		}
+		if IsServiceCallbackOperation(topic.Kind) || stringSliceContains(disallowedClientOps, topic.Kind) {
+			t.Fatalf("business notification topic kind must stay out of service/disallowed operation sets: %+v", topic)
+		}
+		seenKinds[topic.Kind] = true
+	}
+	for _, expected := range []string{"matchmaking", "battle.allocation", "battle.ticket", "settlement"} {
+		if !seenKinds[expected] {
+			t.Fatalf("business notification topic contract missing %q: %+v", expected, topics)
 		}
 	}
 }

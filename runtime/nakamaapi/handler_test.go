@@ -364,6 +364,9 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "business.event") {
 		t.Fatalf("room rules should expose business event WSS/RPC contract: %+v", rulesPayload)
 	}
+	if !stringSliceContains(rulesPayload.ClientOperations, "business.contract") || !stringSliceContains(rulesPayload.ClientWSSOperations, "business.contract") {
+		t.Fatalf("room rules should expose business contract WSS/RPC snapshot: %+v", rulesPayload)
+	}
 	if rulesPayload.ServiceCallbackContext["runtime_ctx_mode"] != "rpc" || rulesPayload.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" || rulesPayload.ServiceCallbackContext["gensoulkyo_battle_callback"] != "true" {
 		t.Fatalf("room rules should expose service callback context requirements: %+v", rulesPayload.ServiceCallbackContext)
 	}
@@ -376,6 +379,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.BusinessNotifications, "activity") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.ticket") || !stringSliceContains(rulesPayload.BusinessNotifications, "settlement") || stringSliceContains(rulesPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("room rules should expose low-frequency business WSS notifications only: %+v", rulesPayload)
 	}
+	assertBusinessNotificationTopics(t, rulesPayload.BusinessNotificationTopics, "battle.allocation", "battle.ticket", "settlement")
 
 	battleServersMissingEnvelope := handler.HandleWSSMessage(WSSMessage{
 		Name:      "battle.servers",
@@ -638,12 +642,43 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "activity") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business event should document low-frequency notification kinds only: %+v", eventPayload)
 	}
+	assertBusinessNotificationTopics(t, eventPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket")
+
+	missingContractEnvelope := handler.HandleRPC(RPCRequest{
+		ID:        "business.contract",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload:   map[string]any{},
+	})
+	if missingContractEnvelope.OK || missingContractEnvelope.ErrorCode != CodeBusinessEnvelopeRequired {
+		t.Fatalf("business contract RPC should require business envelope: %+v", missingContractEnvelope)
+	}
+	contractEvent := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.contract",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload:   envelopePayload(5, "nonce-external-guest-business-contract", "business_contract", map[string]any{}),
+	})
+	if !contractEvent.OK || contractEvent.Status != 200 {
+		t.Fatalf("business contract WSS read failed: %+v", contractEvent)
+	}
+	contractPayload := contractEvent.Payload.(*core.BusinessContractSnapshot)
+	if !contractPayload.OK || !contractPayload.ServerAuthoritative || !contractPayload.BusinessEnvelopeRequired || contractPayload.HighFrequencyBattleTickAllowed || contractPayload.ClientResultSubmitAllowed {
+		t.Fatalf("business contract should remain a low-frequency authenticated contract snapshot: %+v", contractPayload)
+	}
+	if !stringSliceContains(contractPayload.ClientOperations, "business.contract") || !stringSliceContains(contractPayload.ClientWSSOperations, "business.contract") || stringSliceContains(contractPayload.ClientOperations, "battle.result.submit") || stringSliceContains(contractPayload.ClientWSSOperations, "battle.ticket.consume") {
+		t.Fatalf("business contract should expose client RPC/WSS operations without service callbacks: %+v", contractPayload)
+	}
+	if !stringSliceContains(contractPayload.ServiceCallbacks, "battle.result.submit") || contractPayload.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" {
+		t.Fatalf("business contract should document service callback requirements without granting client authority: %+v", contractPayload)
+	}
+	assertBusinessNotificationTopics(t, contractPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket", "settlement")
 
 	activityEvent := handler.HandleWSSMessage(WSSMessage{
 		Name:      "business.event",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(5, "nonce-external-guest-activity-event", "business_event", map[string]any{
+		Payload: envelopePayload(6, "nonce-external-guest-activity-event", "business_event", map[string]any{
 			"kind": "activity",
 		}),
 	})
@@ -673,7 +708,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "match.ready",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(6, "nonce-external-guest-ready", "match_ready", map[string]any{
+		Payload: envelopePayload(7, "nonce-external-guest-ready", "match_ready", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
@@ -700,7 +735,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "presence.heartbeat",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(7, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
+		Payload: envelopePayload(8, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
@@ -2373,6 +2408,25 @@ func stringSliceContains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotificationTopic, expectedKinds ...string) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, topic := range topics {
+		if topic.Kind == "" || topic.Topic != "nakama_wss.business."+strings.ReplaceAll(topic.Kind, ".", "_") || topic.Transport != "nakama_wss" {
+			t.Fatalf("business notification topic shape invalid: %+v", topic)
+		}
+		if topic.ClientEventRequestOperation != "business.event" || !topic.ServerPush || topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
+			t.Fatalf("business notification topic must stay low-frequency and non-authoritative: %+v", topic)
+		}
+		seen[topic.Kind] = true
+	}
+	for _, expected := range expectedKinds {
+		if !seen[expected] {
+			t.Fatalf("business notification topics missing %q: %+v", expected, topics)
+		}
+	}
 }
 
 func (stmt nakamaSQLCaptureStmt) Query(args []driver.Value) (driver.Rows, error) {

@@ -448,6 +448,10 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	if !ok || !anySliceContainsString(disallowed, "match.input") || !anySliceContainsString(disallowed, "battle.result.submit") || anySliceContainsString(disallowed, "battle.ticket") {
 		t.Fatalf("service callback status missing disallowed client operation contract: %+v", statusBody)
 	}
+	topics, ok := statusBody["business_notification_topics"].([]any)
+	if !ok || !anyBusinessNotificationTopicValid(topics, "battle.allocation") || !anyBusinessNotificationTopicValid(topics, "battle.ticket") || !anyBusinessNotificationTopicValid(topics, "settlement") || anyBusinessNotificationTopicValid(topics, "battle.result.submit") {
+		t.Fatalf("service callback status missing low-frequency business notification topic contract: %+v", statusBody)
+	}
 	context, ok := statusBody["service_callback_context"].(map[string]any)
 	if !ok || context[serviceOriginContextKey] != core.ServiceCallbackContext()[serviceOriginContextKey] || context[serviceCallbackContextKey] != core.ServiceCallbackContext()[serviceCallbackContextKey] {
 		t.Fatalf("service callback status drifted from core context: %+v", statusBody)
@@ -1472,6 +1476,26 @@ func stringSliceContains(values []string, want string) bool {
 		if value == want {
 			return true
 		}
+	}
+	return false
+}
+
+func anyBusinessNotificationTopicValid(topics []any, want string) bool {
+	for _, topic := range topics {
+		fields, ok := topic.(map[string]any)
+		if !ok || fields["kind"] != want {
+			continue
+		}
+		topicName, _ := fields["topic"].(string)
+		transport, _ := fields["transport"].(string)
+		requestOp, _ := fields["client_event_request_operation"].(string)
+		if topicName != "nakama_wss.business."+strings.ReplaceAll(want, ".", "_") || transport != "nakama_wss" || requestOp != "business.event" {
+			return false
+		}
+		return fields["server_push"] == true &&
+			fields["service_callback"] == false &&
+			fields["high_frequency_battle_tick_allowed"] == false &&
+			fields["client_result_submit_allowed"] == false
 	}
 	return false
 }

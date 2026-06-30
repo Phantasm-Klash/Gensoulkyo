@@ -2683,6 +2683,25 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.ForbiddenFields, "damage") || !stringSliceContains(rules.ServerAuthority, "state_snapshot") || !stringSliceContains(rules.ClientAuthority, "input_packet") {
 		t.Fatalf("room authority fields missing: %+v", rules)
 	}
+	contract, err := service.BusinessContract(guest.SessionToken)
+	if err != nil {
+		t.Fatalf("business contract: %v", err)
+	}
+	if !contract.OK || !contract.ServerAuthoritative || !contract.BusinessEnvelopeRequired || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
+		t.Fatalf("business contract should be an authenticated low-frequency authority snapshot: %+v", contract)
+	}
+	if !reflect.DeepEqual(contract.ClientOperations, rules.ClientOperations) || !reflect.DeepEqual(contract.ClientRPCOperations, rules.ClientRPCOperations) || !reflect.DeepEqual(contract.ClientWSSOperations, rules.ClientWSSOperations) {
+		t.Fatalf("business contract and room rules client operations drifted: contract=%+v/%+v/%+v rules=%+v/%+v/%+v", contract.ClientOperations, contract.ClientRPCOperations, contract.ClientWSSOperations, rules.ClientOperations, rules.ClientRPCOperations, rules.ClientWSSOperations)
+	}
+	if !reflect.DeepEqual(contract.DisallowedClientOperations, rules.DisallowedClientOperations) || !reflect.DeepEqual(contract.ServiceCallbacks, rules.ServiceCallbacks) || !reflect.DeepEqual(contract.ServiceCallbackContext, rules.ServiceCallbackContext) {
+		t.Fatalf("business contract and room rules callback/security contract drifted: contract=%+v callbacks=%+v context=%+v rules=%+v callbacks=%+v context=%+v", contract.DisallowedClientOperations, contract.ServiceCallbacks, contract.ServiceCallbackContext, rules.DisallowedClientOperations, rules.ServiceCallbacks, rules.ServiceCallbackContext)
+	}
+	if !reflect.DeepEqual(contract.BusinessNotifications, rules.BusinessNotifications) || !reflect.DeepEqual(contract.BusinessNotificationTopics, rules.BusinessNotificationTopics) {
+		t.Fatalf("business contract and room rules notification contract drifted: contract=%+v topics=%+v rules=%+v topics=%+v", contract.BusinessNotifications, contract.BusinessNotificationTopics, rules.BusinessNotifications, rules.BusinessNotificationTopics)
+	}
+	if !reflect.DeepEqual(contract.ForbiddenFields, rules.ForbiddenFields) || !reflect.DeepEqual(contract.ClientAuthority, rules.ClientAuthority) || !reflect.DeepEqual(contract.ServerAuthority, rules.ServerAuthority) {
+		t.Fatalf("business contract and room rules authority fields drifted: contract=%+v/%+v/%+v rules=%+v/%+v/%+v", contract.ForbiddenFields, contract.ClientAuthority, contract.ServerAuthority, rules.ForbiddenFields, rules.ClientAuthority, rules.ServerAuthority)
+	}
 	event, err := service.BusinessEvent(host.SessionToken, BusinessEventRequest{
 		Kind:     "room",
 		RoomCode: created.RoomCode,
