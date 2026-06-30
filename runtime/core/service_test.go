@@ -2696,6 +2696,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !reflect.DeepEqual(contract.DisallowedClientOperations, rules.DisallowedClientOperations) || !reflect.DeepEqual(contract.ServiceCallbacks, rules.ServiceCallbacks) || !reflect.DeepEqual(contract.ServiceCallbackContext, rules.ServiceCallbackContext) {
 		t.Fatalf("business contract and room rules callback/security contract drifted: contract=%+v callbacks=%+v context=%+v rules=%+v callbacks=%+v context=%+v", contract.DisallowedClientOperations, contract.ServiceCallbacks, contract.ServiceCallbackContext, rules.DisallowedClientOperations, rules.ServiceCallbacks, rules.ServiceCallbackContext)
 	}
+	if !reflect.DeepEqual(contract.ServiceCallbackAcceptedValues, ServiceCallbackAcceptedValues()) || !reflect.DeepEqual(contract.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues) {
+		t.Fatalf("business contract and room rules accepted service callback values drifted: contract=%+v rules=%+v expected=%+v", contract.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues, ServiceCallbackAcceptedValues())
+	}
 	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult || rules.SettlementAuthority != contract.SettlementAuthority {
 		t.Fatalf("business contract and room rules settlement authority drifted: contract=%q rules=%q", contract.SettlementAuthority, rules.SettlementAuthority)
 	}
@@ -2720,6 +2723,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.ServiceCallbackContext, rules.ServiceCallbackContext) {
 		t.Fatalf("room rules and business event service callback context drifted: rules=%+v event=%+v", rules.ServiceCallbackContext, event.ServiceCallbackContext)
+	}
+	if !reflect.DeepEqual(event.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues) {
+		t.Fatalf("room rules and business event service callback accepted values drifted: rules=%+v event=%+v", rules.ServiceCallbackAcceptedValues, event.ServiceCallbackAcceptedValues)
 	}
 	if event.SettlementAuthority != rules.SettlementAuthority {
 		t.Fatalf("room rules and business event settlement authority drifted: rules=%q event=%q", rules.SettlementAuthority, event.SettlementAuthority)

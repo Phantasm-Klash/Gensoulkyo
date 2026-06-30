@@ -788,6 +788,7 @@ type BusinessContractSnapshot struct {
 	DisallowedClientOperations     []string                    `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
+	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
@@ -817,6 +818,7 @@ type RoomRulesSnapshot struct {
 	DisallowedClientOperations     []string                    `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
+	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
@@ -928,6 +930,7 @@ type BusinessEvent struct {
 	DisallowedClientOperations     []string                    `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
+	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
