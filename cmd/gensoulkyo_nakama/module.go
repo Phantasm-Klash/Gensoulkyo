@@ -59,6 +59,12 @@ var rpcIDs = []string{
 
 var serviceOriginRPCIDs = serviceOriginRPCIDSet()
 
+const (
+	serviceOriginVarKey   = "gensoulkyo_service_origin"
+	serviceOriginBattle   = "battle_server"
+	serviceCallbackVarKey = "gensoulkyo_battle_callback"
+)
+
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	handler := nakamaapi.New(nil)
 	if db != nil {
@@ -99,7 +105,19 @@ func isServiceOriginRPC(ctx context.Context, rpcID string) bool {
 		return false
 	}
 	mode := strings.ToLower(strings.TrimSpace(runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)))
-	return mode != "" && mode != "client"
+	if mode != "rpc" {
+		return false
+	}
+	vars := runtimeCtxStringMap(ctx, runtime.RUNTIME_CTX_VARS)
+	if strings.ToLower(strings.TrimSpace(vars[serviceOriginVarKey])) != serviceOriginBattle {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(vars[serviceCallbackVarKey])) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func serviceOriginRPCIDSet() map[string]struct{} {
@@ -157,4 +175,22 @@ func runtimeCtxString(ctx context.Context, key string) string {
 		return text
 	}
 	return ""
+}
+
+func runtimeCtxStringMap(ctx context.Context, key string) map[string]string {
+	value := ctx.Value(key)
+	switch typed := value.(type) {
+	case map[string]string:
+		return typed
+	case map[string]any:
+		out := make(map[string]string, len(typed))
+		for mapKey, mapValue := range typed {
+			if text, ok := mapValue.(string); ok {
+				out[mapKey] = text
+			}
+		}
+		return out
+	default:
+		return map[string]string{}
+	}
 }

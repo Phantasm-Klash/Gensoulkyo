@@ -25,6 +25,7 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 		"runtime.RUNTIME_CTX_SESSION_ID",
 		"runtime.RUNTIME_CTX_USER_ID",
 		"runtime.RUNTIME_CTX_MODE",
+		"runtime.RUNTIME_CTX_VARS",
 		"PayloadError: payloadError(payload)",
 		"auth.anonymous",
 		"bootstrap",
@@ -135,7 +136,13 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID) != \"\"",
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID) != \"\"",
 		"runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)",
-		"mode != \"\" && mode != \"client\"",
+		"mode != \"rpc\"",
+		"runtimeCtxStringMap(ctx, runtime.RUNTIME_CTX_VARS)",
+		"serviceOriginVarKey",
+		"gensoulkyo_service_origin",
+		"battle_server",
+		"serviceCallbackVarKey",
+		"gensoulkyo_battle_callback",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("Nakama binding service-origin gate missing %q", expected)
@@ -162,6 +169,54 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	} {
 		if !strings.Contains(text, serviceRPC) {
 			t.Fatalf("Nakama binding must register service-origin RPC %q", serviceRPC)
+		}
+	}
+}
+
+func TestNakamaBindingServiceOriginContextGateRequiresBattleCallbackVars(t *testing.T) {
+	source, err := os.ReadFile("module.go")
+	if err != nil {
+		t.Fatalf("read module source: %v", err)
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), "module.go", string(source), 0)
+	if err != nil {
+		t.Fatalf("parse module source: %v", err)
+	}
+	gate := findFuncDecl(file, "isServiceOriginRPC")
+	if gate == nil {
+		t.Fatalf("isServiceOriginRPC not found")
+	}
+	gateText := string(source[gate.Pos()-1 : gate.End()-1])
+	for _, expected := range []string{
+		"serviceOriginRPCIDs[rpcID]",
+		"RUNTIME_CTX_SESSION_ID",
+		"RUNTIME_CTX_USER_ID",
+		"mode != \"rpc\"",
+		"RUNTIME_CTX_VARS",
+		"vars[serviceOriginVarKey]",
+		"serviceOriginBattle",
+		"vars[serviceCallbackVarKey]",
+		"case \"1\", \"true\", \"yes\"",
+	} {
+		if !strings.Contains(gateText, expected) {
+			t.Fatalf("service-origin context gate missing %q in:\n%s", expected, gateText)
+		}
+	}
+	if strings.Contains(gateText, "mode != \"\" && mode != \"client\"") {
+		t.Fatalf("service-origin context gate must not treat any non-client mode as trusted:\n%s", gateText)
+	}
+	mapHelper := findFuncDecl(file, "runtimeCtxStringMap")
+	if mapHelper == nil {
+		t.Fatalf("runtimeCtxStringMap helper not found")
+	}
+	mapHelperText := string(source[mapHelper.Pos()-1 : mapHelper.End()-1])
+	for _, expected := range []string{
+		"case map[string]string",
+		"case map[string]any",
+		"map[string]string{}",
+	} {
+		if !strings.Contains(mapHelperText, expected) {
+			t.Fatalf("runtime context vars helper missing %q in:\n%s", expected, mapHelperText)
 		}
 	}
 }
@@ -200,6 +255,16 @@ func TestNakamaTagBuildComposeProfileDocumentsTemporarySDKPin(t *testing.T) {
 			t.Fatalf("Nakama binding README missing %q", expected)
 		}
 	}
+}
+
+func findFuncDecl(file *ast.File, name string) *ast.FuncDecl {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name {
+			return fn
+		}
+	}
+	return nil
 }
 
 func extractRPCIDs(t *testing.T, source string) []string {
