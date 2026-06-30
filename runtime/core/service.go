@@ -2389,6 +2389,18 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 	} else if !player.Connected {
 		presenceStatus = "disconnected"
 	}
+	var allocation *BattleServerAllocation
+	if alloc := s.ensureBattleAllocationLocked(match); alloc != nil {
+		copy := copyBattleAllocation(alloc)
+		allocation = &copy
+	}
+	var battleTicket *SignedBattleTicket
+	if match.Status != "ended" {
+		if signed, err := s.signedBattleTicketLocked(match, user); err == nil {
+			copy := copySignedBattleTicket(signed)
+			battleTicket = &copy
+		}
+	}
 	return &PresenceHeartbeatResponse{
 		OK:                   true,
 		UserID:               user.UserID,
@@ -2412,6 +2424,8 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 		LastEventCursor:      normalizedCursor(req.LastEventCursor),
 		LatestEventCursor:    latestCursor,
 		OldestEventCursor:    oldestCursor,
+		BattleAllocation:     allocation,
+		BattleTicket:         battleTicket,
 		ServerTime:           now,
 		ServerAuthoritative:  true,
 	}
