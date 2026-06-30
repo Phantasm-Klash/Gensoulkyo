@@ -5344,7 +5344,37 @@ func validateSignedBattleResultShape(signed SignedBattleResult, now time.Time) e
 	if strings.TrimSpace(result.ModeResultJSON) != "" && !json.Valid([]byte(result.ModeResultJSON)) {
 		return newError(codeInvalidRequest, "battle result mode result json is invalid")
 	}
+	if forbidden := firstForbiddenBattleResultProjectionField(result.RewardProjectionJSON); forbidden != "" {
+		return newError(codeForbiddenField, "battle result reward projection cannot include %s", forbidden)
+	}
+	if forbidden := firstForbiddenBattleResultProjectionField(result.ModeResultJSON); forbidden != "" {
+		return newError(codeForbiddenField, "battle result mode projection cannot include %s", forbidden)
+	}
 	return nil
+}
+
+func firstForbiddenBattleResultProjectionField(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return ""
+	}
+	switch typed := decoded.(type) {
+	case map[string]any:
+		return firstForbiddenFieldDeep(typed)
+	case []any:
+		for _, item := range typed {
+			if nestedMap, ok := item.(map[string]any); ok {
+				if nested := firstForbiddenFieldDeep(nestedMap); nested != "" {
+					return nested
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func allocationPlayerIDs(allocation *BattleServerAllocation) []string {

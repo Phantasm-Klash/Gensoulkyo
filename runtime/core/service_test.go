@@ -767,6 +767,18 @@ func TestBattleResultSubmitVerifiesAllocationAndSettlesMatch(t *testing.T) {
 		t.Fatalf("expected player mismatch rejection, got %v", err)
 	}
 
+	badRewardProjection := signedBattleResultForAllocation(allocation)
+	badRewardProjection.Result.RewardProjectionJSON = `{"source":"battle_server","reward":{"gold":999999}}`
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: badRewardProjection}); ErrorCode(err) != codeForbiddenField {
+		t.Fatalf("expected reward projection authority-field rejection, got %v", err)
+	}
+
+	badModeProjection := signedBattleResultForAllocation(allocation)
+	badModeProjection.Result.ModeResultJSON = `{"verified":true,"players":[{"boss_hp":0}]}`
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: badModeProjection}); ErrorCode(err) != codeForbiddenField {
+		t.Fatalf("expected mode projection authority-field rejection, got %v", err)
+	}
+
 	signed := signedBattleResultForAllocation(allocation)
 	resp, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
 	if err != nil {
