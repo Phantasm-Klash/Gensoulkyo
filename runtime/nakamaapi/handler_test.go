@@ -1574,6 +1574,37 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	for _, player := range match.BattleAllocation.Players {
 		playerIDs = append(playerIDs, player.PlayerID)
 	}
+	badProjectionSubmit := handler.HandleRPC(RPCRequest{
+		ID:      "battle.result.submit",
+		Service: true,
+		Payload: map[string]any{"signed_result": map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"version": map[string]any{
+					"protocol_version":     core.ProtocolVersion,
+					"business_api_version": core.BusinessAPIVersion,
+					"battle_api_version":   core.BattleAPIVersion,
+					"ruleset_version":      core.RulesetVersion,
+				},
+				"match_id":         match.MatchID,
+				"mode_id":          match.ModeID,
+				"result_hash":      "sha256:abcd1234",
+				"replay_id":        "nakama-replay-forbidden-callback",
+				"player_ids":       playerIDs,
+				"mode_result_json": `{"verified":true,"players":[{"boss_hp":0}]}`,
+				"settled_at_ms":    time.Now().UnixMilli(),
+			},
+			"signature_alg":        "ED25519",
+			"key_id":               match.BattleAllocation.BattleServerID,
+			"signature_hex":        strings.Repeat("c", 128),
+			"public_key_hex":       strings.Repeat("d", 64),
+			"server_authoritative": true,
+		}},
+	})
+	if badProjectionSubmit.OK || badProjectionSubmit.Status != 403 || badProjectionSubmit.ErrorCode != "forbidden_field" {
+		t.Fatalf("service-origin result projection with authority fields should be rejected: %+v", badProjectionSubmit)
+	}
+
 	resultSubmit := handler.HandleRPC(RPCRequest{
 		ID:      "battle.result.submit",
 		Service: true,

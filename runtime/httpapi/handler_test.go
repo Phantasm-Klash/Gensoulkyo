@@ -747,6 +747,13 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		PublicKeyHex:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		ServerAuthoritative: true,
 	}
+	badProjection := result
+	badProjection.Result.RewardProjectionJSON = `{"source":"battle_server","reward":{"gold":999999}}`
+	forbiddenProjection := postRaw(t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: badProjection})
+	if forbiddenProjection.Code != http.StatusForbidden || forbiddenProjection.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden battle result projection rejection, got %+v", forbiddenProjection)
+	}
+
 	submit := postJSON[core.BattleResultSubmitResponse](t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: result})
 	if !submit.OK || !submit.Accepted || submit.MatchID != queueBob.MatchID {
 		t.Fatalf("battle result submit invalid: %+v", submit)
