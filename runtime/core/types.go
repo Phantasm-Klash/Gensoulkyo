@@ -741,9 +741,15 @@ type RoomRulesSnapshot struct {
 	TickRate            int          `json:"tick_rate"`
 	InputDelayTicks     int          `json:"input_delay_ticks"`
 	BattleTicketTTL     int          `json:"battle_ticket_ttl_seconds"`
+	BusinessTransports  []string     `json:"business_transports"`
+	BattleTransports    []string     `json:"battle_transports"`
+	ClientOperations    []string     `json:"client_operations"`
+	ServiceCallbacks    []string     `json:"service_callbacks"`
 	ClientAuthority     []string     `json:"client_authority"`
 	ServerAuthority     []string     `json:"server_authority"`
 	ForbiddenFields     []string     `json:"forbidden_fields"`
+	BusinessEnvelope    bool         `json:"business_envelope_required"`
+	ClientResultSubmit  bool         `json:"client_result_submit_allowed"`
 	ServerTime          time.Time    `json:"server_time"`
 	ServerAuthoritative bool         `json:"server_authoritative"`
 }

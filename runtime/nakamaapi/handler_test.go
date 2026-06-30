@@ -265,6 +265,18 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if len(rulesPayload.ForbiddenFields) == 0 || rulesPayload.Room.Participants[0].DeckSnapshotHash == "" {
 		t.Fatalf("room rules missing protocol fields: %+v", rulesPayload)
 	}
+	if !rulesPayload.BusinessEnvelope || rulesPayload.ClientResultSubmit {
+		t.Fatalf("room rules should require business envelope and forbid client result submit: %+v", rulesPayload)
+	}
+	if !stringSliceContains(rulesPayload.BusinessTransports, "nakama_wss") || !stringSliceContains(rulesPayload.BattleTransports, "kcp_udp") {
+		t.Fatalf("room rules should expose transport split contract: %+v", rulesPayload)
+	}
+	if !stringSliceContains(rulesPayload.ClientOperations, "battle.ticket") || stringSliceContains(rulesPayload.ClientOperations, "battle.result.submit") {
+		t.Fatalf("room rules should expose client RPC/WSS operations without result submit: %+v", rulesPayload)
+	}
+	if !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.ticket.consume") {
+		t.Fatalf("room rules should expose service-origin callback operations: %+v", rulesPayload)
+	}
 
 	battleServersMissingEnvelope := handler.HandleWSSMessage(WSSMessage{
 		Name:      "battle.servers",
@@ -1858,6 +1870,15 @@ func nakamaSQLForcedErrorLocked(query string) error {
 		}
 	}
 	return nil
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (stmt nakamaSQLCaptureStmt) Query(args []driver.Value) (driver.Rows, error) {
