@@ -168,6 +168,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.battleServerHeartbeat(w, r)
 		return
 	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "servers" && segments[3] == "offline" && r.Method == http.MethodPost {
+		h.battleServerOffline(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "tickets" && segments[3] == "consume" && r.Method == http.MethodPost {
+		h.consumeBattleTicket(w, r)
+		return
+	}
 	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "results" && segments[3] == "submit" && r.Method == http.MethodPost {
 		h.submitBattleResult(w, r)
 		return
@@ -602,6 +610,32 @@ func (h *Handler) battleServerHeartbeat(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	resp, err := h.service.BattleServerHeartbeat(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) battleServerOffline(w http.ResponseWriter, r *http.Request) {
+	var req core.BattleServerOfflineRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.BattleServerOffline(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) consumeBattleTicket(w http.ResponseWriter, r *http.Request) {
+	var req core.BattleTicketConsumeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.ConsumeBattleTicket(req)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -461,6 +461,25 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	if !registered.OK || registered.BattleServerID != "aaa-http-battle" || registered.Endpoint != "127.0.0.1:7911" {
 		t.Fatalf("registered battle server invalid: %+v", registered)
 	}
+	registeredPVP := postJSON[core.BattleServerStatus](t, server.URL+"/v1/battle/servers/register", "", map[string]any{
+		"battle_server_id": "aaa-http-pvp",
+		"endpoint":         "127.0.0.1:7912",
+		"region":           "local",
+		"build_id":         "http-pvp-test",
+		"capacity":         16,
+		"status":           "online",
+		"supported_modes":  []string{"pvp_duel"},
+	})
+	if !registeredPVP.OK || registeredPVP.Status != "online" {
+		t.Fatalf("registered pvp battle server invalid: %+v", registeredPVP)
+	}
+	offlinePVP := postJSON[core.BattleServerStatus](t, server.URL+"/v1/battle/servers/offline", "", map[string]any{
+		"battle_server_id": "aaa-http-pvp",
+		"status":           "online",
+	})
+	if !offlinePVP.OK || offlinePVP.Status != "offline" || offlinePVP.Load != 0 || !offlinePVP.ServerAuthoritative {
+		t.Fatalf("offline pvp battle server invalid: %+v", offlinePVP)
+	}
 	list := getJSON[core.BattleServerListResponse](t, server.URL+"/v1/battle/servers", "")
 	if !list.OK || len(list.Servers) < 2 {
 		t.Fatalf("battle server list invalid: %+v", list)
@@ -485,6 +504,22 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		t.Fatalf("queue battle allocation/ticket mismatch: alloc=%+v ticket=%+v", queueBob.BattleAllocation, queueBob.BattleTicket)
 	}
 
+	pvpAlice := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "battle-http-pvp-a", "display_name": "Battle HTTP PvP A"})
+	pvpBob := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "battle-http-pvp-b", "display_name": "Battle HTTP PvP B"})
+	postJSON[core.QueueResponse](t, server.URL+"/v1/matchmaking/join", pvpAlice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_pvp_alice_deck",
+		"deck_snapshot":  validDeck("http_pvp_alice_deck"),
+	})
+	pvpMatch := postJSON[core.QueueResponse](t, server.URL+"/v1/matchmaking/join", pvpBob.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_pvp_bob_deck",
+		"deck_snapshot":  validDeck("http_pvp_bob_deck"),
+	})
+	if pvpMatch.MatchID == "" || pvpMatch.BattleAllocation == nil || pvpMatch.BattleAllocation.BattleServerID == "aaa-http-pvp" {
+		t.Fatalf("offline pvp battle server must be skipped for future allocation: %+v", pvpMatch)
+	}
+
 	allocation := getJSON[core.BattleServerAllocation](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/battle-allocation", alice.SessionToken)
 	if !allocation.OK || allocation.MatchID != queueBob.MatchID || len(allocation.Players) != 2 || allocation.Version.ProtocolVersion != core.ProtocolVersion {
 		t.Fatalf("explicit allocation invalid: %+v", allocation)
@@ -492,6 +527,35 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	ticket := postJSON[core.SignedBattleTicket](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/battle-ticket", alice.SessionToken, map[string]any{})
 	if !ticket.OK || ticket.Ticket.UserID != alice.UserID || ticket.Ticket.BattleServerID != "aaa-http-battle" || ticket.SignatureHex == "" || ticket.PublicKeyHex == "" {
 		t.Fatalf("explicit battle ticket invalid: %+v", ticket)
+	}
+	consume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"user_id":          alice.UserID,
+		"player_id":        ticket.Ticket.PlayerID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
+	})
+	if !consume.OK || !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
+		t.Fatalf("battle ticket consume invalid: %+v", consume)
+	}
+	duplicateConsume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
+	})
+	if !duplicateConsume.OK || !duplicateConsume.Consumed || !duplicateConsume.Duplicate || !duplicateConsume.ServerAuthoritative {
+		t.Fatalf("duplicate battle ticket consume invalid: %+v", duplicateConsume)
+	}
+	badConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": "wrong-nonce",
+	})
+	if badConsume.Code != http.StatusBadRequest || badConsume.ErrorCode != "invalid_request" {
+		t.Fatalf("expected bad ticket consume rejection, got %+v", badConsume)
 	}
 
 	postJSON[core.ReadyResponse](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/ready", alice.SessionToken, map[string]any{})
