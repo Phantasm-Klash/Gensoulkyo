@@ -153,13 +153,13 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(request.SessionID, req) })
-	case "business.event":
+	case "business.event", "business.event.settlement":
 		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
 			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
 		}
-		var req core.BusinessEventRequest
-		if err := decodeBody(body, &req); err != nil {
-			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		req, response := businessEventRequest(body, rpcID)
+		if !response.OK {
+			return response
 		}
 		return handler.call(func() (any, error) { return handler.service.BusinessEvent(request.SessionID, req) })
 	case "matchmaking.join":
@@ -290,13 +290,13 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(message.SessionID, req) })
-	case "business.event":
+	case "business.event", "business.event.settlement":
 		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
 			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
 		}
-		var req core.BusinessEventRequest
-		if err := decodeBody(body, &req); err != nil {
-			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		req, response := businessEventRequest(body, name)
+		if !response.OK {
+			return response
 		}
 		return handler.call(func() (any, error) { return handler.service.BusinessEvent(message.SessionID, req) })
 	case "matchmaking.join":
@@ -602,6 +602,17 @@ func lobbyMessageRequest(body map[string]any, name string) (core.LobbyMessageReq
 		req.Kind = "chat"
 	case "rooms.announcement":
 		req.Kind = "announcement"
+	}
+	return req, successResponse(nil)
+}
+
+func businessEventRequest(body map[string]any, name string) (core.BusinessEventRequest, Response) {
+	var req core.BusinessEventRequest
+	if err := decodeBody(body, &req); err != nil {
+		return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+	}
+	if normalizeName(name) == "business.event.settlement" {
+		req.Kind = "settlement"
 	}
 	return req, successResponse(nil)
 }

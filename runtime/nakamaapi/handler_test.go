@@ -1570,11 +1570,10 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		t.Fatalf("duplicate result submit receipt should be idempotent and authoritative: %+v", receipt)
 	}
 	settlementEvent := handler.HandleWSSMessage(WSSMessage{
-		Name:      "business.event",
+		Name:      "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(12, "nonce-sql-host-settlement-event", "business_event", map[string]any{
-			"kind":     "settlement",
+		Payload: envelopePayload(12, "nonce-sql-host-settlement-event", "business_event_settlement", map[string]any{
 			"match_id": match.MatchID,
 		}),
 	})
@@ -1591,12 +1590,11 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !settlementPayload.BusinessEnvelopeRequired || !stringSliceContains(settlementPayload.ForbiddenFields, "final_result") {
 		t.Fatalf("settlement business event should retain business security contract: %+v", settlementPayload)
 	}
-	clientAuthoredSettlement := handler.HandleWSSMessage(WSSMessage{
-		Name:      "business.event",
+	clientAuthoredSettlement := handler.HandleRPC(RPCRequest{
+		ID:        "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(13, "nonce-sql-host-settlement-client-authored", "business_event", map[string]any{
-			"kind":        "settlement",
+		Payload: envelopePayload(13, "nonce-sql-host-settlement-client-authored", "business_event_settlement", map[string]any{
 			"match_id":    match.MatchID,
 			"result_hash": "client-authored",
 		}),
