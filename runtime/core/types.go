@@ -335,6 +335,7 @@ type BattleTicket struct {
 	BattleServerID      string       `json:"battle_server_id"`
 	Endpoint            string       `json:"endpoint"`
 	DeckSnapshotHash    string       `json:"deck_snapshot_hash"`
+	ModeConfigHash      string       `json:"mode_config_hash"`
 	RulesetVersion      string       `json:"ruleset_version"`
 	TicketNonceHex      string       `json:"ticket_nonce_hex"`
 	IssuedAt            time.Time    `json:"issued_at"`
@@ -363,6 +364,7 @@ type BattleTicketConsumeRequest struct {
 	UserID         string       `json:"user_id,omitempty"`
 	PlayerID       string       `json:"player_id,omitempty"`
 	BattleServerID string       `json:"battle_server_id"`
+	ModeConfigHash string       `json:"mode_config_hash,omitempty"`
 	TicketNonceHex string       `json:"ticket_nonce_hex"`
 }
 
@@ -374,6 +376,7 @@ type BattleTicketConsumeResponse struct {
 	UserID              string       `json:"user_id"`
 	PlayerID            string       `json:"player_id"`
 	BattleServerID      string       `json:"battle_server_id"`
+	ModeConfigHash      string       `json:"mode_config_hash"`
 	IssuedAt            time.Time    `json:"issued_at"`
 	ExpiresAt           time.Time    `json:"expires_at"`
 	ConsumedAt          time.Time    `json:"consumed_at"`

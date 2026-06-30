@@ -73,6 +73,7 @@ func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
 		TicketID:       "ticket-contract",
 		MatchID:        "match-contract",
 		BattleServerID: "battle-contract",
+		ModeConfigHash: "sha256:123456",
 		TicketNonceHex: "abcdef",
 	}
 	encoded, err := json.Marshal(req)
@@ -89,6 +90,38 @@ func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
 	}
 	if version["protocol_version"] == nil || version["business_api_version"] == "" || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
 		t.Fatalf("consume request version missing battle gates: %+v", version)
+	}
+	if roundTrip["mode_config_hash"] != "sha256:123456" {
+		t.Fatalf("consume request must expose optional mode_config_hash echo: %s", encoded)
+	}
+}
+
+func TestBattleTicketExposesSignedModeConfigHashContract(t *testing.T) {
+	ticket := BattleTicket{
+		Version:             currentVersionStamp(),
+		TicketID:            "ticket-contract",
+		MatchID:             "match-contract",
+		UserID:              "user-contract",
+		PlayerID:            "player-contract",
+		ModeID:              "pvp_duel",
+		BattleServerID:      "battle-contract",
+		Endpoint:            "127.0.0.1:7909",
+		DeckSnapshotHash:    "sha256:deck123",
+		ModeConfigHash:      "sha256:mode123",
+		RulesetVersion:      RulesetVersion,
+		TicketNonceHex:      "abcdef",
+		ServerAuthoritative: true,
+	}
+	encoded, err := json.Marshal(ticket)
+	if err != nil {
+		t.Fatalf("marshal battle ticket: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal battle ticket: %v", err)
+	}
+	if roundTrip["mode_config_hash"] != "sha256:mode123" {
+		t.Fatalf("battle ticket must expose signed mode_config_hash for battle-server validation: %s", encoded)
 	}
 }
 
@@ -119,6 +152,7 @@ func TestPresenceHeartbeatResponseExposesBattleDescriptorContract(t *testing.T) 
 				PlayerID:            "player-contract",
 				BattleServerID:      "battle-contract",
 				Endpoint:            "127.0.0.1:7909",
+				ModeConfigHash:      "sha256:mode123",
 				ServerAuthoritative: true,
 			},
 			SignatureAlg:        "ED25519",
@@ -145,7 +179,7 @@ func TestPresenceHeartbeatResponseExposesBattleDescriptorContract(t *testing.T) 
 		t.Fatalf("heartbeat response must expose signed battle ticket descriptor: %s", encoded)
 	}
 	ticket, ok := signedTicket["ticket"].(map[string]any)
-	if !ok || ticket["match_id"] != "match-contract" || ticket["user_id"] != "user-contract" || ticket["battle_server_id"] != "battle-contract" || ticket["server_authoritative"] != true {
+	if !ok || ticket["match_id"] != "match-contract" || ticket["user_id"] != "user-contract" || ticket["battle_server_id"] != "battle-contract" || ticket["mode_config_hash"] != "sha256:mode123" || ticket["server_authoritative"] != true {
 		t.Fatalf("heartbeat signed ticket must stay match/user/server bound: %s", encoded)
 	}
 }

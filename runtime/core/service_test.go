@@ -375,6 +375,9 @@ func TestBattleAllocationAndSignedTicketUseRegisteredServer(t *testing.T) {
 	if !strings.HasPrefix(queueBob.BattleTicket.Ticket.DeckSnapshotHash, "sha256:") || queueBob.BattleTicket.Ticket.TicketNonceHex == "" {
 		t.Fatalf("battle ticket missing hash/nonce: %+v", queueBob.BattleTicket.Ticket)
 	}
+	if queueBob.BattleTicket.Ticket.ModeConfigHash != queueBob.BattleAllocation.ModeConfigHash || !strings.HasPrefix(queueBob.BattleTicket.Ticket.ModeConfigHash, "sha256:") {
+		t.Fatalf("battle ticket must be signed against allocation mode config: allocation=%+v ticket=%+v", queueBob.BattleAllocation, queueBob.BattleTicket.Ticket)
+	}
 	if !verifySignedBattleTicket(t, queueBob.BattleTicket) {
 		t.Fatalf("battle ticket signature did not verify: %+v", queueBob.BattleTicket)
 	}
@@ -673,6 +676,9 @@ func TestPvPDuelModeContractAllocationAndSettlement(t *testing.T) {
 	}
 	if queueBob.BattleTicket.Ticket.ModeID != "pvp_duel" || queueBob.BattleTicket.Ticket.UserID != bob.UserID || queueBob.BattleTicket.Ticket.BattleServerID != "pvp-battle-dev" {
 		t.Fatalf("pvp ticket not bound to bob/mode/server: %+v", queueBob.BattleTicket)
+	}
+	if queueBob.BattleTicket.Ticket.ModeConfigHash != queueBob.BattleAllocation.ModeConfigHash {
+		t.Fatalf("pvp ticket must bind allocation mode config: allocation=%+v ticket=%+v", queueBob.BattleAllocation, queueBob.BattleTicket.Ticket)
 	}
 	if !verifySignedBattleTicket(t, queueBob.BattleTicket) {
 		t.Fatalf("pvp battle ticket signature did not verify: %+v", queueBob.BattleTicket)
@@ -1065,18 +1071,19 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		UserID:         alice.UserID,
 		PlayerID:       ticket.Ticket.PlayerID,
 		BattleServerID: ticket.Ticket.BattleServerID,
+		ModeConfigHash: ticket.Ticket.ModeConfigHash,
 		TicketNonceHex: ticket.Ticket.TicketNonceHex,
 	})
 	if err != nil {
 		t.Fatalf("consume ticket: %v", err)
 	}
-	if !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
+	if !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || consume.ModeConfigHash != ticket.Ticket.ModeConfigHash || !consume.ServerAuthoritative {
 		t.Fatalf("consume response invalid: %+v", consume)
 	}
 	if consume.IssuedAt != ticket.Ticket.IssuedAt || consume.ExpiresAt != ticket.Ticket.ExpiresAt || consume.ConsumedAt != now || consume.IssuedAtMS != ticket.Ticket.IssuedAtMS || consume.ExpiresAtMS != ticket.Ticket.ExpiresAtMS || consume.ConsumedAtMS != now.UnixMilli() {
 		t.Fatalf("consume response should expose ticket lifecycle times: ticket=%+v consume=%+v", ticket.Ticket, consume)
 	}
-	if len(repo.tickets) < 2 || repo.tickets[len(repo.tickets)-1].Status != "consumed" || repo.tickets[len(repo.tickets)-1].ConsumedAt != now {
+	if len(repo.tickets) < 2 || repo.tickets[len(repo.tickets)-1].Status != "consumed" || repo.tickets[len(repo.tickets)-1].ConsumedAt != now || repo.tickets[len(repo.tickets)-1].ModeConfigHash != ticket.Ticket.ModeConfigHash {
 		t.Fatalf("consumed ticket audit missing: %+v", repo.tickets)
 	}
 	afterConsumeAuditCount := len(repo.tickets)
@@ -1105,6 +1112,16 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	}
 	if replacement.Ticket.TicketID == ticket.Ticket.TicketID {
 		t.Fatalf("consumed ticket should not be reissued: old=%+v replacement=%+v", ticket.Ticket, replacement.Ticket)
+	}
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        replacement.Ticket.Version,
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		ModeConfigHash: "sha256:wrongmode",
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected mode config mismatch rejection, got %v", err)
 	}
 	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
 		Version:        replacement.Ticket.Version,
