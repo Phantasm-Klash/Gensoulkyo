@@ -350,6 +350,12 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "battle.servers") || !stringSliceContains(rulesPayload.ClientOperations, "battle.ticket") || !stringSliceContains(rulesPayload.ClientOperations, "matchmaking.cancel") || stringSliceContains(rulesPayload.ClientOperations, "battle.result.submit") || stringSliceContains(rulesPayload.ClientOperations, "battle.servers.register") {
 		t.Fatalf("room rules should expose client RPC/WSS operations without result submit: %+v", rulesPayload)
 	}
+	if !stringSliceContains(rulesPayload.ClientRPCOperations, "battle.allocation") || !stringSliceContains(rulesPayload.ClientWSSOperations, "battle.ticket") || stringSliceContains(rulesPayload.ClientRPCOperations, "battle.result.submit") || stringSliceContains(rulesPayload.ClientWSSOperations, "battle.ticket.consume") {
+		t.Fatalf("room rules should expose split client RPC/WSS operations without service callbacks: %+v", rulesPayload)
+	}
+	if !stringSliceContains(rulesPayload.ClientRPCOperations, "activity.claim") || stringSliceContains(rulesPayload.ClientWSSOperations, "activity.claim") {
+		t.Fatalf("room rules should keep RPC-only activity claim out of WSS contract: %+v", rulesPayload)
+	}
 	if !stringSliceContains(rulesPayload.ClientOperations, "business.event") {
 		t.Fatalf("room rules should expose business event WSS/RPC contract: %+v", rulesPayload)
 	}
@@ -606,6 +612,12 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.chat") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.announcement") || !stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers") || stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers.register") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
+	}
+	if !stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.allocation") || !stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket") || stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.result.submit") || stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket.consume") {
+		t.Fatalf("business event should document split client RPC/WSS operations without service callbacks: %+v", eventPayload)
+	}
+	if !stringSliceContains(eventPayload.AllowedClientRPCOperations, "activity.claim") || stringSliceContains(eventPayload.AllowedClientWSSOperations, "activity.claim") {
+		t.Fatalf("business event should keep RPC-only activity claim out of WSS contract: %+v", eventPayload)
 	}
 	if !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business event should document low-frequency notification kinds only: %+v", eventPayload)

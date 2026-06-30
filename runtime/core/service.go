@@ -1143,6 +1143,8 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"chacha20_poly1305",
 		},
 		ClientOperations:      ContractClientOperations(),
+		ClientRPCOperations:   ContractClientRPCOperations(),
+		ClientWSSOperations:   ContractClientWSSOperations(),
 		ServiceCallbacks:      ServiceCallbackOperations(),
 		BusinessNotifications: businessNotificationKinds(),
 		ClientAuthority: []string{
@@ -2422,6 +2424,8 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 		UserID:                         user.UserID,
 		AllowedClientOperations:        businessEventClientOperations(),
+		AllowedClientRPCOperations:     businessEventClientRPCOperations(),
+		AllowedClientWSSOperations:     businessEventClientWSSOperations(),
 		ServiceCallbacks:               ServiceCallbackOperations(),
 		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEnvelopeRequired:       true,
@@ -5951,6 +5955,14 @@ func businessEventClientOperations() []string {
 	return ContractClientOperations()
 }
 
+func businessEventClientRPCOperations() []string {
+	return ContractClientRPCOperations()
+}
+
+func businessEventClientWSSOperations() []string {
+	return ContractClientWSSOperations()
+}
+
 func businessNotificationKinds() []string {
 	return []string{
 		"presence",
@@ -6030,6 +6042,7 @@ func contractClientOperations() []string {
 		"match.ready",
 		"match.disconnect",
 		"match.reconnect",
+		"activity.claim",
 		"battle.servers",
 		"battle.allocation",
 		"battle.ticket",
@@ -6039,6 +6052,48 @@ func contractClientOperations() []string {
 
 func ContractClientOperations() []string {
 	return contractClientOperations()
+}
+
+func contractClientRPCOperations() []string {
+	return contractClientOperations()
+}
+
+func ContractClientRPCOperations() []string {
+	return contractClientRPCOperations()
+}
+
+func contractClientWSSOperations() []string {
+	return []string{
+		"presence.heartbeat",
+		"matchmaking.join",
+		"matchmaking.ticket",
+		"matchmaking.cancel",
+		"rooms.create",
+		"rooms.list",
+		"rooms.get",
+		"rooms.rules",
+		"rooms.join",
+		"rooms.leave",
+		"rooms.message",
+		"rooms.chat",
+		"rooms.announcement",
+		"business.event",
+		"business.event.settlement",
+		"match.ready",
+		"match.disconnect",
+		"match.reconnect",
+		"battle.servers",
+		"battle.allocation",
+		"battle.ticket",
+		"replay.get",
+		"business.envelope.audit.status",
+		"battle.audit.status",
+		"lobby.audit.status",
+	}
+}
+
+func ContractClientWSSOperations() []string {
+	return contractClientWSSOperations()
 }
 
 func serviceCallbackOperations() []string {
