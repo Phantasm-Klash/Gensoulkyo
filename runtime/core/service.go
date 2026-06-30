@@ -1481,9 +1481,7 @@ func (s *Service) BusinessEvent(sessionToken string, req BusinessEventRequest) (
 	if kind == "" {
 		kind = "presence"
 	}
-	switch kind {
-	case "presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket", "settlement":
-	default:
+	if !isBusinessNotificationKind(kind) {
 		return nil, newError(codeInvalidRequest, "business event kind %q is not supported", kind)
 	}
 	event, err := s.businessEventLocked(user, kind, req)
@@ -5788,6 +5786,15 @@ func businessNotificationKinds() []string {
 		"battle.ticket",
 		"settlement",
 	}
+}
+
+func isBusinessNotificationKind(kind string) bool {
+	for _, allowed := range businessNotificationKinds() {
+		if kind == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func contractClientOperations() []string {

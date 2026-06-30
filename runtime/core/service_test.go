@@ -2348,6 +2348,30 @@ func TestRoomCodeFlowCreatesMatchAndRejectsLateJoin(t *testing.T) {
 	}
 }
 
+func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
+	service := NewService(Config{})
+	user := mustLogin(t, service, "Business Notifications")
+
+	presence, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{})
+	if err != nil {
+		t.Fatalf("default presence business event: %v", err)
+	}
+	if !presence.OK || presence.Kind != "presence" || presence.Topic != "nakama_wss.business.presence" {
+		t.Fatalf("presence business event invalid: %+v", presence)
+	}
+	for _, expected := range []string{"presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket", "settlement"} {
+		if !stringSliceContains(presence.BusinessNotifications, expected) {
+			t.Fatalf("business event notification contract missing %q: %+v", expected, presence.BusinessNotifications)
+		}
+	}
+	if stringSliceContains(presence.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("business notifications must not expose service-origin result submit: %+v", presence.BusinessNotifications)
+	}
+	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "battle.result.submit"}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("service-origin result submit must not be accepted as a business event kind, got %v", err)
+	}
+}
+
 func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	service := NewService(Config{})
 	host := mustLogin(t, service, "Lobby Host")
