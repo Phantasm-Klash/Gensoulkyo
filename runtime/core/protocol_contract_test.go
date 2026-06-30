@@ -161,6 +161,11 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	if !stringSliceContains(clientRPCOps, "activity.claim") || stringSliceContains(clientWSSOps, "activity.claim") {
 		t.Fatalf("client RPC/WSS operation contracts should reflect handler transport support: rpc=%+v wss=%+v", clientRPCOps, clientWSSOps)
 	}
+	for _, diagnostic := range []string{"business.envelope.audit.status", "battle.audit.status", "lobby.audit.status"} {
+		if !stringSliceContains(clientOps, diagnostic) || !stringSliceContains(clientRPCOps, diagnostic) || !stringSliceContains(clientWSSOps, diagnostic) {
+			t.Fatalf("client RPC/WSS operation contracts should expose authenticated audit diagnostics %q: client=%+v rpc=%+v wss=%+v", diagnostic, clientOps, clientRPCOps, clientWSSOps)
+		}
+	}
 	for _, serviceOnly := range []string{"battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline"} {
 		if stringSliceContains(clientOps, serviceOnly) || stringSliceContains(clientRPCOps, serviceOnly) || stringSliceContains(clientWSSOps, serviceOnly) {
 			t.Fatalf("client operation contract must not expose service-only battle server callback %q: client=%+v rpc=%+v wss=%+v", serviceOnly, clientOps, clientRPCOps, clientWSSOps)
