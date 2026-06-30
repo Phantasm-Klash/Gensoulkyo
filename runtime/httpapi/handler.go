@@ -10,6 +10,12 @@ import (
 	"gensoulkyo/runtime/security"
 )
 
+const (
+	headerServiceOrigin  = "X-PhK-Service-Origin"
+	headerBattleCallback = "X-PhK-Battle-Callback"
+	serviceOriginBattle  = "battle_server"
+)
+
 type Handler struct {
 	service       *core.Service
 	envelopeGuard *security.BusinessEnvelopeGuard
@@ -630,6 +636,9 @@ func (h *Handler) registerBattleServer(w http.ResponseWriter, r *http.Request) {
 	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
+	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
 	resp, err := h.service.RegisterBattleServer(req)
 	if err != nil {
 		writeError(w, err)
@@ -647,6 +656,9 @@ func (h *Handler) battleServerHeartbeat(w http.ResponseWriter, r *http.Request) 
 	}
 	var req core.BattleServerHeartbeatRequest
 	if !decodeServiceJSON(w, r, &req) {
+		return
+	}
+	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
 		return
 	}
 	resp, err := h.service.BattleServerHeartbeat(req)
@@ -668,6 +680,9 @@ func (h *Handler) battleServerOffline(w http.ResponseWriter, r *http.Request) {
 	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
+	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
 	resp, err := h.service.BattleServerOffline(req)
 	if err != nil {
 		writeError(w, err)
@@ -687,6 +702,9 @@ func (h *Handler) consumeBattleTicket(w http.ResponseWriter, r *http.Request) {
 	if !decodeServiceJSON(w, r, &req) {
 		return
 	}
+	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
 	resp, err := h.service.ConsumeBattleTicket(req)
 	if err != nil {
 		writeError(w, err)
@@ -704,6 +722,9 @@ func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
 	}
 	var req core.BattleResultSubmitRequest
 	if !decodeServiceJSON(w, r, &req) {
+		return
+	}
+	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
 		return
 	}
 	resp, err := h.service.SubmitBattleResult(req)
@@ -871,6 +892,27 @@ func rejectBusinessEnvelopeHeadersForServiceRoute(w http.ResponseWriter, r *http
 		"message":    "service-origin callback must not include business envelope headers",
 	})
 	return true
+}
+
+func rejectMissingServiceOriginHeadersForServiceRoute(w http.ResponseWriter, r *http.Request) bool {
+	if strings.ToLower(strings.TrimSpace(r.Header.Get(headerServiceOrigin))) == serviceOriginBattle && truthyHeader(r.Header.Get(headerBattleCallback)) {
+		return false
+	}
+	writeJSON(w, http.StatusForbidden, map[string]any{
+		"ok":         false,
+		"error_code": "service_origin_required",
+		"message":    "service-origin callback requires development battle callback headers",
+	})
+	return true
+}
+
+func truthyHeader(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func servicePayloadHasBusinessEnvelope(payload map[string]any) bool {
