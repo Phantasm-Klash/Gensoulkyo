@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	phkv1 "github.com/phantasm-klash/phk-protocol/gen/go/phk/v1"
 )
@@ -296,10 +297,38 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("service callback accepted values missing %q: %+v", expected, acceptedCallbackValues)
 		}
 	}
+	seenAcceptedCallbackValues := map[string]bool{}
 	for _, value := range acceptedCallbackValues {
-		if strings.TrimSpace(value) == "" {
-			t.Fatalf("service callback accepted values must not expose blanks: %+v", acceptedCallbackValues)
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if value != normalized || normalized == "" {
+			t.Fatalf("service callback accepted values must be non-blank normalized tokens: %+v", acceptedCallbackValues)
 		}
+		if normalized == ServiceCallbackDisallowedValue || normalized == callbackContext[ServiceCallbackBusinessEnvelopeAllowedKey] || normalized == callbackContext[ServiceCallbackPlayerSessionContextKey] {
+			t.Fatalf("service callback accepted values must not include disallowed/player/envelope tokens: %+v context=%+v", acceptedCallbackValues, callbackContext)
+		}
+		if seenAcceptedCallbackValues[normalized] {
+			t.Fatalf("service callback accepted values must be unique after normalization: %+v", acceptedCallbackValues)
+		}
+		seenAcceptedCallbackValues[normalized] = true
+	}
+	for _, rejected := range []string{"", "false", "0", "no", ServiceCallbackOriginBattleServer, ServiceCallbackRuntimeModeRPC} {
+		if seenAcceptedCallbackValues[strings.ToLower(strings.TrimSpace(rejected))] {
+			t.Fatalf("service callback accepted values must not trust rejected token %q: %+v", rejected, acceptedCallbackValues)
+		}
+	}
+	for _, value := range []string{callbackContext[ServiceCallbackRuntimeModeKey], callbackContext[ServiceCallbackOriginKey], callbackContext[ServiceCallbackFlagKey]} {
+		if value != strings.ToLower(strings.TrimSpace(value)) {
+			t.Fatalf("service callback context values must stay normalized for HTTP/Nakama gates: %+v", callbackContext)
+		}
+	}
+	for _, disallowedKey := range []string{ServiceCallbackBusinessEnvelopeAllowedKey, ServiceCallbackPlayerSessionContextKey} {
+		if callbackContext[disallowedKey] != ServiceCallbackDisallowedValue {
+			t.Fatalf("service callback context must keep %q disallowed: %+v", disallowedKey, callbackContext)
+		}
+	}
+	contract := businessContractSnapshot(time.Unix(1782800000, 0))
+	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult {
+		t.Fatalf("business contract must publish service-signed settlement authority, got %+v", contract)
 	}
 	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
 		if !stringSliceContains(ops, "battle.servers") {

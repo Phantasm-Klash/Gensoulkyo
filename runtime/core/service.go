@@ -58,6 +58,8 @@ const (
 	worldBossDailyLimit  = 3
 )
 
+const settlementAuthorityServiceSignedBattleResult = "service_signed_battle_result_callback"
+
 var forbiddenClientFields = map[string]struct{}{
 	"score":                  {},
 	"graze":                  {},
@@ -1142,6 +1144,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		DisallowedClientOperations:     contract.DisallowedClientOperations,
 		ServiceCallbacks:               contract.ServiceCallbacks,
 		ServiceCallbackContext:         contract.ServiceCallbackContext,
+		SettlementAuthority:            contract.SettlementAuthority,
 		BusinessNotifications:          contract.BusinessNotifications,
 		BusinessNotificationTopics:     contract.BusinessNotificationTopics,
 		ClientAuthority:                contract.ClientAuthority,
@@ -2442,6 +2445,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		DisallowedClientOperations:     ContractDisallowedClientOperations(),
 		ServiceCallbacks:               ServiceCallbackOperations(),
 		ServiceCallbackContext:         ServiceCallbackContext(),
+		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
 		BusinessNotifications:          businessNotificationKinds(),
 		BusinessNotificationTopics:     businessNotificationTopics(),
 		BusinessEnvelopeRequired:       true,
@@ -6069,6 +6073,7 @@ func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 		DisallowedClientOperations: ContractDisallowedClientOperations(),
 		ServiceCallbacks:           ServiceCallbackOperations(),
 		ServiceCallbackContext:     ServiceCallbackContext(),
+		SettlementAuthority:        settlementAuthorityServiceSignedBattleResult,
 		BusinessNotifications:      businessNotificationKinds(),
 		BusinessNotificationTopics: businessNotificationTopics(),
 		ClientAuthority: []string{

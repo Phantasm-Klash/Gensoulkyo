@@ -784,6 +784,7 @@ type BusinessContractSnapshot struct {
 	DisallowedClientOperations     []string                    `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
+	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
 	ClientAuthority                []string                    `json:"client_authority"`
@@ -812,6 +813,7 @@ type RoomRulesSnapshot struct {
 	DisallowedClientOperations     []string                    `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
+	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
 	ClientAuthority                []string                    `json:"client_authority"`
@@ -922,6 +924,7 @@ type BusinessEvent struct {
 	DisallowedClientOperations     []string                    `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
+	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
 	BusinessEnvelopeRequired       bool                        `json:"business_envelope_required"`
