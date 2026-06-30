@@ -8,7 +8,6 @@ import (
 
 	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/httpapi"
-	"gensoulkyo/runtime/security"
 	"gensoulkyo/runtime/storage"
 )
 
@@ -43,11 +42,12 @@ func main() {
 	service := core.NewService(core.Config{})
 	handler := httpapi.New(service)
 	if db != nil {
-		auditSink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
+		wired, err := httpapi.NewWithDatabase(db)
 		if err != nil {
 			log.Fatal(err)
 		}
-		handler = httpapi.NewWithOptions(service, httpapi.WithBusinessEnvelopeGuard(security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(auditSink))))
+		service = wired.Service
+		handler = wired.Handler
 	}
 	server := &http.Server{
 		Addr:              *addr,
