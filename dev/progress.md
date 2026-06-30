@@ -248,3 +248,10 @@ Status date: 2026-06-28
 - Tightened match entry version validation so an omitted `client_version` remains a development fallback, but any supplied version stamp must include matching protocol, business API, battle API, and ruleset versions before queue or room entry.
 - Added core, HTTP fallback, and SDK-neutral Nakama regressions proving partial version stamps are rejected for matchmaking and room joins while complete current stamps still pass.
 - Verified `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
+
+## 2026-06-30 gensoulkyo-lobby Nakama callback context fail-closed update
+
+- Hardened the build-tagged Nakama service-origin RPC gate so missing or empty canonical callback context values from `core.ServiceCallbackContext()` fail closed before battle server lifecycle, ticket-consume, or result-submit callbacks can reach core dispatch.
+- Kept the gate tied to explicit Nakama `rpc` mode, no player session/user context, allowlisted callback names, and `gensoulkyo_service_origin=battle_server` plus accepted callback markers; this does not create any high-frequency tick or client settlement authority path.
+- Dispositioned the legacy checkout dirty set in `/root/gotouhou/Gensoulkyo`: those four Nakama callback-gate edits were valuable but already superseded by the current managed branch implementation and this narrower hardening.
+- Verified `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
