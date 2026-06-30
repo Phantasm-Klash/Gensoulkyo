@@ -2043,7 +2043,10 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 	if ticket.BattleServerID != battleServerID {
 		return nil, newError(codeBattleServer, "battle ticket server mismatch")
 	}
-	if req.ModeConfigHash != "" && strings.TrimSpace(req.ModeConfigHash) != ticket.ModeConfigHash {
+	if ticket.ModeConfigHash != "" && strings.TrimSpace(req.ModeConfigHash) == "" {
+		return nil, newError(codeInvalidRequest, "battle ticket mode config hash is required")
+	}
+	if strings.TrimSpace(req.ModeConfigHash) != ticket.ModeConfigHash {
 		return nil, newError(codeInvalidRequest, "battle ticket mode config mismatch")
 	}
 	if ticket.TicketNonceHex != nonce {
