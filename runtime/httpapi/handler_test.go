@@ -206,6 +206,12 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if settlementEvent.Topic != "nakama_wss.business.settlement" || settlementEvent.Settlement == nil || settlementEvent.Settlement.ReplayID != settlement.ReplayID || settlementEvent.ClientResultSubmitAllowed || settlementEvent.HighFrequencyBattleTickAllowed {
 		t.Fatalf("settlement business event invalid: %+v", settlementEvent)
 	}
+	if !settlementEvent.BusinessEnvelopeRequired || !stringSliceContains(settlementEvent.ForbiddenFields, "final_result") || !stringSliceContains(settlementEvent.ForbiddenFields, "settlement_key") {
+		t.Fatalf("settlement business event should expose security contract: %+v", settlementEvent)
+	}
+	if settlementEvent.Version.ProtocolVersion != core.ProtocolVersion || settlementEvent.Version.RulesetVersion != core.RulesetVersion || settlementEvent.Version.BusinessAPIVersion != core.BusinessAPIVersion || settlementEvent.Version.BattleAPIVersion != core.BattleAPIVersion {
+		t.Fatalf("settlement business event missing version stamp: %+v", settlementEvent.Version)
+	}
 	forbiddenSettlementEvent := postRaw(t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
 		"kind":        "settlement",
 		"match_id":    queueBob.MatchID,
@@ -597,6 +603,9 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	if !consume.OK || !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
 		t.Fatalf("battle ticket consume invalid: %+v", consume)
 	}
+	if consume.IssuedAtMS != ticket.Ticket.IssuedAtMS || consume.ExpiresAtMS != ticket.Ticket.ExpiresAtMS || consume.ConsumedAtMS == 0 {
+		t.Fatalf("battle ticket consume should echo ticket lifecycle timestamps: ticket=%+v consume=%+v", ticket.Ticket, consume)
+	}
 	duplicateConsume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
@@ -605,6 +614,9 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	})
 	if !duplicateConsume.OK || !duplicateConsume.Consumed || !duplicateConsume.Duplicate || !duplicateConsume.ServerAuthoritative {
 		t.Fatalf("duplicate battle ticket consume invalid: %+v", duplicateConsume)
+	}
+	if duplicateConsume.ConsumedAtMS != consume.ConsumedAtMS || duplicateConsume.ExpiresAtMS != consume.ExpiresAtMS {
+		t.Fatalf("duplicate consume should preserve first consume lifecycle timestamps: first=%+v duplicate=%+v", consume, duplicateConsume)
 	}
 	badConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
 		"ticket_id":        ticket.Ticket.TicketID,

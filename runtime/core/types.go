@@ -367,6 +367,12 @@ type BattleTicketConsumeResponse struct {
 	UserID              string       `json:"user_id"`
 	PlayerID            string       `json:"player_id"`
 	BattleServerID      string       `json:"battle_server_id"`
+	IssuedAt            time.Time    `json:"issued_at"`
+	ExpiresAt           time.Time    `json:"expires_at"`
+	ConsumedAt          time.Time    `json:"consumed_at"`
+	IssuedAtMS          int64        `json:"issued_at_ms"`
+	ExpiresAtMS         int64        `json:"expires_at_ms"`
+	ConsumedAtMS        int64        `json:"consumed_at_ms"`
 	Consumed            bool         `json:"consumed"`
 	Duplicate           bool         `json:"duplicate"`
 	ServerAuthoritative bool         `json:"server_authoritative"`
@@ -826,6 +832,7 @@ type BusinessEventRequest struct {
 
 type BusinessEvent struct {
 	OK                             bool                    `json:"ok"`
+	Version                        VersionStamp            `json:"version"`
 	Kind                           string                  `json:"kind"`
 	Topic                          string                  `json:"topic"`
 	UserID                         string                  `json:"user_id"`
@@ -847,6 +854,8 @@ type BusinessEvent struct {
 	Settlement                     *MatchEndEvent          `json:"settlement,omitempty"`
 	AllowedClientOperations        []string                `json:"allowed_client_operations"`
 	ServiceCallbacks               []string                `json:"service_callbacks"`
+	BusinessEnvelopeRequired       bool                    `json:"business_envelope_required"`
+	ForbiddenFields                []string                `json:"forbidden_fields"`
 	HighFrequencyBattleTickAllowed bool                    `json:"high_frequency_battle_tick_allowed"`
 	ClientResultSubmitAllowed      bool                    `json:"client_result_submit_allowed"`
 	ServerTime                     time.Time               `json:"server_time"`

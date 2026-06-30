@@ -1125,11 +1125,6 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 	now := s.clock()
 	snapshot := s.roomSnapshotLocked(room, now)
 	mode := ModeConfigs[room.ModeID]
-	forbiddenFields := make([]string, 0, len(forbiddenClientFields))
-	for field := range forbiddenClientFields {
-		forbiddenFields = append(forbiddenFields, field)
-	}
-	sort.Strings(forbiddenFields)
 	rules := &RoomRulesSnapshot{
 		OK:              true,
 		Version:         currentVersionStamp(),
@@ -1147,33 +1142,8 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"protobuf",
 			"chacha20_poly1305",
 		},
-		ClientOperations: []string{
-			"rooms.create",
-			"rooms.list",
-			"rooms.get",
-			"rooms.rules",
-			"rooms.join",
-			"rooms.leave",
-			"rooms.message",
-			"business.event",
-			"business.event.settlement",
-			"matchmaking.ticket",
-			"matchmaking.cancel",
-			"match.ready",
-			"match.disconnect",
-			"match.reconnect",
-			"presence.heartbeat",
-			"battle.allocation",
-			"battle.ticket",
-			"replay.get",
-		},
-		ServiceCallbacks: []string{
-			"battle.servers.register",
-			"battle.servers.heartbeat",
-			"battle.servers.offline",
-			"battle.ticket.consume",
-			"battle.result.submit",
-		},
+		ClientOperations: contractClientOperations(),
+		ServiceCallbacks: serviceCallbackOperations(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -1192,7 +1162,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"damage",
 			"reward",
 		},
-		ForbiddenFields:     forbiddenFields,
+		ForbiddenFields:     sortedForbiddenClientFields(),
 		BusinessEnvelope:    true,
 		ClientResultSubmit:  false,
 		ServerTime:          now,
@@ -2088,6 +2058,12 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 			UserID:              ticket.UserID,
 			PlayerID:            ticket.PlayerID,
 			BattleServerID:      ticket.BattleServerID,
+			IssuedAt:            ticket.IssuedAt,
+			ExpiresAt:           ticket.ExpiresAt,
+			ConsumedAt:          consumedAt,
+			IssuedAtMS:          ticket.IssuedAtMS,
+			ExpiresAtMS:         ticket.ExpiresAtMS,
+			ConsumedAtMS:        consumedAt.UnixMilli(),
 			Consumed:            true,
 			Duplicate:           true,
 			ServerAuthoritative: true,
@@ -2104,6 +2080,12 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 		UserID:              ticket.UserID,
 		PlayerID:            ticket.PlayerID,
 		BattleServerID:      ticket.BattleServerID,
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ConsumedAt:          now,
+		IssuedAtMS:          ticket.IssuedAtMS,
+		ExpiresAtMS:         ticket.ExpiresAtMS,
+		ConsumedAtMS:        now.UnixMilli(),
 		Consumed:            true,
 		Duplicate:           false,
 		ServerAuthoritative: true,
@@ -2421,11 +2403,14 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 	now := s.clock()
 	event := &BusinessEvent{
 		OK:                             true,
+		Version:                        currentVersionStamp(),
 		Kind:                           kind,
 		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 		UserID:                         user.UserID,
 		AllowedClientOperations:        businessEventClientOperations(),
 		ServiceCallbacks:               serviceCallbackOperations(),
+		BusinessEnvelopeRequired:       true,
+		ForbiddenFields:                sortedForbiddenClientFields(),
 		HighFrequencyBattleTickAllowed: false,
 		ClientResultSubmitAllowed:      false,
 		ServerTime:                     now,
@@ -5757,10 +5742,17 @@ func cloneQueueResponse(source *QueueResponse) *QueueResponse {
 }
 
 func businessEventClientOperations() []string {
+	return contractClientOperations()
+}
+
+func contractClientOperations() []string {
 	return []string{
 		"presence.heartbeat",
+		"matchmaking.join",
 		"matchmaking.ticket",
 		"matchmaking.cancel",
+		"rooms.create",
+		"rooms.list",
 		"rooms.get",
 		"rooms.rules",
 		"rooms.join",
@@ -5773,6 +5765,7 @@ func businessEventClientOperations() []string {
 		"match.reconnect",
 		"battle.allocation",
 		"battle.ticket",
+		"replay.get",
 	}
 }
 
@@ -5784,6 +5777,15 @@ func serviceCallbackOperations() []string {
 		"battle.ticket.consume",
 		"battle.result.submit",
 	}
+}
+
+func sortedForbiddenClientFields() []string {
+	fields := make([]string, 0, len(forbiddenClientFields))
+	for field := range forbiddenClientFields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
 }
 
 func copyDeckRecord(source DeckRecord) DeckRecord {

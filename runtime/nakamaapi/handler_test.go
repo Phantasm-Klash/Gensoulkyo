@@ -575,8 +575,14 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if eventPayload.Topic != "nakama_wss.business.matchmaking" || eventPayload.MatchID != found.MatchID || eventPayload.QueueStatus != "found" || eventPayload.BattleAllocation == nil || eventPayload.BattleTicket == nil {
 		t.Fatalf("business event should include low-frequency matchmaking allocation/ticket state: %+v", eventPayload)
 	}
+	if eventPayload.Version.ProtocolVersion != core.ProtocolVersion || eventPayload.Version.RulesetVersion != core.RulesetVersion || eventPayload.Version.BusinessAPIVersion != core.BusinessAPIVersion || eventPayload.Version.BattleAPIVersion != core.BattleAPIVersion {
+		t.Fatalf("business event should include shared protocol version stamp: %+v", eventPayload.Version)
+	}
 	if eventPayload.HighFrequencyBattleTickAllowed || eventPayload.ClientResultSubmitAllowed || stringSliceContains(eventPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("business event must not authorize high-frequency tick or client result submit: %+v", eventPayload)
+	}
+	if !eventPayload.BusinessEnvelopeRequired || !stringSliceContains(eventPayload.ForbiddenFields, "damage") || !stringSliceContains(eventPayload.ForbiddenFields, "settlement_key") {
+		t.Fatalf("business event should expose envelope and forbidden-field contract: %+v", eventPayload)
 	}
 	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
@@ -1469,6 +1475,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || receipt.Duplicate || receipt.TicketID != allocation.Ticket.TicketID || !receipt.ServerAuthoritative {
 		t.Fatalf("ticket consume receipt should be accepted and authoritative: %+v", receipt)
 	}
+	if receipt := consumedTicket.Payload.(*core.BattleTicketConsumeResponse); receipt.IssuedAtMS != allocation.Ticket.IssuedAtMS || receipt.ExpiresAtMS != allocation.Ticket.ExpiresAtMS || receipt.ConsumedAtMS == 0 {
+		t.Fatalf("ticket consume receipt should expose ticket lifecycle timestamps: ticket=%+v receipt=%+v", allocation.Ticket, receipt)
+	}
 	duplicateConsumedTicket := handler.HandleRPC(RPCRequest{
 		ID:      "battle.ticket.consume",
 		Service: true,
@@ -1484,6 +1493,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	if receipt := duplicateConsumedTicket.Payload.(*core.BattleTicketConsumeResponse); !receipt.Consumed || !receipt.Duplicate || !receipt.ServerAuthoritative {
 		t.Fatalf("duplicate ticket consume receipt should be idempotent and authoritative: %+v", receipt)
+	}
+	if first, duplicate := consumedTicket.Payload.(*core.BattleTicketConsumeResponse), duplicateConsumedTicket.Payload.(*core.BattleTicketConsumeResponse); duplicate.ConsumedAtMS != first.ConsumedAtMS || duplicate.ExpiresAtMS != first.ExpiresAtMS {
+		t.Fatalf("duplicate ticket consume should preserve original lifecycle timestamps: first=%+v duplicate=%+v", first, duplicate)
 	}
 	playerIDs := []string{}
 	for _, player := range match.BattleAllocation.Players {
@@ -1575,6 +1587,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	if settlementPayload.HighFrequencyBattleTickAllowed || settlementPayload.ClientResultSubmitAllowed || stringSliceContains(settlementPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("settlement business event must not authorize battle tick or client result submit: %+v", settlementPayload)
+	}
+	if !settlementPayload.BusinessEnvelopeRequired || !stringSliceContains(settlementPayload.ForbiddenFields, "final_result") {
+		t.Fatalf("settlement business event should retain business security contract: %+v", settlementPayload)
 	}
 	clientAuthoredSettlement := handler.HandleWSSMessage(WSSMessage{
 		Name:      "business.event",

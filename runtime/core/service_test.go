@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -998,6 +999,9 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	if !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
 		t.Fatalf("consume response invalid: %+v", consume)
 	}
+	if consume.IssuedAt != ticket.Ticket.IssuedAt || consume.ExpiresAt != ticket.Ticket.ExpiresAt || consume.ConsumedAt != now || consume.IssuedAtMS != ticket.Ticket.IssuedAtMS || consume.ExpiresAtMS != ticket.Ticket.ExpiresAtMS || consume.ConsumedAtMS != now.UnixMilli() {
+		t.Fatalf("consume response should expose ticket lifecycle times: ticket=%+v consume=%+v", ticket.Ticket, consume)
+	}
 	if len(repo.tickets) < 2 || repo.tickets[len(repo.tickets)-1].Status != "consumed" || repo.tickets[len(repo.tickets)-1].ConsumedAt != now {
 		t.Fatalf("consumed ticket audit missing: %+v", repo.tickets)
 	}
@@ -1013,6 +1017,9 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	}
 	if !duplicate.Consumed || !duplicate.Duplicate || duplicate.ServerTime != now {
 		t.Fatalf("duplicate consume response invalid: %+v", duplicate)
+	}
+	if duplicate.ConsumedAt != consume.ConsumedAt || duplicate.ConsumedAtMS != consume.ConsumedAtMS || duplicate.ExpiresAt != ticket.Ticket.ExpiresAt {
+		t.Fatalf("duplicate consume should return original lifecycle times: first=%+v duplicate=%+v", consume, duplicate)
 	}
 	if len(repo.tickets) != afterConsumeAuditCount {
 		t.Fatalf("duplicate consume should not write another ticket audit: %+v", repo.tickets)
@@ -2404,6 +2411,25 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !stringSliceContains(rules.ForbiddenFields, "damage") || !stringSliceContains(rules.ServerAuthority, "state_snapshot") || !stringSliceContains(rules.ClientAuthority, "input_packet") {
 		t.Fatalf("room authority fields missing: %+v", rules)
+	}
+	event, err := service.BusinessEvent(host.SessionToken, BusinessEventRequest{
+		Kind:     "room",
+		RoomCode: created.RoomCode,
+	})
+	if err != nil {
+		t.Fatalf("room business event: %v", err)
+	}
+	if !reflect.DeepEqual(event.AllowedClientOperations, rules.ClientOperations) || !reflect.DeepEqual(event.ServiceCallbacks, rules.ServiceCallbacks) {
+		t.Fatalf("room rules and business event contract drifted: rules=%+v callbacks=%+v event=%+v callbacks=%+v", rules.ClientOperations, rules.ServiceCallbacks, event.AllowedClientOperations, event.ServiceCallbacks)
+	}
+	if !event.BusinessEnvelopeRequired || !reflect.DeepEqual(event.ForbiddenFields, rules.ForbiddenFields) {
+		t.Fatalf("room business event should expose the same security contract as room rules: rules=%+v event=%+v", rules.ForbiddenFields, event.ForbiddenFields)
+	}
+	if event.Version.ProtocolVersion != ProtocolVersion || event.Version.RulesetVersion != RulesetVersion || event.Version.BusinessAPIVersion != BusinessAPIVersion || event.Version.BattleAPIVersion != BattleAPIVersion {
+		t.Fatalf("room business event must expose protocol version stamp: %+v", event.Version)
+	}
+	if event.HighFrequencyBattleTickAllowed || event.ClientResultSubmitAllowed || stringSliceContains(event.AllowedClientOperations, "battle.result.submit") {
+		t.Fatalf("room business event must not authorize battle tick or client result submit: %+v", event)
 	}
 
 	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
