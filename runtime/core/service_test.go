@@ -2497,13 +2497,32 @@ func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
 	if !presence.OK || presence.Kind != "presence" || presence.Topic != "nakama_wss.business.presence" {
 		t.Fatalf("presence business event invalid: %+v", presence)
 	}
-	for _, expected := range []string{"presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket", "settlement"} {
+	for _, expected := range []string{"presence", "queue", "room", "matchmaking", "match.ready", "activity", "battle.allocation", "battle.ticket", "settlement"} {
 		if !stringSliceContains(presence.BusinessNotifications, expected) {
 			t.Fatalf("business event notification contract missing %q: %+v", expected, presence.BusinessNotifications)
 		}
 	}
 	if stringSliceContains(presence.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business notifications must not expose service-origin result submit: %+v", presence.BusinessNotifications)
+	}
+	activity, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "activity"})
+	if err != nil {
+		t.Fatalf("activity business event: %v", err)
+	}
+	if activity.Activity == nil || !activity.Activity.OK || !activity.Activity.ServerAuthoritative || activity.Activity.UserID != user.UserID {
+		t.Fatalf("activity business event should expose server-owned activity snapshot: %+v", activity)
+	}
+	if len(activity.Activity.Tasks) == 0 || len(activity.Activity.Events) == 0 || len(activity.Activity.Leaderboards) == 0 {
+		t.Fatalf("activity business event missing activity projections: %+v", activity.Activity)
+	}
+	if activity.Activity.ClaimableTasks != 0 || activity.Activity.ClaimableEvents != 0 || activity.Activity.ClaimableLeaderboards != 0 {
+		t.Fatalf("fresh activity snapshot should not mark rewards claimable: %+v", activity.Activity)
+	}
+	if !stringSliceContains(activity.BusinessNotifications, "activity") || !stringSliceContains(activity.AllowedClientRPCOperations, "activity.claim") || stringSliceContains(activity.AllowedClientWSSOperations, "activity.claim") {
+		t.Fatalf("activity notification must stay read-only on WSS and keep claim RPC-only: %+v", activity)
+	}
+	if activity.HighFrequencyBattleTickAllowed || activity.ClientResultSubmitAllowed || stringSliceContains(activity.AllowedClientOperations, "battle.result.submit") {
+		t.Fatalf("activity business event must not authorize battle tick or client result submit: %+v", activity)
 	}
 	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "battle.result.submit"}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("service-origin result submit must not be accepted as a business event kind, got %v", err)
@@ -2631,7 +2650,7 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if rules.ServiceCallbackContext["player_session_context_allowed"] != "false" || rules.ServiceCallbackContext["business_envelope_allowed"] != "false" {
 		t.Fatalf("room rules should keep service callbacks out of player/envelope paths: %+v", rules.ServiceCallbackContext)
 	}
-	if !stringSliceContains(rules.BusinessNotifications, "battle.allocation") || !stringSliceContains(rules.BusinessNotifications, "battle.ticket") || !stringSliceContains(rules.BusinessNotifications, "settlement") || stringSliceContains(rules.BusinessNotifications, "battle.result.submit") {
+	if !stringSliceContains(rules.BusinessNotifications, "activity") || !stringSliceContains(rules.BusinessNotifications, "battle.allocation") || !stringSliceContains(rules.BusinessNotifications, "battle.ticket") || !stringSliceContains(rules.BusinessNotifications, "settlement") || stringSliceContains(rules.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("room rules should publish low-frequency business WSS notifications only: %+v", rules)
 	}
 	if !stringSliceContains(rules.ForbiddenFields, "damage") || !stringSliceContains(rules.ServerAuthority, "state_snapshot") || !stringSliceContains(rules.ClientAuthority, "input_packet") {

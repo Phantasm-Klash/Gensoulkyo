@@ -867,6 +867,7 @@ type BusinessEvent struct {
 	BattleAllocation               *BattleServerAllocation `json:"battle_allocation,omitempty"`
 	BattleTicket                   *SignedBattleTicket     `json:"battle_ticket,omitempty"`
 	Settlement                     *MatchEndEvent          `json:"settlement,omitempty"`
+	Activity                       *ActivitySnapshot       `json:"activity,omitempty"`
 	AllowedClientOperations        []string                `json:"allowed_client_operations"`
 	AllowedClientRPCOperations     []string                `json:"allowed_client_rpc_operations"`
 	AllowedClientWSSOperations     []string                `json:"allowed_client_wss_operations"`
@@ -1170,6 +1171,18 @@ type LeaderboardRow struct {
 	Percentile    float64 `json:"percentile"`
 	SeasonID      string  `json:"season_id"`
 	RewardStatus  string  `json:"reward_status,omitempty"`
+}
+
+type ActivitySnapshot struct {
+	OK                    bool                      `json:"ok"`
+	UserID                string                    `json:"user_id"`
+	Tasks                 map[string]TaskState      `json:"tasks"`
+	Events                map[string]EventState     `json:"events"`
+	Leaderboards          map[string]LeaderboardRow `json:"leaderboards"`
+	ClaimableTasks        int                       `json:"claimable_tasks"`
+	ClaimableEvents       int                       `json:"claimable_events"`
+	ClaimableLeaderboards int                       `json:"claimable_leaderboards"`
+	ServerAuthoritative   bool                      `json:"server_authoritative"`
 }
 
 type ActivityClaimRequest struct {
