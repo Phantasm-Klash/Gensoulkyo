@@ -242,3 +242,9 @@ Status date: 2026-06-28
 - Added `high_frequency_battle_tick_allowed=false` to `RoomRulesSnapshot`, aligning the room/rules contract with `BusinessEvent` so clients can distinguish low-frequency Nakama HTTPS/WSS lobby notifications from C++ Battle Server KCP tick traffic.
 - Extended core, HTTP fallback, and SDK-neutral Nakama room-rule regressions so the contract keeps business envelope required, client result submission forbidden, and high-frequency battle ticks forbidden on the business channel.
 - Verified `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
+
+## 2026-06-30 gensoulkyo-lobby client version stamp update
+
+- Tightened match entry version validation so an omitted `client_version` remains a development fallback, but any supplied version stamp must include matching protocol, business API, battle API, and ruleset versions before queue or room entry.
+- Added core, HTTP fallback, and SDK-neutral Nakama regressions proving partial version stamps are rejected for matchmaking and room joins while complete current stamps still pass.
+- Verified `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.

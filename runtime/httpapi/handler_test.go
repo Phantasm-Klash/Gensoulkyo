@@ -793,6 +793,15 @@ func TestHTTPMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
 	if rejected.Code != http.StatusBadRequest || rejected.ErrorCode != "mode_invalid" {
 		t.Fatalf("expected protocol mismatch rejection, got %+v", rejected)
 	}
+	partialVersion := postRaw(t, server.URL+"/v1/matchmaking/join", alice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_version_a_deck",
+		"deck_snapshot":  validDeck("http_version_a_deck"),
+		"client_version": map[string]any{"protocol_version": core.ProtocolVersion},
+	})
+	if partialVersion.Code != http.StatusBadRequest || partialVersion.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected partial version rejection, got %+v", partialVersion)
+	}
 
 	host := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-version-host", "display_name": "HTTP Version Host"})
 	room := postJSON[core.QueueResponse](t, server.URL+"/v1/rooms/create", host.SessionToken, map[string]any{
