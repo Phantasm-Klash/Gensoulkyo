@@ -541,6 +541,10 @@ func TestHTTPServiceCallbacksRejectBusinessEnvelopePayloadShape(t *testing.T) {
 
 	for _, payload := range []map[string]any{
 		{
+			"version":       security.BusinessEnvelopeVersion,
+			"signed_result": map[string]any{"match_id": "direct-version-client-shaped"},
+		},
+		{
 			"seq":           1,
 			"timestamp_ms":  time.Now().UnixMilli(),
 			"nonce":         "http-service-direct-envelope",
@@ -580,6 +584,12 @@ func TestHTTPServiceCallbacksRejectBusinessEnvelopePayloadShape(t *testing.T) {
 			"data": map[string]any{
 				"envelope_version": "business-v0-scaffold",
 				"signed_result":    map[string]any{"match_id": "nested-envelope-version-client-shaped"},
+			},
+		},
+		{
+			"body": map[string]any{
+				"version":       security.BusinessEnvelopeVersion,
+				"signed_result": map[string]any{"match_id": "nested-version-client-shaped"},
 			},
 		},
 	} {
