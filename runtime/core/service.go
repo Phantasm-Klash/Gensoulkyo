@@ -2554,6 +2554,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && event.Settlement == nil && kind != "presence" {
 		return nil, newError(codeInvalidRequest, "business event requires ticket_id, room_code, or match_id")
 	}
+	s.recordBusinessEventLobbyAuditLocked(kind, user.UserID, ticket, event, match, now)
 	return event, nil
 }
 
@@ -3502,6 +3503,55 @@ func (s *Service) recordLobbyConnectionAuditLocked(match *matchState, userID str
 	record.MatchID = match.MatchID
 	record.CurrentPlayers = connectedPlayerCountLocked(match)
 	record.RequiredPlayers = len(match.PlayerIDs)
+	s.recordLobbyRoomAuditRecordLocked(record)
+}
+
+func (s *Service) recordBusinessEventLobbyAuditLocked(kind string, userID string, ticket *queueTicket, event *BusinessEvent, match *matchState, occurredAt time.Time) {
+	if s.lobbyAuditRepo == nil || userID == "" || event == nil {
+		return
+	}
+	action := "ticket_read"
+	switch kind {
+	case "room":
+		action = "snapshot_read"
+	case "queue", "matchmaking", "match.ready", "battle.allocation", "battle.ticket":
+	default:
+		return
+	}
+	var room *roomState
+	if ticket != nil && ticket.RoomCode != "" {
+		room = s.rooms[normalizeRoomCode(ticket.RoomCode)]
+	}
+	if room == nil && event.Room != nil {
+		room = s.rooms[normalizeRoomCode(event.Room.RoomCode)]
+		if ticket == nil && room != nil {
+			ticket = s.roomTicketForUserLocked(room.RoomCode, userID)
+		}
+	}
+	if room == nil && ticket == nil {
+		return
+	}
+	record := s.lobbyRoomAuditRecordLocked(room, ticket, userID, action, occurredAt)
+	record.MatchID = firstNonEmptyCore(event.MatchID, record.MatchID)
+	record.RoomStatus = firstNonEmptyCore(event.RoomStatus, record.RoomStatus)
+	record.CurrentPlayers = event.CurrentPlayers
+	if record.CurrentPlayers == 0 {
+		if event.Room != nil {
+			record.CurrentPlayers = event.Room.CurrentPlayers
+		} else if match != nil {
+			record.CurrentPlayers = connectedPlayerCountLocked(match)
+		} else if ticket != nil {
+			record.CurrentPlayers = s.ticketDepthLocked(ticket)
+		}
+	}
+	record.RequiredPlayers = event.RequiredPlayers
+	if record.RequiredPlayers == 0 {
+		if event.Room != nil {
+			record.RequiredPlayers = event.Room.RequiredPlayers
+		} else if match != nil {
+			record.RequiredPlayers = len(match.PlayerIDs)
+		}
+	}
 	s.recordLobbyRoomAuditRecordLocked(record)
 }
 
