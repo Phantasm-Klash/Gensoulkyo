@@ -620,6 +620,9 @@ func (h *Handler) battleServers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) registerBattleServer(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
 	var req core.RegisterBattleServerRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -633,6 +636,9 @@ func (h *Handler) registerBattleServer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) battleServerHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
 	var req core.BattleServerHeartbeatRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -646,6 +652,9 @@ func (h *Handler) battleServerHeartbeat(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) battleServerOffline(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
 	var req core.BattleServerOfflineRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -659,6 +668,9 @@ func (h *Handler) battleServerOffline(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) consumeBattleTicket(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
 	var req core.BattleTicketConsumeRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -672,6 +684,9 @@ func (h *Handler) consumeBattleTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
 	var req core.BattleResultSubmitRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -769,6 +784,18 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 	if len(segments) == 3 && segments[1] == "security" && (segments[2] == "battle-audit" || segments[2] == "lobby-audit") && method == http.MethodGet {
 		return false
 	}
+	return true
+}
+
+func rejectPlayerContextForServiceRoute(w http.ResponseWriter, r *http.Request) bool {
+	if sessionToken(r) == "" {
+		return false
+	}
+	writeJSON(w, http.StatusForbidden, map[string]any{
+		"ok":         false,
+		"error_code": "service_origin_required",
+		"message":    "service-origin callback must not include player session context",
+	})
 	return true
 }
 

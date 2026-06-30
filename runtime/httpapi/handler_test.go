@@ -427,6 +427,27 @@ func TestHTTPBusinessEnvelopeFallbackGuard(t *testing.T) {
 	}
 }
 
+func TestHTTPServiceCallbacksRejectPlayerSessionContext(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	player := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-service-player", "display_name": "HTTP Service Player"})
+	routes := []string{
+		"/v1/battle/servers/register",
+		"/v1/battle/servers/heartbeat",
+		"/v1/battle/servers/offline",
+		"/v1/battle/tickets/consume",
+		"/v1/battle/results/submit",
+	}
+	for _, route := range routes {
+		response := postRaw(t, server.URL+route, player.SessionToken, map[string]any{})
+		if response.Code != http.StatusForbidden || response.ErrorCode != "service_origin_required" || !strings.Contains(response.Message, "player session context") {
+			t.Fatalf("service callback %s should reject player session context before core validation, got %+v", route, response)
+		}
+	}
+}
+
 func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	driverName := registerHTTPAuditCaptureDriver(t)
 	db, err := sql.Open(driverName, "")
