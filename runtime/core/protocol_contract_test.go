@@ -121,16 +121,18 @@ func TestBattleResultExposesFullServiceVersionContract(t *testing.T) {
 
 func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testing.T) {
 	clientOps := ContractClientOperations()
+	clientRPCOps := ContractClientRPCOperations()
+	clientWSSOps := ContractClientWSSOperations()
 	serviceCallbacks := ServiceCallbackOperations()
-	if len(clientOps) == 0 || len(serviceCallbacks) == 0 {
-		t.Fatalf("business operation contracts must not be empty: client=%+v service=%+v", clientOps, serviceCallbacks)
+	if len(clientOps) == 0 || len(clientRPCOps) == 0 || len(clientWSSOps) == 0 || len(serviceCallbacks) == 0 {
+		t.Fatalf("business operation contracts must not be empty: client=%+v rpc=%+v wss=%+v service=%+v", clientOps, clientRPCOps, clientWSSOps, serviceCallbacks)
 	}
 	for _, callback := range serviceCallbacks {
 		if !IsServiceCallbackOperation(callback) {
 			t.Fatalf("service callback helper does not recognize %q", callback)
 		}
-		if stringSliceContains(clientOps, callback) {
-			t.Fatalf("service callback %q must not be exposed as a client operation: client=%+v service=%+v", callback, clientOps, serviceCallbacks)
+		if stringSliceContains(clientOps, callback) || stringSliceContains(clientRPCOps, callback) || stringSliceContains(clientWSSOps, callback) {
+			t.Fatalf("service callback %q must not be exposed as a client operation: client=%+v rpc=%+v wss=%+v service=%+v", callback, clientOps, clientRPCOps, clientWSSOps, serviceCallbacks)
 		}
 	}
 	for _, expected := range []string{
@@ -144,17 +146,24 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("service callback contract missing %q: %+v", expected, serviceCallbacks)
 		}
 	}
-	for _, clientOp := range clientOps {
-		if IsServiceCallbackOperation(clientOp) {
-			t.Fatalf("client operation %q must not require service origin: client=%+v service=%+v", clientOp, clientOps, serviceCallbacks)
+	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
+		for _, clientOp := range ops {
+			if IsServiceCallbackOperation(clientOp) {
+				t.Fatalf("client operation %q must not require service origin: client=%+v rpc=%+v wss=%+v service=%+v", clientOp, clientOps, clientRPCOps, clientWSSOps, serviceCallbacks)
+			}
 		}
 	}
-	if !stringSliceContains(clientOps, "battle.servers") {
-		t.Fatalf("client operation contract should expose battle server discovery: client=%+v", clientOps)
+	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
+		if !stringSliceContains(ops, "battle.servers") {
+			t.Fatalf("client operation contract should expose battle server discovery: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
+		}
+	}
+	if !stringSliceContains(clientRPCOps, "activity.claim") || stringSliceContains(clientWSSOps, "activity.claim") {
+		t.Fatalf("client RPC/WSS operation contracts should reflect handler transport support: rpc=%+v wss=%+v", clientRPCOps, clientWSSOps)
 	}
 	for _, serviceOnly := range []string{"battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline"} {
-		if stringSliceContains(clientOps, serviceOnly) {
-			t.Fatalf("client operation contract must not expose service-only battle server callback %q: client=%+v", serviceOnly, clientOps)
+		if stringSliceContains(clientOps, serviceOnly) || stringSliceContains(clientRPCOps, serviceOnly) || stringSliceContains(clientWSSOps, serviceOnly) {
+			t.Fatalf("client operation contract must not expose service-only battle server callback %q: client=%+v rpc=%+v wss=%+v", serviceOnly, clientOps, clientRPCOps, clientWSSOps)
 		}
 	}
 }

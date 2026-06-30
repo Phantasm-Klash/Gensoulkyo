@@ -756,6 +756,8 @@ type RoomRulesSnapshot struct {
 	BusinessTransports             []string     `json:"business_transports"`
 	BattleTransports               []string     `json:"battle_transports"`
 	ClientOperations               []string     `json:"client_operations"`
+	ClientRPCOperations            []string     `json:"client_rpc_operations"`
+	ClientWSSOperations            []string     `json:"client_wss_operations"`
 	ServiceCallbacks               []string     `json:"service_callbacks"`
 	BusinessNotifications          []string     `json:"business_notifications"`
 	ClientAuthority                []string     `json:"client_authority"`
@@ -858,6 +860,8 @@ type BusinessEvent struct {
 	BattleTicket                   *SignedBattleTicket     `json:"battle_ticket,omitempty"`
 	Settlement                     *MatchEndEvent          `json:"settlement,omitempty"`
 	AllowedClientOperations        []string                `json:"allowed_client_operations"`
+	AllowedClientRPCOperations     []string                `json:"allowed_client_rpc_operations"`
+	AllowedClientWSSOperations     []string                `json:"allowed_client_wss_operations"`
 	ServiceCallbacks               []string                `json:"service_callbacks"`
 	BusinessNotifications          []string                `json:"business_notifications"`
 	BusinessEnvelopeRequired       bool                    `json:"business_envelope_required"`
