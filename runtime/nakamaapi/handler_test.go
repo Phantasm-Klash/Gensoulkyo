@@ -639,6 +639,25 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("business event should document low-frequency notification kinds only: %+v", eventPayload)
 	}
 
+	activityEvent := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(5, "nonce-external-guest-activity-event", "business_event", map[string]any{
+			"kind": "activity",
+		}),
+	})
+	if !activityEvent.OK || activityEvent.Status != 200 {
+		t.Fatalf("activity business event WSS read failed: %+v", activityEvent)
+	}
+	activityPayload := activityEvent.Payload.(*core.BusinessEvent)
+	if activityPayload.Topic != "nakama_wss.business.activity" || activityPayload.Activity == nil || !activityPayload.Activity.ServerAuthoritative || len(activityPayload.Activity.Tasks) == 0 || len(activityPayload.Activity.Events) == 0 {
+		t.Fatalf("activity business event should expose read-only server activity projection: %+v", activityPayload)
+	}
+	if !stringSliceContains(activityPayload.AllowedClientRPCOperations, "activity.claim") || stringSliceContains(activityPayload.AllowedClientWSSOperations, "activity.claim") || activityPayload.ClientResultSubmitAllowed || activityPayload.HighFrequencyBattleTickAllowed {
+		t.Fatalf("activity business event should keep claim RPC-only and not authorize battle authority: %+v", activityPayload)
+	}
+
 	hostReady := handler.HandleRPC(RPCRequest{
 		ID:        "match.ready",
 		SessionID: hostSession,
@@ -654,7 +673,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "match.ready",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(5, "nonce-external-guest-ready", "match_ready", map[string]any{
+		Payload: envelopePayload(6, "nonce-external-guest-ready", "match_ready", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
@@ -681,7 +700,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "presence.heartbeat",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(6, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
+		Payload: envelopePayload(7, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
