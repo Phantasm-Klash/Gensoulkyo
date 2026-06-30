@@ -444,6 +444,10 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	if !ok || !anySliceContainsString(callbacks, "battle.result.submit") || !anySliceContainsString(callbacks, "battle.ticket.consume") {
 		t.Fatalf("service callback status missing callback operations: %+v", statusBody)
 	}
+	disallowed, ok := statusBody["disallowed_client_operations"].([]any)
+	if !ok || !anySliceContainsString(disallowed, "match.input") || !anySliceContainsString(disallowed, "battle.result.submit") || anySliceContainsString(disallowed, "battle.ticket") {
+		t.Fatalf("service callback status missing disallowed client operation contract: %+v", statusBody)
+	}
 	context, ok := statusBody["service_callback_context"].(map[string]any)
 	if !ok || context[serviceOriginContextKey] != core.ServiceCallbackContext()[serviceOriginContextKey] || context[serviceCallbackContextKey] != core.ServiceCallbackContext()[serviceCallbackContextKey] {
 		t.Fatalf("service callback status drifted from core context: %+v", statusBody)

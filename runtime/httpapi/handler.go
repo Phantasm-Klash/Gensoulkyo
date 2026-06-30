@@ -769,8 +769,9 @@ func (h *Handler) serviceCallbackStatus(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"status": map[string]any{
-			"service_callbacks":        core.ServiceCallbackOperations(),
-			"service_callback_context": core.ServiceCallbackContext(),
+			"service_callbacks":            core.ServiceCallbackOperations(),
+			"service_callback_context":     core.ServiceCallbackContext(),
+			"disallowed_client_operations": core.ContractDisallowedClientOperations(),
 			"http_headers": map[string]string{
 				"service_origin":  headerServiceOrigin,
 				"battle_callback": headerBattleCallback,
