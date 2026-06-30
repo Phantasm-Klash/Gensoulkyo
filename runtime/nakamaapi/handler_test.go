@@ -367,7 +367,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "business.contract") || !stringSliceContains(rulesPayload.ClientWSSOperations, "business.contract") {
 		t.Fatalf("room rules should expose business contract WSS/RPC snapshot: %+v", rulesPayload)
 	}
-	if rulesPayload.ServiceCallbackContext["runtime_ctx_mode"] != "rpc" || rulesPayload.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" || rulesPayload.ServiceCallbackContext["gensoulkyo_battle_callback"] != "true" {
+	if rulesPayload.ServiceCallbackContext[core.ServiceCallbackRuntimeModeKey] != core.ServiceCallbackRuntimeModeRPC || rulesPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer || rulesPayload.ServiceCallbackContext[core.ServiceCallbackFlagKey] != core.ServiceCallbackRequiredValue {
 		t.Fatalf("room rules should expose service callback context requirements: %+v", rulesPayload.ServiceCallbackContext)
 	}
 	if !stringSliceContains(rulesPayload.ClientOperations, "rooms.chat") || !stringSliceContains(rulesPayload.ClientOperations, "rooms.announcement") {
@@ -630,7 +630,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.chat") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.announcement") || !stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers") || stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers.register") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
 	}
-	if eventPayload.ServiceCallbackContext["runtime_ctx_mode"] != "rpc" || eventPayload.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" || eventPayload.ServiceCallbackContext["gensoulkyo_battle_callback"] != "true" {
+	if eventPayload.ServiceCallbackContext[core.ServiceCallbackRuntimeModeKey] != core.ServiceCallbackRuntimeModeRPC || eventPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer || eventPayload.ServiceCallbackContext[core.ServiceCallbackFlagKey] != core.ServiceCallbackRequiredValue {
 		t.Fatalf("business event should document service callback context requirements: %+v", eventPayload.ServiceCallbackContext)
 	}
 	if !stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.allocation") || !stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket") || stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.result.submit") || stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket.consume") {
@@ -669,7 +669,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !stringSliceContains(contractPayload.ClientOperations, "business.contract") || !stringSliceContains(contractPayload.ClientWSSOperations, "business.contract") || stringSliceContains(contractPayload.ClientOperations, "battle.result.submit") || stringSliceContains(contractPayload.ClientWSSOperations, "battle.ticket.consume") {
 		t.Fatalf("business contract should expose client RPC/WSS operations without service callbacks: %+v", contractPayload)
 	}
-	if !stringSliceContains(contractPayload.ServiceCallbacks, "battle.result.submit") || contractPayload.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" {
+	if !stringSliceContains(contractPayload.ServiceCallbacks, "battle.result.submit") || contractPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer {
 		t.Fatalf("business contract should document service callback requirements without granting client authority: %+v", contractPayload)
 	}
 	assertBusinessNotificationTopics(t, contractPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket", "settlement")

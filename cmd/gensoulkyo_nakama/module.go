@@ -61,9 +61,9 @@ var rpcIDs = []string{
 var serviceOriginRPCIDs = serviceOriginRPCIDSet()
 
 const (
-	serviceRuntimeModeKey = "runtime_ctx_mode"
-	serviceOriginVarKey   = "gensoulkyo_service_origin"
-	serviceCallbackVarKey = "gensoulkyo_battle_callback"
+	serviceRuntimeModeKey = core.ServiceCallbackRuntimeModeKey
+	serviceOriginVarKey   = core.ServiceCallbackOriginKey
+	serviceCallbackVarKey = core.ServiceCallbackFlagKey
 )
 
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {

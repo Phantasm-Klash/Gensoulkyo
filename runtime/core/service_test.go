@@ -2671,10 +2671,10 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rules.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should publish service-only battle callbacks: %+v", rules)
 	}
-	if rules.ServiceCallbackContext["runtime_ctx_mode"] != "rpc" || rules.ServiceCallbackContext["gensoulkyo_service_origin"] != "battle_server" || rules.ServiceCallbackContext["gensoulkyo_battle_callback"] != "true" {
+	if rules.ServiceCallbackContext[ServiceCallbackRuntimeModeKey] != ServiceCallbackRuntimeModeRPC || rules.ServiceCallbackContext[ServiceCallbackOriginKey] != ServiceCallbackOriginBattleServer || rules.ServiceCallbackContext[ServiceCallbackFlagKey] != ServiceCallbackRequiredValue {
 		t.Fatalf("room rules should publish trusted service callback context requirements: %+v", rules.ServiceCallbackContext)
 	}
-	if rules.ServiceCallbackContext["player_session_context_allowed"] != "false" || rules.ServiceCallbackContext["business_envelope_allowed"] != "false" {
+	if rules.ServiceCallbackContext[ServiceCallbackPlayerSessionContextKey] != ServiceCallbackDisallowedValue || rules.ServiceCallbackContext[ServiceCallbackBusinessEnvelopeAllowedKey] != ServiceCallbackDisallowedValue {
 		t.Fatalf("room rules should keep service callbacks out of player/envelope paths: %+v", rules.ServiceCallbackContext)
 	}
 	if !stringSliceContains(rules.BusinessNotifications, "activity") || !stringSliceContains(rules.BusinessNotifications, "battle.allocation") || !stringSliceContains(rules.BusinessNotifications, "battle.ticket") || !stringSliceContains(rules.BusinessNotifications, "settlement") || stringSliceContains(rules.BusinessNotifications, "battle.result.submit") {

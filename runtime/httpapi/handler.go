@@ -13,8 +13,8 @@ import (
 const (
 	headerServiceOrigin       = "X-PhK-Service-Origin"
 	headerBattleCallback      = "X-PhK-Battle-Callback"
-	serviceOriginContextKey   = "gensoulkyo_service_origin"
-	serviceCallbackContextKey = "gensoulkyo_battle_callback"
+	serviceOriginContextKey   = core.ServiceCallbackOriginKey
+	serviceCallbackContextKey = core.ServiceCallbackFlagKey
 )
 
 type Handler struct {

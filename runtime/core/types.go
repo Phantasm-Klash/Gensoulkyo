@@ -20,6 +20,16 @@ const (
 	BattleServerHeartbeatTTLSeconds = 30
 	DefaultBattleServerID           = "battle-local-dev"
 	DefaultBattleEndpoint           = "127.0.0.1:7901"
+
+	ServiceCallbackRuntimeModeKey             = "runtime_ctx_mode"
+	ServiceCallbackOriginKey                  = "gensoulkyo_service_origin"
+	ServiceCallbackFlagKey                    = "gensoulkyo_battle_callback"
+	ServiceCallbackPlayerSessionContextKey    = "player_session_context_allowed"
+	ServiceCallbackBusinessEnvelopeAllowedKey = "business_envelope_allowed"
+	ServiceCallbackRuntimeModeRPC             = "rpc"
+	ServiceCallbackOriginBattleServer         = "battle_server"
+	ServiceCallbackRequiredValue              = "true"
+	ServiceCallbackDisallowedValue            = "false"
 )
 
 type ModeConfig struct {

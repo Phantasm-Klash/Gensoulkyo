@@ -6264,17 +6264,17 @@ func ServiceCallbackOperations() []string {
 
 func ServiceCallbackContext() map[string]string {
 	return map[string]string{
-		"runtime_ctx_mode":               "rpc",
-		"gensoulkyo_service_origin":      "battle_server",
-		"gensoulkyo_battle_callback":     "true",
-		"player_session_context_allowed": "false",
-		"business_envelope_allowed":      "false",
+		ServiceCallbackRuntimeModeKey:             ServiceCallbackRuntimeModeRPC,
+		ServiceCallbackOriginKey:                  ServiceCallbackOriginBattleServer,
+		ServiceCallbackFlagKey:                    ServiceCallbackRequiredValue,
+		ServiceCallbackPlayerSessionContextKey:    ServiceCallbackDisallowedValue,
+		ServiceCallbackBusinessEnvelopeAllowedKey: ServiceCallbackDisallowedValue,
 	}
 }
 
 func ServiceCallbackAcceptedValues() []string {
 	return []string{
-		ServiceCallbackContext()["gensoulkyo_battle_callback"],
+		ServiceCallbackContext()[ServiceCallbackFlagKey],
 		"1",
 		"yes",
 	}

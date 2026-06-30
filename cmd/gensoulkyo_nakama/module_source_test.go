@@ -142,10 +142,11 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 		"mode != expectedMode",
 		"runtimeCtxStringMap(ctx, runtime.RUNTIME_CTX_VARS)",
 		"serviceRuntimeModeKey",
+		"core.ServiceCallbackRuntimeModeKey",
 		"serviceOriginVarKey",
-		"gensoulkyo_service_origin",
+		"core.ServiceCallbackOriginKey",
 		"serviceCallbackVarKey",
-		"gensoulkyo_battle_callback",
+		"core.ServiceCallbackFlagKey",
 		"core.ServiceCallbackContext()",
 	} {
 		if !strings.Contains(text, expected) {

@@ -271,11 +271,11 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	}
 	callbackContext := ServiceCallbackContext()
 	expectedCallbackContext := map[string]string{
-		"runtime_ctx_mode":               "rpc",
-		"gensoulkyo_service_origin":      "battle_server",
-		"gensoulkyo_battle_callback":     "true",
-		"player_session_context_allowed": "false",
-		"business_envelope_allowed":      "false",
+		ServiceCallbackRuntimeModeKey:             ServiceCallbackRuntimeModeRPC,
+		ServiceCallbackOriginKey:                  ServiceCallbackOriginBattleServer,
+		ServiceCallbackFlagKey:                    ServiceCallbackRequiredValue,
+		ServiceCallbackPlayerSessionContextKey:    ServiceCallbackDisallowedValue,
+		ServiceCallbackBusinessEnvelopeAllowedKey: ServiceCallbackDisallowedValue,
 	}
 	if len(callbackContext) != len(expectedCallbackContext) {
 		t.Fatalf("service callback context must expose only required non-secret gates: got %+v want keys %+v", callbackContext, expectedCallbackContext)
@@ -291,7 +291,7 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		}
 	}
 	acceptedCallbackValues := ServiceCallbackAcceptedValues()
-	for _, expected := range []string{callbackContext["gensoulkyo_battle_callback"], "1", "yes"} {
+	for _, expected := range []string{callbackContext[ServiceCallbackFlagKey], "1", "yes"} {
 		if !stringSliceContains(acceptedCallbackValues, expected) {
 			t.Fatalf("service callback accepted values missing %q: %+v", expected, acceptedCallbackValues)
 		}
