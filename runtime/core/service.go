@@ -1027,7 +1027,14 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		match := s.createMatchLocked(mode, groupIDs)
 		room.MatchID = match.MatchID
 		room.Status = "found"
-		s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "matched", s.clock())
+		now := s.clock()
+		for _, matchedTicketID := range groupIDs {
+			matchedTicket := s.tickets[matchedTicketID]
+			if matchedTicket == nil {
+				continue
+			}
+			s.recordLobbyRoomAuditLocked(room, matchedTicket, matchedTicket.UserID, "matched", now)
+		}
 		return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), match), nil
 	}
 	s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "joined", ticket.CreatedAt)

@@ -1269,6 +1269,16 @@ func TestLobbyLifecycleAuditRecordsRoomReadyTransitions(t *testing.T) {
 	if joined.MatchID == "" {
 		t.Fatalf("pvp room join should allocate a match: %+v", joined)
 	}
+	matchedAudits := filterLobbyRoomAudits(repo.rooms, "matched")
+	if len(matchedAudits) != 2 {
+		t.Fatalf("room match should audit every matched participant, got %+v", matchedAudits)
+	}
+	if matchedAudits[0].UserID != host.UserID || matchedAudits[0].TicketID != created.TicketID || matchedAudits[0].MatchID != joined.MatchID || matchedAudits[0].CurrentPlayers != 2 {
+		t.Fatalf("host matched audit invalid: %+v", matchedAudits[0])
+	}
+	if matchedAudits[1].UserID != guest.UserID || matchedAudits[1].TicketID != joined.TicketID || matchedAudits[1].MatchID != joined.MatchID || matchedAudits[1].CurrentPlayers != 2 {
+		t.Fatalf("guest matched audit invalid: %+v", matchedAudits[1])
+	}
 	beforeReadyAudits := len(repo.rooms)
 
 	hostReady, err := service.ReadyMatch(host.SessionToken, joined.MatchID)
@@ -1438,7 +1448,7 @@ func TestLobbyLifecycleAuditRecordsRoomHeartbeatTransitions(t *testing.T) {
 		t.Fatalf("matched heartbeat audit invalid: %+v", heartbeatAudits[1])
 	}
 	status := service.LobbyLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.ConnectionRecords != 2 || status.LastSuccessOperation != "heartbeat" || status.RoomRecords != 2 || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
+	if !status.OK || !status.Configured || status.ConnectionRecords != 2 || status.LastSuccessOperation != "heartbeat" || status.RoomRecords != 3 || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
 		t.Fatalf("heartbeat audit status invalid: %+v", status)
 	}
 }

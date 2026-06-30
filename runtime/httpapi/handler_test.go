@@ -400,11 +400,11 @@ func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 		t.Fatalf("battle audit status should reflect HTTP SQL repository writes: %+v", battleStatus)
 	}
 	lobbyStatus := wired.Service.LobbyLifecycleAuditStatus()
-	if !lobbyStatus.Configured || !lobbyStatus.OK || lobbyStatus.RoomRecords != 2 {
+	if !lobbyStatus.Configured || !lobbyStatus.OK || lobbyStatus.RoomRecords != 3 {
 		t.Fatalf("lobby audit status should reflect HTTP SQL repository writes: %+v", lobbyStatus)
 	}
 	tableCounts := httpAuditTableCounts()
-	if tableCounts["business_envelope_audits"] != 2 || tableCounts["lobby_room_audits"] != 2 || tableCounts["match_allocation_audits"] != 2 || tableCounts["battle_ticket_audits"] < 1 {
+	if tableCounts["business_envelope_audits"] != 2 || tableCounts["lobby_room_audits"] != 3 || tableCounts["match_allocation_audits"] != 2 || tableCounts["battle_ticket_audits"] < 1 {
 		t.Fatalf("unexpected HTTP SQL audit writes: counts=%+v calls=%+v", tableCounts, httpAuditCaptureCalls())
 	}
 
@@ -421,7 +421,7 @@ func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 		t.Fatalf("lobby audit endpoint should be public status: %+v", lobbyAuditEndpoint)
 	}
 	lobbyAuditStatus := lobbyAuditEndpoint["status"].(map[string]any)
-	if !lobbyAuditStatus["configured"].(bool) || int(lobbyAuditStatus["room_records"].(float64)) != 2 {
+	if !lobbyAuditStatus["configured"].(bool) || int(lobbyAuditStatus["room_records"].(float64)) != 3 {
 		t.Fatalf("lobby audit endpoint status invalid: %+v", lobbyAuditEndpoint)
 	}
 }
