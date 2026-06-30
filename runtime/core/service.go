@@ -1149,6 +1149,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		ServiceCallbacks:           ServiceCallbackOperations(),
 		ServiceCallbackContext:     ServiceCallbackContext(),
 		BusinessNotifications:      businessNotificationKinds(),
+		BusinessNotificationTopics: businessNotificationTopics(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -2454,6 +2455,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		ServiceCallbacks:               ServiceCallbackOperations(),
 		ServiceCallbackContext:         ServiceCallbackContext(),
 		BusinessNotifications:          businessNotificationKinds(),
+		BusinessNotificationTopics:     businessNotificationTopics(),
 		BusinessEnvelopeRequired:       true,
 		ForbiddenFields:                sortedForbiddenClientFields(),
 		HighFrequencyBattleTickAllowed: false,
@@ -6043,6 +6045,28 @@ func businessNotificationKinds() []string {
 		"battle.ticket",
 		"settlement",
 	}
+}
+
+func businessNotificationTopics() []BusinessNotificationTopic {
+	kinds := businessNotificationKinds()
+	topics := make([]BusinessNotificationTopic, 0, len(kinds))
+	for _, kind := range kinds {
+		topics = append(topics, BusinessNotificationTopic{
+			Kind:                           kind,
+			Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
+			Transport:                      "nakama_wss",
+			ClientEventRequestOperation:    "business.event",
+			ServerPush:                     true,
+			ServiceCallback:                false,
+			HighFrequencyBattleTickAllowed: false,
+			ClientResultSubmitAllowed:      false,
+		})
+	}
+	return topics
+}
+
+func ContractBusinessNotificationTopics() []BusinessNotificationTopic {
+	return businessNotificationTopics()
 }
 
 func isBusinessNotificationKind(kind string) bool {
