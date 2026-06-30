@@ -165,6 +165,8 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return response
 		}
 		return handler.call(func() (any, error) { return handler.service.BusinessEvent(request.SessionID, req) })
+	case "business.contract":
+		return handler.call(func() (any, error) { return handler.service.BusinessContract(request.SessionID) })
 	case "matchmaking.join":
 		var req core.JoinQueueRequest
 		if err := decodeBody(body, &req); err != nil {
@@ -302,6 +304,8 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return response
 		}
 		return handler.call(func() (any, error) { return handler.service.BusinessEvent(message.SessionID, req) })
+	case "business.contract":
+		return handler.call(func() (any, error) { return handler.service.BusinessContract(message.SessionID) })
 	case "matchmaking.join":
 		var req core.JoinQueueRequest
 		if err := decodeBody(body, &req); err != nil {

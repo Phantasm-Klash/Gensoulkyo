@@ -1125,58 +1125,46 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 	now := s.clock()
 	snapshot := s.roomSnapshotLocked(room, now)
 	mode := ModeConfigs[room.ModeID]
+	contract := businessContractSnapshot(now)
 	rules := &RoomRulesSnapshot{
-		OK:              true,
-		Version:         currentVersionStamp(),
-		Room:            snapshot,
-		Mode:            mode,
-		TickRate:        TickRate,
-		InputDelayTicks: DefaultInputDelayTick,
-		BattleTicketTTL: BattleTicketTTLSeconds,
-		BusinessTransports: []string{
-			"nakama_https_rpc",
-			"nakama_wss",
-		},
-		BattleTransports: []string{
-			"kcp_udp",
-			"protobuf",
-			"chacha20_poly1305",
-		},
-		ClientOperations:           ContractClientOperations(),
-		ClientRPCOperations:        ContractClientRPCOperations(),
-		ClientWSSOperations:        ContractClientWSSOperations(),
-		DisallowedClientOperations: ContractDisallowedClientOperations(),
-		ServiceCallbacks:           ServiceCallbackOperations(),
-		ServiceCallbackContext:     ServiceCallbackContext(),
-		BusinessNotifications:      businessNotificationKinds(),
-		BusinessNotificationTopics: businessNotificationTopics(),
-		ClientAuthority: []string{
-			"input_packet",
-			"cast_card_request",
-			"mode_action_request",
-			"ready",
-			"reconnect_request",
-		},
-		ServerAuthority: []string{
-			"battle_ticket",
-			"deck_snapshot_hash",
-			"match_seed",
-			"state_snapshot",
-			"score",
-			"graze_count",
-			"hit_count",
-			"damage",
-			"reward",
-		},
-		ForbiddenFields:                sortedForbiddenClientFields(),
-		BusinessEnvelope:               true,
-		ClientResultSubmit:             false,
-		HighFrequencyBattleTickAllowed: false,
-		ServerTime:                     now,
-		ServerAuthoritative:            true,
+		OK:                             true,
+		Version:                        contract.Version,
+		Room:                           snapshot,
+		Mode:                           mode,
+		TickRate:                       TickRate,
+		InputDelayTicks:                DefaultInputDelayTick,
+		BattleTicketTTL:                BattleTicketTTLSeconds,
+		BusinessTransports:             contract.BusinessTransports,
+		BattleTransports:               contract.BattleTransports,
+		ClientOperations:               contract.ClientOperations,
+		ClientRPCOperations:            contract.ClientRPCOperations,
+		ClientWSSOperations:            contract.ClientWSSOperations,
+		DisallowedClientOperations:     contract.DisallowedClientOperations,
+		ServiceCallbacks:               contract.ServiceCallbacks,
+		ServiceCallbackContext:         contract.ServiceCallbackContext,
+		BusinessNotifications:          contract.BusinessNotifications,
+		BusinessNotificationTopics:     contract.BusinessNotificationTopics,
+		ClientAuthority:                contract.ClientAuthority,
+		ServerAuthority:                contract.ServerAuthority,
+		ForbiddenFields:                contract.ForbiddenFields,
+		BusinessEnvelope:               contract.BusinessEnvelopeRequired,
+		ClientResultSubmit:             contract.ClientResultSubmitAllowed,
+		HighFrequencyBattleTickAllowed: contract.HighFrequencyBattleTickAllowed,
+		ServerTime:                     contract.ServerTime,
+		ServerAuthoritative:            contract.ServerAuthoritative,
 	}
 	s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "rules_read", now)
 	return rules, nil
+}
+
+func (s *Service) BusinessContract(sessionToken string) (*BusinessContractSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+		return nil, err
+	}
+	return businessContractSnapshot(s.clock()), nil
 }
 
 func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueResponse, error) {
@@ -6069,6 +6057,47 @@ func ContractBusinessNotificationTopics() []BusinessNotificationTopic {
 	return businessNotificationTopics()
 }
 
+func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
+	return &BusinessContractSnapshot{
+		OK:                         true,
+		Version:                    currentVersionStamp(),
+		BusinessTransports:         []string{"nakama_https_rpc", "nakama_wss"},
+		BattleTransports:           []string{"kcp_udp", "protobuf", "chacha20_poly1305"},
+		ClientOperations:           ContractClientOperations(),
+		ClientRPCOperations:        ContractClientRPCOperations(),
+		ClientWSSOperations:        ContractClientWSSOperations(),
+		DisallowedClientOperations: ContractDisallowedClientOperations(),
+		ServiceCallbacks:           ServiceCallbackOperations(),
+		ServiceCallbackContext:     ServiceCallbackContext(),
+		BusinessNotifications:      businessNotificationKinds(),
+		BusinessNotificationTopics: businessNotificationTopics(),
+		ClientAuthority: []string{
+			"input_packet",
+			"cast_card_request",
+			"mode_action_request",
+			"ready",
+			"reconnect_request",
+		},
+		ServerAuthority: []string{
+			"battle_ticket",
+			"deck_snapshot_hash",
+			"match_seed",
+			"state_snapshot",
+			"score",
+			"graze_count",
+			"hit_count",
+			"damage",
+			"reward",
+		},
+		ForbiddenFields:                sortedForbiddenClientFields(),
+		BusinessEnvelopeRequired:       true,
+		ClientResultSubmitAllowed:      false,
+		HighFrequencyBattleTickAllowed: false,
+		ServerTime:                     now,
+		ServerAuthoritative:            true,
+	}
+}
+
 func isBusinessNotificationKind(kind string) bool {
 	for _, allowed := range businessNotificationKinds() {
 		if kind == allowed {
@@ -6136,6 +6165,7 @@ func contractClientOperations() []string {
 		"rooms.announcement",
 		"business.event",
 		"business.event.settlement",
+		"business.contract",
 		"match.ready",
 		"match.disconnect",
 		"match.reconnect",
@@ -6179,6 +6209,7 @@ func contractClientWSSOperations() []string {
 		"rooms.announcement",
 		"business.event",
 		"business.event.settlement",
+		"business.contract",
 		"match.ready",
 		"match.disconnect",
 		"match.reconnect",

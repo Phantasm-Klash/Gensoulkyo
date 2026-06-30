@@ -763,6 +763,29 @@ type BusinessNotificationTopic struct {
 	ClientResultSubmitAllowed      bool   `json:"client_result_submit_allowed"`
 }
 
+type BusinessContractSnapshot struct {
+	OK                             bool                        `json:"ok"`
+	Version                        VersionStamp                `json:"version"`
+	BusinessTransports             []string                    `json:"business_transports"`
+	BattleTransports               []string                    `json:"battle_transports"`
+	ClientOperations               []string                    `json:"client_operations"`
+	ClientRPCOperations            []string                    `json:"client_rpc_operations"`
+	ClientWSSOperations            []string                    `json:"client_wss_operations"`
+	DisallowedClientOperations     []string                    `json:"disallowed_client_operations"`
+	ServiceCallbacks               []string                    `json:"service_callbacks"`
+	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
+	BusinessNotifications          []string                    `json:"business_notifications"`
+	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
+	ClientAuthority                []string                    `json:"client_authority"`
+	ServerAuthority                []string                    `json:"server_authority"`
+	ForbiddenFields                []string                    `json:"forbidden_fields"`
+	BusinessEnvelopeRequired       bool                        `json:"business_envelope_required"`
+	ClientResultSubmitAllowed      bool                        `json:"client_result_submit_allowed"`
+	HighFrequencyBattleTickAllowed bool                        `json:"high_frequency_battle_tick_allowed"`
+	ServerTime                     time.Time                   `json:"server_time"`
+	ServerAuthoritative            bool                        `json:"server_authoritative"`
+}
+
 type RoomRulesSnapshot struct {
 	OK                             bool                        `json:"ok"`
 	Version                        VersionStamp                `json:"version"`

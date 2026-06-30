@@ -27,6 +27,7 @@ var rpcIDs = []string{
 	"presence.heartbeat",
 	"business.event",
 	"business.event.settlement",
+	"business.contract",
 	"matchmaking.join",
 	"matchmaking.ticket",
 	"matchmaking.cancel",

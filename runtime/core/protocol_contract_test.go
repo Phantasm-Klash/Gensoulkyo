@@ -306,6 +306,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("client operation contract should expose battle server discovery: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
 		}
 	}
+	if !stringSliceContains(clientOps, "business.contract") || !stringSliceContains(clientRPCOps, "business.contract") || !stringSliceContains(clientWSSOps, "business.contract") {
+		t.Fatalf("client RPC/WSS operation contracts should expose authenticated business contract snapshot: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
+	}
 	if !stringSliceContains(clientRPCOps, "activity.claim") || stringSliceContains(clientWSSOps, "activity.claim") {
 		t.Fatalf("client RPC/WSS operation contracts should reflect handler transport support: rpc=%+v wss=%+v", clientRPCOps, clientWSSOps)
 	}
