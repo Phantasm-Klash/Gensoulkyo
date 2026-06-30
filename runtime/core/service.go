@@ -6030,6 +6030,7 @@ func contractClientOperations() []string {
 		"match.ready",
 		"match.disconnect",
 		"match.reconnect",
+		"battle.servers",
 		"battle.allocation",
 		"battle.ticket",
 		"replay.get",

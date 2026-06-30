@@ -139,12 +139,20 @@ func payloadMap(value any) (map[string]any, bool) {
 }
 
 func payloadContainsEnvelopeField(payload map[string]any) bool {
-	for _, key := range []string{"version", "envelope_version", "seq", "timestamp_ms", "nonce", "op_code", "op", "key_id", "keyId", "auth_tag", "tag", "ciphertext_mode", "mode", "body_hash", "bodyHash"} {
+	for _, key := range BusinessEnvelopeFieldAliases() {
 		if _, ok := payload[key]; ok {
 			return true
 		}
 	}
 	return false
+}
+
+func BusinessEnvelopeFieldAliases() []string {
+	return []string{"version", "envelope_version", "session_id", "business_session_id", "seq", "timestamp_ms", "timestampMS", "nonce", "op_code", "op", "key_id", "keyId", "keyID", "auth_tag", "tag", "ciphertext_mode", "mode", "body_hash", "bodyHash"}
+}
+
+func BusinessEnvelopeServiceCallbackFieldAliases() []string {
+	return []string{"envelope_version", "session_id", "business_session_id", "seq", "timestamp_ms", "timestampMS", "nonce", "op_code", "op", "key_id", "keyId", "keyID", "auth_tag", "tag", "ciphertext_mode", "mode", "body_hash", "bodyHash"}
 }
 
 func headerString(headers map[string][]string, key string) string {
