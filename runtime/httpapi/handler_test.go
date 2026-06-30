@@ -493,6 +493,35 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	if !ticket.OK || ticket.Ticket.UserID != alice.UserID || ticket.Ticket.BattleServerID != "aaa-http-battle" || ticket.SignatureHex == "" || ticket.PublicKeyHex == "" {
 		t.Fatalf("explicit battle ticket invalid: %+v", ticket)
 	}
+	consume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"user_id":          alice.UserID,
+		"player_id":        ticket.Ticket.PlayerID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
+	})
+	if !consume.OK || !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
+		t.Fatalf("battle ticket consume invalid: %+v", consume)
+	}
+	duplicateConsume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
+	})
+	if !duplicateConsume.OK || !duplicateConsume.Consumed || !duplicateConsume.Duplicate || !duplicateConsume.ServerAuthoritative {
+		t.Fatalf("duplicate battle ticket consume invalid: %+v", duplicateConsume)
+	}
+	badConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": "wrong-nonce",
+	})
+	if badConsume.Code != http.StatusBadRequest || badConsume.ErrorCode != "invalid_request" {
+		t.Fatalf("expected bad ticket consume rejection, got %+v", badConsume)
+	}
 
 	postJSON[core.ReadyResponse](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/ready", alice.SessionToken, map[string]any{})
 	readyBob := postJSON[core.ReadyResponse](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/ready", bob.SessionToken, map[string]any{})
