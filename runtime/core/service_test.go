@@ -2602,6 +2602,11 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.ClientOperations, "battle.servers") || !stringSliceContains(rules.ClientOperations, "battle.ticket") || !stringSliceContains(rules.ClientOperations, "match.ready") || !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || !stringSliceContains(rules.ClientOperations, "rooms.chat") || !stringSliceContains(rules.ClientOperations, "rooms.announcement") || stringSliceContains(rules.ClientOperations, "battle.result.submit") || stringSliceContains(rules.ClientOperations, "battle.servers.register") {
 		t.Fatalf("room rules should keep client operations read/intent only: %+v", rules)
 	}
+	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.result.submit"} {
+		if !stringSliceContains(rules.DisallowedClientOperations, forbiddenOp) || stringSliceContains(rules.ClientOperations, forbiddenOp) || stringSliceContains(rules.ClientRPCOperations, forbiddenOp) || stringSliceContains(rules.ClientWSSOperations, forbiddenOp) {
+			t.Fatalf("room rules should explicitly disallow high-frequency/result client op %q: %+v", forbiddenOp, rules)
+		}
+	}
 	if !stringSliceContains(rules.ClientRPCOperations, "battle.allocation") || !stringSliceContains(rules.ClientWSSOperations, "battle.ticket") || stringSliceContains(rules.ClientRPCOperations, "battle.result.submit") || stringSliceContains(rules.ClientWSSOperations, "battle.ticket.consume") {
 		t.Fatalf("room rules should publish split client RPC/WSS operations without service callbacks: %+v", rules)
 	}
@@ -2632,6 +2637,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.AllowedClientOperations, rules.ClientOperations) || !reflect.DeepEqual(event.ServiceCallbacks, rules.ServiceCallbacks) {
 		t.Fatalf("room rules and business event contract drifted: rules=%+v callbacks=%+v event=%+v callbacks=%+v", rules.ClientOperations, rules.ServiceCallbacks, event.AllowedClientOperations, event.ServiceCallbacks)
+	}
+	if !reflect.DeepEqual(event.DisallowedClientOperations, rules.DisallowedClientOperations) {
+		t.Fatalf("room rules and business event disallowed operation contract drifted: rules=%+v event=%+v", rules.DisallowedClientOperations, event.DisallowedClientOperations)
 	}
 	if !reflect.DeepEqual(event.ServiceCallbackContext, rules.ServiceCallbackContext) {
 		t.Fatalf("room rules and business event service callback context drifted: rules=%+v event=%+v", rules.ServiceCallbackContext, event.ServiceCallbackContext)

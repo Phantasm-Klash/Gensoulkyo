@@ -758,6 +758,7 @@ type RoomRulesSnapshot struct {
 	ClientOperations               []string          `json:"client_operations"`
 	ClientRPCOperations            []string          `json:"client_rpc_operations"`
 	ClientWSSOperations            []string          `json:"client_wss_operations"`
+	DisallowedClientOperations     []string          `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string          `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string `json:"service_callback_context"`
 	BusinessNotifications          []string          `json:"business_notifications"`
@@ -863,6 +864,7 @@ type BusinessEvent struct {
 	AllowedClientOperations        []string                `json:"allowed_client_operations"`
 	AllowedClientRPCOperations     []string                `json:"allowed_client_rpc_operations"`
 	AllowedClientWSSOperations     []string                `json:"allowed_client_wss_operations"`
+	DisallowedClientOperations     []string                `json:"disallowed_client_operations"`
 	ServiceCallbacks               []string                `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string       `json:"service_callback_context"`
 	BusinessNotifications          []string                `json:"business_notifications"`

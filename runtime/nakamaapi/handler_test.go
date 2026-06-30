@@ -350,6 +350,11 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "battle.servers") || !stringSliceContains(rulesPayload.ClientOperations, "battle.ticket") || !stringSliceContains(rulesPayload.ClientOperations, "matchmaking.cancel") || stringSliceContains(rulesPayload.ClientOperations, "battle.result.submit") || stringSliceContains(rulesPayload.ClientOperations, "battle.servers.register") {
 		t.Fatalf("room rules should expose client RPC/WSS operations without result submit: %+v", rulesPayload)
 	}
+	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.result.submit"} {
+		if !stringSliceContains(rulesPayload.DisallowedClientOperations, forbiddenOp) || stringSliceContains(rulesPayload.ClientOperations, forbiddenOp) || stringSliceContains(rulesPayload.ClientRPCOperations, forbiddenOp) || stringSliceContains(rulesPayload.ClientWSSOperations, forbiddenOp) {
+			t.Fatalf("room rules should explicitly disallow Nakama client op %q: %+v", forbiddenOp, rulesPayload)
+		}
+	}
 	if !stringSliceContains(rulesPayload.ClientRPCOperations, "battle.allocation") || !stringSliceContains(rulesPayload.ClientWSSOperations, "battle.ticket") || stringSliceContains(rulesPayload.ClientRPCOperations, "battle.result.submit") || stringSliceContains(rulesPayload.ClientWSSOperations, "battle.ticket.consume") {
 		t.Fatalf("room rules should expose split client RPC/WSS operations without service callbacks: %+v", rulesPayload)
 	}
@@ -609,6 +614,11 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 	if eventPayload.HighFrequencyBattleTickAllowed || eventPayload.ClientResultSubmitAllowed || stringSliceContains(eventPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("business event must not authorize high-frequency tick or client result submit: %+v", eventPayload)
+	}
+	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.result.submit"} {
+		if !stringSliceContains(eventPayload.DisallowedClientOperations, forbiddenOp) || stringSliceContains(eventPayload.AllowedClientOperations, forbiddenOp) || stringSliceContains(eventPayload.AllowedClientRPCOperations, forbiddenOp) || stringSliceContains(eventPayload.AllowedClientWSSOperations, forbiddenOp) {
+			t.Fatalf("business event should explicitly disallow Nakama client op %q: %+v", forbiddenOp, eventPayload)
+		}
 	}
 	if !eventPayload.BusinessEnvelopeRequired || !stringSliceContains(eventPayload.ForbiddenFields, "damage") || !stringSliceContains(eventPayload.ForbiddenFields, "settlement_key") {
 		t.Fatalf("business event should expose envelope and forbidden-field contract: %+v", eventPayload)
@@ -1203,6 +1213,60 @@ func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.
 	for _, audit := range snapshot.Audits {
 		if audit.Accepted || audit.Transport != security.BusinessEnvelopeTransportNakamaWSS || audit.Reason != security.ReasonVersion || !strings.HasPrefix(audit.Endpoint, "wss.battle.") || audit.SessionIDHint == "player-session" || audit.UserID != "player-user" {
 			t.Fatalf("service-origin WSS rejection audit should be non-secret and synthetic: %+v", audit)
+		}
+	}
+}
+
+func TestNakamaClientDispatchRejectsHighFrequencyAndSettlementAuthorityOperations(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	sessionID := "nakama-disallowed-client-session"
+	userID := "nakama-disallowed-client-user"
+	for index, name := range []string{
+		"match.input",
+		"match.snapshot",
+		"match.events",
+		"match.settle",
+		"battle.input",
+		"battle.snapshot",
+		"battle.events",
+	} {
+		rpc := handler.HandleRPC(RPCRequest{
+			ID:        name,
+			SessionID: sessionID,
+			UserID:    userID,
+			Payload:   envelopePayload(int64(index*2+1), "nonce-disallowed-rpc-"+name, strings.ReplaceAll(name, ".", "_"), map[string]any{"match_id": "client-match"}),
+		})
+		if rpc.OK || rpc.Status != 404 || rpc.ErrorCode != "not_found" {
+			t.Fatalf("Nakama RPC %s must not expose high-frequency/result authority path, got %+v", name, rpc)
+		}
+		wss := handler.HandleWSSMessage(WSSMessage{
+			Name:      name,
+			SessionID: sessionID,
+			UserID:    userID,
+			Payload:   envelopePayload(int64(index*2+2), "nonce-disallowed-wss-"+name, strings.ReplaceAll(name, ".", "_"), map[string]any{"match_id": "client-match"}),
+		})
+		if wss.OK || wss.Status != 404 || wss.ErrorCode != "not_found" {
+			t.Fatalf("Nakama WSS %s must not expose high-frequency/result authority path, got %+v", name, wss)
+		}
+	}
+	for index, name := range []string{"battle.result.submit", "battle.ticket.consume", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline"} {
+		rpc := handler.HandleRPC(RPCRequest{
+			ID:        name,
+			SessionID: sessionID,
+			UserID:    userID,
+			Payload:   envelopePayload(int64(100+index*2), "nonce-disallowed-rpc-"+name, strings.ReplaceAll(name, ".", "_"), map[string]any{"match_id": "client-match"}),
+		})
+		if rpc.OK || rpc.Status != 403 || rpc.ErrorCode != CodeServiceOriginRequired {
+			t.Fatalf("Nakama RPC %s must require service origin for callback authority, got %+v", name, rpc)
+		}
+		wss := handler.HandleWSSMessage(WSSMessage{
+			Name:      name,
+			SessionID: sessionID,
+			UserID:    userID,
+			Payload:   envelopePayload(int64(101+index*2), "nonce-disallowed-wss-"+name, strings.ReplaceAll(name, ".", "_"), map[string]any{"match_id": "client-match"}),
+		})
+		if wss.OK || wss.Status != 403 || wss.ErrorCode != CodeServiceOriginRequired {
+			t.Fatalf("Nakama WSS %s must stay service-origin-only, got %+v", name, wss)
 		}
 	}
 }
