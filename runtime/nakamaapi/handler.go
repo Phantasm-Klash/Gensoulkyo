@@ -509,12 +509,7 @@ func rpcSkipsEnvelope(rpcID string) bool {
 }
 
 func rpcRequiresServiceOrigin(rpcID string) bool {
-	switch rpcID {
-	case "battle.result.submit", "battle.ticket.consume", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline":
-		return true
-	default:
-		return false
-	}
+	return core.IsServiceCallbackOperation(rpcID)
 }
 
 func normalizeName(name string) string {

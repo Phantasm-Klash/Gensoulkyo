@@ -1077,13 +1077,7 @@ func TestNakamaServiceOriginRPCRejectsDirectBusinessEnvelopeFields(t *testing.T)
 
 func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
-	callbacks := []string{
-		"battle.servers.register",
-		"battle.servers.heartbeat",
-		"battle.servers.offline",
-		"battle.ticket.consume",
-		"battle.result.submit",
-	}
+	callbacks := core.ServiceCallbackOperations()
 	for index, name := range callbacks {
 		response := handler.HandleWSSMessage(WSSMessage{
 			Name:      name,

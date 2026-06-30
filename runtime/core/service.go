@@ -1142,8 +1142,8 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"protobuf",
 			"chacha20_poly1305",
 		},
-		ClientOperations:      contractClientOperations(),
-		ServiceCallbacks:      serviceCallbackOperations(),
+		ClientOperations:      ContractClientOperations(),
+		ServiceCallbacks:      ServiceCallbackOperations(),
 		BusinessNotifications: businessNotificationKinds(),
 		ClientAuthority: []string{
 			"input_packet",
@@ -2410,7 +2410,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 		UserID:                         user.UserID,
 		AllowedClientOperations:        businessEventClientOperations(),
-		ServiceCallbacks:               serviceCallbackOperations(),
+		ServiceCallbacks:               ServiceCallbackOperations(),
 		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEnvelopeRequired:       true,
 		ForbiddenFields:                sortedForbiddenClientFields(),
@@ -5806,7 +5806,7 @@ func cloneQueueResponse(source *QueueResponse) *QueueResponse {
 }
 
 func businessEventClientOperations() []string {
-	return contractClientOperations()
+	return ContractClientOperations()
 }
 
 func businessNotificationKinds() []string {
@@ -5894,6 +5894,10 @@ func contractClientOperations() []string {
 	}
 }
 
+func ContractClientOperations() []string {
+	return contractClientOperations()
+}
+
 func serviceCallbackOperations() []string {
 	return []string{
 		"battle.servers.register",
@@ -5902,6 +5906,20 @@ func serviceCallbackOperations() []string {
 		"battle.ticket.consume",
 		"battle.result.submit",
 	}
+}
+
+func ServiceCallbackOperations() []string {
+	return serviceCallbackOperations()
+}
+
+func IsServiceCallbackOperation(operation string) bool {
+	operation = strings.ToLower(strings.TrimSpace(operation))
+	for _, callback := range serviceCallbackOperations() {
+		if operation == callback {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedForbiddenClientFields() []string {

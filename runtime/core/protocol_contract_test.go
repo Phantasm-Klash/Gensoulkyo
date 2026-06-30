@@ -92,6 +92,38 @@ func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
 	}
 }
 
+func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testing.T) {
+	clientOps := ContractClientOperations()
+	serviceCallbacks := ServiceCallbackOperations()
+	if len(clientOps) == 0 || len(serviceCallbacks) == 0 {
+		t.Fatalf("business operation contracts must not be empty: client=%+v service=%+v", clientOps, serviceCallbacks)
+	}
+	for _, callback := range serviceCallbacks {
+		if !IsServiceCallbackOperation(callback) {
+			t.Fatalf("service callback helper does not recognize %q", callback)
+		}
+		if stringSliceContains(clientOps, callback) {
+			t.Fatalf("service callback %q must not be exposed as a client operation: client=%+v service=%+v", callback, clientOps, serviceCallbacks)
+		}
+	}
+	for _, expected := range []string{
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+		"battle.servers.offline",
+		"battle.ticket.consume",
+		"battle.result.submit",
+	} {
+		if !IsServiceCallbackOperation(expected) {
+			t.Fatalf("service callback contract missing %q: %+v", expected, serviceCallbacks)
+		}
+	}
+	for _, clientOp := range clientOps {
+		if IsServiceCallbackOperation(clientOp) {
+			t.Fatalf("client operation %q must not require service origin: client=%+v service=%+v", clientOp, clientOps, serviceCallbacks)
+		}
+	}
+}
+
 func TestBattleModeActionFixtureContract(t *testing.T) {
 	action := struct {
 		Version                   int    `json:"version"`
