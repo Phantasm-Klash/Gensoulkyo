@@ -149,6 +149,14 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("client operation %q must not require service origin: client=%+v service=%+v", clientOp, clientOps, serviceCallbacks)
 		}
 	}
+	if !stringSliceContains(clientOps, "battle.servers") {
+		t.Fatalf("client operation contract should expose battle server discovery: client=%+v", clientOps)
+	}
+	for _, serviceOnly := range []string{"battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline"} {
+		if stringSliceContains(clientOps, serviceOnly) {
+			t.Fatalf("client operation contract must not expose service-only battle server callback %q: client=%+v", serviceOnly, clientOps)
+		}
+	}
 }
 
 func TestBattleModeActionFixtureContract(t *testing.T) {
