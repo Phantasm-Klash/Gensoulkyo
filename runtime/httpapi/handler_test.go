@@ -1065,12 +1065,18 @@ func TestHTTPHeartbeatFlow(t *testing.T) {
 	if matchBeat.PresenceStatus != "in_match" || matchBeat.MatchStatus != "running" || !matchBeat.Connected || matchBeat.MatchTick < 1 || matchBeat.LatestEventCursor <= 1 || !matchBeat.ServerAuthoritative {
 		t.Fatalf("match heartbeat invalid: %+v", matchBeat)
 	}
+	if matchBeat.BattleAllocation == nil || matchBeat.BattleAllocation.MatchID != bobQueue.MatchID || matchBeat.BattleTicket == nil || matchBeat.BattleTicket.Ticket.UserID != alice.UserID || matchBeat.BattleTicket.SignatureHex == "" {
+		t.Fatalf("match heartbeat should include low-frequency allocation and signed ticket descriptors: %+v", matchBeat)
+	}
 	postJSON[core.ReconnectResponse](t, server.URL+"/v1/matches/"+bobQueue.MatchID+"/disconnect", alice.SessionToken, map[string]any{})
 	disconnectBeat := postJSON[core.PresenceHeartbeatResponse](t, server.URL+"/v1/presence/heartbeat", alice.SessionToken, map[string]any{
 		"match_id": bobQueue.MatchID,
 	})
 	if disconnectBeat.PresenceStatus != "disconnected" || disconnectBeat.Connected || disconnectBeat.ReconnectSecondsLeft <= 0 {
 		t.Fatalf("disconnect heartbeat invalid: %+v", disconnectBeat)
+	}
+	if disconnectBeat.BattleAllocation == nil || disconnectBeat.BattleTicket == nil || disconnectBeat.BattleTicket.Ticket.MatchID != bobQueue.MatchID {
+		t.Fatalf("disconnect heartbeat should preserve reconnect allocation/ticket descriptors: %+v", disconnectBeat)
 	}
 }
 

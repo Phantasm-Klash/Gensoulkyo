@@ -2385,6 +2385,12 @@ func TestHeartbeatReportsQueueRoomAndMatchPresence(t *testing.T) {
 	if matchBeat.TicketID != queued.TicketID || matchBeat.Loadout.CharacterID != "wide" {
 		t.Fatalf("match heartbeat missing ticket/loadout: %+v", matchBeat)
 	}
+	if matchBeat.BattleAllocation == nil || matchBeat.BattleAllocation.MatchID != found.MatchID || !matchBeat.BattleAllocation.ServerAuthoritative {
+		t.Fatalf("match heartbeat missing server battle allocation descriptor: %+v", matchBeat)
+	}
+	if matchBeat.BattleTicket == nil || matchBeat.BattleTicket.Ticket.MatchID != found.MatchID || matchBeat.BattleTicket.Ticket.UserID != alice.UserID || matchBeat.BattleTicket.Ticket.BattleServerID != matchBeat.BattleAllocation.BattleServerID || matchBeat.BattleTicket.SignatureHex == "" {
+		t.Fatalf("match heartbeat missing signed user-bound battle ticket: %+v", matchBeat)
+	}
 	if _, err := service.DisconnectMatch(alice.SessionToken, found.MatchID); err != nil {
 		t.Fatalf("disconnect: %v", err)
 	}
@@ -2394,6 +2400,9 @@ func TestHeartbeatReportsQueueRoomAndMatchPresence(t *testing.T) {
 	}
 	if disconnectBeat.PresenceStatus != "disconnected" || disconnectBeat.Connected || disconnectBeat.ReconnectSecondsLeft != ReconnectWindowSeconds {
 		t.Fatalf("disconnect heartbeat should not reconnect player: %+v", disconnectBeat)
+	}
+	if disconnectBeat.BattleAllocation == nil || disconnectBeat.BattleTicket == nil || disconnectBeat.BattleTicket.Ticket.UserID != alice.UserID {
+		t.Fatalf("disconnect heartbeat should preserve reconnect allocation/ticket descriptor: %+v", disconnectBeat)
 	}
 }
 

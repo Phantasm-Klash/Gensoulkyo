@@ -688,6 +688,10 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !heartbeat.OK || heartbeat.Payload.(*core.PresenceHeartbeatResponse).PresenceStatus != "in_match" || heartbeat.Payload.(*core.PresenceHeartbeatResponse).ModeID != "pvp_duel" {
 		t.Fatalf("heartbeat should report authoritative running room match: %+v", heartbeat)
 	}
+	heartbeatPayload := heartbeat.Payload.(*core.PresenceHeartbeatResponse)
+	if heartbeatPayload.BattleAllocation == nil || heartbeatPayload.BattleAllocation.MatchID != found.MatchID || heartbeatPayload.BattleTicket == nil || heartbeatPayload.BattleTicket.Ticket.UserID != guestUser || heartbeatPayload.BattleTicket.SignatureHex == "" {
+		t.Fatalf("heartbeat should carry low-frequency allocation and signed ticket descriptors: %+v", heartbeatPayload)
+	}
 
 	wssAllocation := handler.HandleWSSMessage(WSSMessage{
 		Name:      "battle.allocation",

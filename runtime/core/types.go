@@ -800,30 +800,32 @@ type PresenceHeartbeatRequest struct {
 }
 
 type PresenceHeartbeatResponse struct {
-	OK                   bool          `json:"ok"`
-	UserID               string        `json:"user_id"`
-	PresenceStatus       string        `json:"presence_status"`
-	SessionStatus        string        `json:"session_status"`
-	TicketID             string        `json:"ticket_id,omitempty"`
-	QueueStatus          string        `json:"queue_status,omitempty"`
-	RoomCode             string        `json:"room_code,omitempty"`
-	RoomStatus           string        `json:"room_status,omitempty"`
-	RequiredPlayers      int           `json:"required_players,omitempty"`
-	CurrentPlayers       int           `json:"current_players,omitempty"`
-	ModeID               string        `json:"mode_id,omitempty"`
-	Loadout              PlayerLoadout `json:"loadout,omitempty"`
-	MatchID              string        `json:"match_id,omitempty"`
-	MatchStatus          string        `json:"match_status,omitempty"`
-	MatchTick            int           `json:"match_tick"`
-	LastClientTick       int           `json:"last_client_tick"`
-	Connected            bool          `json:"connected"`
-	Ready                bool          `json:"ready"`
-	ReconnectSecondsLeft int           `json:"reconnect_seconds_left"`
-	LastEventCursor      int           `json:"last_event_cursor"`
-	LatestEventCursor    int           `json:"latest_event_cursor"`
-	OldestEventCursor    int           `json:"oldest_event_cursor"`
-	ServerTime           time.Time     `json:"server_time"`
-	ServerAuthoritative  bool          `json:"server_authoritative"`
+	OK                   bool                    `json:"ok"`
+	UserID               string                  `json:"user_id"`
+	PresenceStatus       string                  `json:"presence_status"`
+	SessionStatus        string                  `json:"session_status"`
+	TicketID             string                  `json:"ticket_id,omitempty"`
+	QueueStatus          string                  `json:"queue_status,omitempty"`
+	RoomCode             string                  `json:"room_code,omitempty"`
+	RoomStatus           string                  `json:"room_status,omitempty"`
+	RequiredPlayers      int                     `json:"required_players,omitempty"`
+	CurrentPlayers       int                     `json:"current_players,omitempty"`
+	ModeID               string                  `json:"mode_id,omitempty"`
+	Loadout              PlayerLoadout           `json:"loadout,omitempty"`
+	MatchID              string                  `json:"match_id,omitempty"`
+	MatchStatus          string                  `json:"match_status,omitempty"`
+	MatchTick            int                     `json:"match_tick"`
+	LastClientTick       int                     `json:"last_client_tick"`
+	Connected            bool                    `json:"connected"`
+	Ready                bool                    `json:"ready"`
+	ReconnectSecondsLeft int                     `json:"reconnect_seconds_left"`
+	LastEventCursor      int                     `json:"last_event_cursor"`
+	LatestEventCursor    int                     `json:"latest_event_cursor"`
+	OldestEventCursor    int                     `json:"oldest_event_cursor"`
+	BattleAllocation     *BattleServerAllocation `json:"battle_allocation,omitempty"`
+	BattleTicket         *SignedBattleTicket     `json:"battle_ticket,omitempty"`
+	ServerTime           time.Time               `json:"server_time"`
+	ServerAuthoritative  bool                    `json:"server_authoritative"`
 }
 
 type ReadyResponse struct {
