@@ -565,22 +565,29 @@ func TestHTTPServiceCallbacksRequireDevelopmentBattleCallbackHeaders(t *testing.
 		}
 		for name, headers := range map[string]map[string]string{
 			"wrong origin":     {headerServiceOrigin: "player", headerBattleCallback: "true"},
-			"missing callback": {headerServiceOrigin: serviceOriginBattle},
-			"false callback":   {headerServiceOrigin: serviceOriginBattle, headerBattleCallback: "false"},
+			"missing callback": {headerServiceOrigin: core.ServiceCallbackContext()[serviceOriginContextKey]},
+			"false callback":   {headerServiceOrigin: core.ServiceCallbackContext()[serviceOriginContextKey], headerBattleCallback: "false"},
 		} {
 			response := postRawWithHeaders(t, server.URL+route, "", map[string]any{}, headers)
 			if response.Code != http.StatusForbidden || response.ErrorCode != "service_origin_required" || !strings.Contains(response.Message, "development battle callback headers") {
 				t.Fatalf("service callback %s should reject %s callback headers, got %+v", route, name, response)
 			}
 		}
-		for _, callbackHeader := range []string{"true", "1", "yes"} {
+		for _, callbackHeader := range []string{core.ServiceCallbackContext()[serviceCallbackContextKey], "1", "yes"} {
 			response := postRawWithHeaders(t, server.URL+route, "", map[string]any{}, map[string]string{
-				headerServiceOrigin:  serviceOriginBattle,
+				headerServiceOrigin:  core.ServiceCallbackContext()[serviceOriginContextKey],
 				headerBattleCallback: callbackHeader,
 			})
 			if response.Code == http.StatusForbidden && response.ErrorCode == "service_origin_required" {
 				t.Fatalf("service callback %s should accept development callback header %q before core validation, got %+v", route, callbackHeader, response)
 			}
+		}
+		response = postRawWithHeaders(t, server.URL+route, "", map[string]any{}, map[string]string{
+			headerServiceOrigin:  "  " + strings.ToUpper(core.ServiceCallbackContext()[serviceOriginContextKey]) + "  ",
+			headerBattleCallback: "  " + strings.ToUpper(core.ServiceCallbackContext()[serviceCallbackContextKey]) + "  ",
+		})
+		if response.Code == http.StatusForbidden && response.ErrorCode == "service_origin_required" {
+			t.Fatalf("service callback %s should normalize shared callback context headers, got %+v", route, response)
 		}
 	}
 }
@@ -1317,8 +1324,8 @@ func businessEnvelopeHeaders(seq int64, timestamp time.Time, nonce string, op st
 
 func serviceCallbackHeaders() map[string]string {
 	return map[string]string{
-		headerServiceOrigin:  serviceOriginBattle,
-		headerBattleCallback: "true",
+		headerServiceOrigin:  core.ServiceCallbackContext()[serviceOriginContextKey],
+		headerBattleCallback: core.ServiceCallbackContext()[serviceCallbackContextKey],
 	}
 }
 
