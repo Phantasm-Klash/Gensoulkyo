@@ -2029,6 +2029,9 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 		return nil, newError(codeNotFound, "battle ticket not found")
 	}
 	ticket := signed.Ticket
+	if err := validateBattleTicketConsumeVersion(req.Version, ticket); err != nil {
+		return nil, err
+	}
 	if ticket.MatchID != matchID {
 		return nil, newError(codeInvalidRequest, "battle ticket match mismatch")
 	}
@@ -3612,6 +3615,28 @@ func validateClientMatchVersion(version VersionStamp) error {
 	}
 	if trimmed := strings.TrimSpace(version.RulesetVersion); trimmed != "" && trimmed != RulesetVersion {
 		return newError(codeInvalidMode, "ruleset version mismatch")
+	}
+	return nil
+}
+
+func validateBattleTicketConsumeVersion(version VersionStamp, ticket BattleTicket) error {
+	if version.ProtocolVersion == 0 {
+		return newError(codeInvalidRequest, "battle ticket consume version.protocol_version is required")
+	}
+	if version.ProtocolVersion != ticket.Version.ProtocolVersion {
+		return newError(codeInvalidRequest, "battle ticket consume protocol version mismatch")
+	}
+	if strings.TrimSpace(version.BattleAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle ticket consume version.battle_api_version is required")
+	}
+	if version.BattleAPIVersion != ticket.Version.BattleAPIVersion {
+		return newError(codeInvalidRequest, "battle ticket consume battle api version mismatch")
+	}
+	if strings.TrimSpace(version.RulesetVersion) == "" {
+		return newError(codeInvalidRequest, "battle ticket consume version.ruleset_version is required")
+	}
+	if version.RulesetVersion != ticket.RulesetVersion {
+		return newError(codeInvalidRequest, "battle ticket consume ruleset version mismatch")
 	}
 	return nil
 }

@@ -978,6 +978,7 @@ func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T)
 			id: "battle.ticket.consume",
 			op: "battle_ticket_consume",
 			body: map[string]any{
+				"version":          map[string]any{"protocol_version": core.ProtocolVersion, "battle_api_version": core.BattleAPIVersion, "ruleset_version": core.RulesetVersion},
 				"ticket_id":        "ticket-client-shaped",
 				"match_id":         "match-client-shaped",
 				"battle_server_id": "battle-client-shaped",
@@ -1553,6 +1554,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:      "battle.ticket.consume",
 		Service: true,
 		Payload: map[string]any{
+			"version":          allocation.Ticket.Version,
 			"ticket_id":        allocation.Ticket.TicketID,
 			"match_id":         match.MatchID,
 			"user_id":          allocation.Ticket.UserID,
@@ -1574,6 +1576,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:      "battle.ticket.consume",
 		Service: true,
 		Payload: map[string]any{
+			"version":          allocation.Ticket.Version,
 			"ticket_id":        allocation.Ticket.TicketID,
 			"match_id":         match.MatchID,
 			"battle_server_id": allocation.Ticket.BattleServerID,

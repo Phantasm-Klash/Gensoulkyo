@@ -67,6 +67,31 @@ func TestMatchEntryRequestsExposeClientVersionContract(t *testing.T) {
 	}
 }
 
+func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
+	req := BattleTicketConsumeRequest{
+		Version:        currentVersionStamp(),
+		TicketID:       "ticket-contract",
+		MatchID:        "match-contract",
+		BattleServerID: "battle-contract",
+		TicketNonceHex: "abcdef",
+	}
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal consume request: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal consume request: %v", err)
+	}
+	version, ok := roundTrip["version"].(map[string]any)
+	if !ok {
+		t.Fatalf("consume request must expose version stamp: %s", encoded)
+	}
+	if version["protocol_version"] == nil || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
+		t.Fatalf("consume request version missing battle gates: %+v", version)
+	}
+}
+
 func TestBattleModeActionFixtureContract(t *testing.T) {
 	action := struct {
 		Version                   int    `json:"version"`

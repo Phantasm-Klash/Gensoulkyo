@@ -685,6 +685,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		t.Fatalf("explicit battle ticket invalid: %+v", ticket)
 	}
 	consume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          ticket.Ticket.Version,
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
 		"user_id":          alice.UserID,
@@ -699,6 +700,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		t.Fatalf("battle ticket consume should echo ticket lifecycle timestamps: ticket=%+v consume=%+v", ticket.Ticket, consume)
 	}
 	duplicateConsume := postJSON[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          ticket.Ticket.Version,
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
 		"battle_server_id": ticket.Ticket.BattleServerID,
@@ -711,6 +713,7 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 		t.Fatalf("duplicate consume should preserve first consume lifecycle timestamps: first=%+v duplicate=%+v", consume, duplicateConsume)
 	}
 	badConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          ticket.Ticket.Version,
 		"ticket_id":        ticket.Ticket.TicketID,
 		"match_id":         queueBob.MatchID,
 		"battle_server_id": ticket.Ticket.BattleServerID,
@@ -718,6 +721,18 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	})
 	if badConsume.Code != http.StatusBadRequest || badConsume.ErrorCode != "invalid_request" {
 		t.Fatalf("expected bad ticket consume rejection, got %+v", badConsume)
+	}
+	staleVersion := ticket.Ticket.Version
+	staleVersion.RulesetVersion = "ruleset-stale"
+	staleConsume := postRaw(t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
+		"version":          staleVersion,
+		"ticket_id":        ticket.Ticket.TicketID,
+		"match_id":         queueBob.MatchID,
+		"battle_server_id": ticket.Ticket.BattleServerID,
+		"ticket_nonce_hex": ticket.Ticket.TicketNonceHex,
+	})
+	if staleConsume.Code != http.StatusBadRequest || staleConsume.ErrorCode != "invalid_request" {
+		t.Fatalf("expected stale ticket consume version rejection, got %+v", staleConsume)
 	}
 
 	postJSON[core.ReadyResponse](t, server.URL+"/v1/matches/"+queueBob.MatchID+"/ready", alice.SessionToken, map[string]any{})

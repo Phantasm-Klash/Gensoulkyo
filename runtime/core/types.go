@@ -351,12 +351,13 @@ type SignedBattleTicket struct {
 }
 
 type BattleTicketConsumeRequest struct {
-	TicketID       string `json:"ticket_id"`
-	MatchID        string `json:"match_id"`
-	UserID         string `json:"user_id,omitempty"`
-	PlayerID       string `json:"player_id,omitempty"`
-	BattleServerID string `json:"battle_server_id"`
-	TicketNonceHex string `json:"ticket_nonce_hex"`
+	Version        VersionStamp `json:"version"`
+	TicketID       string       `json:"ticket_id"`
+	MatchID        string       `json:"match_id"`
+	UserID         string       `json:"user_id,omitempty"`
+	PlayerID       string       `json:"player_id,omitempty"`
+	BattleServerID string       `json:"battle_server_id"`
+	TicketNonceHex string       `json:"ticket_nonce_hex"`
 }
 
 type BattleTicketConsumeResponse struct {

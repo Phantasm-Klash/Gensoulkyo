@@ -998,6 +998,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		t.Fatalf("battle ticket: %v", err)
 	}
 	consume, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        ticket.Ticket.Version,
 		TicketID:       ticket.Ticket.TicketID,
 		MatchID:        matchID,
 		UserID:         alice.UserID,
@@ -1019,6 +1020,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	}
 	afterConsumeAuditCount := len(repo.tickets)
 	duplicate, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        ticket.Ticket.Version,
 		TicketID:       ticket.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: ticket.Ticket.BattleServerID,
@@ -1044,12 +1046,32 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		t.Fatalf("consumed ticket should not be reissued: old=%+v replacement=%+v", ticket.Ticket, replacement.Ticket)
 	}
 	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        replacement.Ticket.Version,
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
 		TicketNonceHex: "wrong-nonce",
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected nonce mismatch rejection, got %v", err)
+	}
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected missing consume version rejection, got %v", err)
+	}
+	staleVersion := replacement.Ticket.Version
+	staleVersion.RulesetVersion = "ruleset-stale"
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		Version:        staleVersion,
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: replacement.Ticket.TicketNonceHex,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale consume ruleset rejection, got %v", err)
 	}
 	status := service.BattleLifecycleAuditStatus()
 	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket" {
