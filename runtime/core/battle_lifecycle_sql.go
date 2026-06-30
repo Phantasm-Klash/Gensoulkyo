@@ -15,6 +15,8 @@ INSERT INTO match_allocation_audits (
     endpoint,
     region,
     protocol_version,
+    business_api_version,
+    battle_api_version,
     ruleset_version,
     mode_config_hash,
     server_seed_hash,
@@ -24,7 +26,7 @@ INSERT INTO match_allocation_audits (
     server_authoritative,
     created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16
 ) ON CONFLICT DO NOTHING`
 
 const insertBattleTicketAuditSQL = `
@@ -40,6 +42,8 @@ INSERT INTO battle_ticket_audits (
     key_id,
     ruleset_version,
     protocol_version,
+    business_api_version,
+    battle_api_version,
     deck_snapshot_hash,
     mode_config_hash,
     nonce,
@@ -48,7 +52,7 @@ INSERT INTO battle_ticket_audits (
     server_authoritative,
     consumed_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
 ) ON CONFLICT (ticket_id) DO UPDATE SET
     status = EXCLUDED.status,
     consumed_at = COALESCE(EXCLUDED.consumed_at, battle_ticket_audits.consumed_at),
@@ -148,6 +152,8 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordMatchAllocationAudit(record
 		record.Endpoint,
 		record.Region,
 		record.ProtocolVersion,
+		record.BusinessAPIVersion,
+		record.BattleAPIVersion,
 		record.RulesetVersion,
 		record.ModeConfigHash,
 		record.ServerSeedHash,
@@ -177,6 +183,8 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordBattleTicketAudit(record Ba
 		record.KeyID,
 		record.RulesetVersion,
 		record.ProtocolVersion,
+		record.BusinessAPIVersion,
+		record.BattleAPIVersion,
 		record.DeckSnapshotHash,
 		record.ModeConfigHash,
 		record.Nonce,

@@ -2232,10 +2232,10 @@ func nakamaSQLHasDuplicateBattleResultAudit() bool {
 
 func nakamaSQLHasConsumedBattleTicketAudit() bool {
 	for _, call := range nakamaSQLCaptureCalls() {
-		if !strings.Contains(call.query, "INSERT INTO battle_ticket_audits") || len(call.args) < 18 {
+		if !strings.Contains(call.query, "INSERT INTO battle_ticket_audits") || len(call.args) < 20 {
 			continue
 		}
-		if strings.HasPrefix(fmt.Sprint(call.args[0]), "battle_ticket_") && call.args[15] == "consumed" && call.args[16] == true && call.args[17] != nil {
+		if strings.HasPrefix(fmt.Sprint(call.args[0]), "battle_ticket_") && call.args[11] == core.BusinessAPIVersion && call.args[12] == core.BattleAPIVersion && call.args[17] == "consumed" && call.args[18] == true && call.args[19] != nil {
 			return true
 		}
 	}
@@ -2247,13 +2247,13 @@ func nakamaSQLHasBattleServerLifecycleAudits() bool {
 	foundHeartbeat := false
 	foundOffline := false
 	for _, call := range nakamaSQLCaptureCalls() {
-		if !strings.Contains(call.query, "INSERT INTO match_allocation_audits") || len(call.args) < 14 {
+		if !strings.Contains(call.query, "INSERT INTO match_allocation_audits") || len(call.args) < 16 {
 			continue
 		}
-		if call.args[0] != "battle-server:nakama-sql-battle" || call.args[2] != "nakama-sql-battle" || call.args[12] != true {
+		if call.args[0] != "battle-server:nakama-sql-battle" || call.args[2] != "nakama-sql-battle" || call.args[6] != core.BusinessAPIVersion || call.args[7] != core.BattleAPIVersion || call.args[14] != true {
 			continue
 		}
-		switch call.args[11] {
+		switch call.args[13] {
 		case "server_registered":
 			foundRegister = true
 		case "server_heartbeat":
