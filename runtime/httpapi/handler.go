@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	headerServiceOrigin  = "X-PhK-Service-Origin"
-	headerBattleCallback = "X-PhK-Battle-Callback"
-	serviceOriginBattle  = "battle_server"
+	headerServiceOrigin       = "X-PhK-Service-Origin"
+	headerBattleCallback      = "X-PhK-Battle-Callback"
+	serviceOriginContextKey   = "gensoulkyo_service_origin"
+	serviceCallbackContextKey = "gensoulkyo_battle_callback"
 )
 
 type Handler struct {
@@ -895,7 +896,7 @@ func rejectBusinessEnvelopeHeadersForServiceRoute(w http.ResponseWriter, r *http
 }
 
 func rejectMissingServiceOriginHeadersForServiceRoute(w http.ResponseWriter, r *http.Request) bool {
-	if strings.ToLower(strings.TrimSpace(r.Header.Get(headerServiceOrigin))) == serviceOriginBattle && truthyHeader(r.Header.Get(headerBattleCallback)) {
+	if serviceCallbackHeadersMatch(r.Header) {
 		return false
 	}
 	writeJSON(w, http.StatusForbidden, map[string]any{
@@ -906,9 +907,25 @@ func rejectMissingServiceOriginHeadersForServiceRoute(w http.ResponseWriter, r *
 	return true
 }
 
+func serviceCallbackHeadersMatch(headers http.Header) bool {
+	if normalizeServiceCallbackValue(headers.Get(headerServiceOrigin)) != serviceCallbackContextValue(serviceOriginContextKey) {
+		return false
+	}
+	return truthyHeader(headers.Get(headerBattleCallback))
+}
+
+func serviceCallbackContextValue(key string) string {
+	return normalizeServiceCallbackValue(core.ServiceCallbackContext()[key])
+}
+
+func normalizeServiceCallbackValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
 func truthyHeader(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes":
+	expected := serviceCallbackContextValue(serviceCallbackContextKey)
+	switch normalizeServiceCallbackValue(value) {
+	case "1", "yes", expected:
 		return true
 	default:
 		return false
