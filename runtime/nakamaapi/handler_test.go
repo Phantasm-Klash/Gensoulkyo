@@ -970,6 +970,14 @@ func TestNakamaRPCRejectsServiceOriginBattleResultSubmitWithPlayerContext(t *tes
 	if response.OK || response.Status != 403 || response.ErrorCode != CodeServiceOriginRequired || !strings.Contains(response.Message, "must not include player session context") {
 		t.Fatalf("service-origin result submit with player context must fail closed before core dispatch, got %+v", response)
 	}
+	snapshot := handler.EnvelopeSnapshot()
+	if snapshot.Accepted != 0 || snapshot.Rejected != 1 || snapshot.SessionCount != 0 || len(snapshot.Audits) != 1 {
+		t.Fatalf("miswired service-origin player context should audit without replay state: %+v", snapshot)
+	}
+	audit := snapshot.Audits[0]
+	if audit.Accepted || audit.Transport != security.BusinessEnvelopeTransportNakamaRPC || audit.Endpoint != "rpc.battle.result.submit" || audit.UserID != "player-user" || audit.SessionIDHint == "player-session" {
+		t.Fatalf("miswired service-origin player context audit should be synthetic and sanitized: %+v", audit)
+	}
 }
 
 func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *testing.T) {
