@@ -29,6 +29,23 @@ func TestServiceOriginRPCContextGate(t *testing.T) {
 	if !isServiceOriginRPC(withAnyVars, "battle.ticket.consume") {
 		t.Fatalf("trusted battle callback vars from map[string]any should allow service-origin RPC")
 	}
+	withNumericCallback := context.WithValue(base, runtime.RUNTIME_CTX_VARS, map[string]string{
+		serviceOriginVarKey:   serviceOriginBattle,
+		serviceCallbackVarKey: "1",
+	})
+	if !isServiceOriginRPC(withNumericCallback, "battle.servers.heartbeat") {
+		t.Fatalf("numeric battle callback var should allow service-origin RPC")
+	}
+	for name, vars := range map[string]map[string]string{
+		"wrong origin":     {serviceOriginVarKey: "player", serviceCallbackVarKey: "true"},
+		"missing callback": {serviceOriginVarKey: serviceOriginBattle},
+		"false callback":   {serviceOriginVarKey: serviceOriginBattle, serviceCallbackVarKey: "false"},
+	} {
+		untrusted := context.WithValue(base, runtime.RUNTIME_CTX_VARS, vars)
+		if isServiceOriginRPC(untrusted, "battle.result.submit") {
+			t.Fatalf("%s vars must not allow service-origin RPC", name)
+		}
+	}
 	withPlayerSession := context.WithValue(withVars, runtime.RUNTIME_CTX_SESSION_ID, "player-session")
 	if isServiceOriginRPC(withPlayerSession, "battle.result.submit") {
 		t.Fatalf("player-scoped context must never become service-origin")
