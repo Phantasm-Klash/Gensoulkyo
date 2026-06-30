@@ -79,6 +79,11 @@ var forbiddenClientFields = map[string]struct{}{
 	"mode_state":             {},
 	"server_authoritative":   {},
 	"client_authored_reward": {},
+	"final_result":           {},
+	"mode_result":            {},
+	"player_ids":             {},
+	"result_hash":            {},
+	"settlement_key":         {},
 }
 
 type Error struct {
@@ -1147,6 +1152,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"rooms.leave",
 			"rooms.message",
 			"business.event",
+			"business.event.settlement",
 			"matchmaking.ticket",
 			"matchmaking.cancel",
 			"match.ready",
@@ -1501,7 +1507,7 @@ func (s *Service) BusinessEvent(sessionToken string, req BusinessEventRequest) (
 		kind = "presence"
 	}
 	switch kind {
-	case "presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket":
+	case "presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket", "settlement":
 	default:
 		return nil, newError(codeInvalidRequest, "business event kind %q is not supported", kind)
 	}
@@ -2457,7 +2463,9 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 			event.MatchID = ticket.MatchID
 			event.CurrentPlayers = mode.MinPlayers
 		}
-		event.Queue = cloneQueueResponse(s.queueResponseLocked(ticket, mode, depth, match))
+		if kind != "settlement" {
+			event.Queue = cloneQueueResponse(s.queueResponseLocked(ticket, mode, depth, match))
+		}
 		if ticket.RoomCode != "" {
 			if room := s.rooms[normalizeRoomCode(ticket.RoomCode)]; room != nil {
 				snapshot := s.roomSnapshotLocked(room, now)
@@ -2494,7 +2502,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		event.ReadyCount = s.readyCountLocked(match)
 		allocation := copyBattleAllocation(s.ensureBattleAllocationLocked(match))
 		event.BattleAllocation = &allocation
-		if player != nil {
+		if player != nil && kind != "settlement" {
 			if signed, err := s.signedBattleTicketLocked(match, user); err == nil {
 				ticketCopy := copySignedBattleTicket(signed)
 				event.BattleTicket = &ticketCopy
@@ -2534,7 +2542,21 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		ticketCopy := copySignedBattleTicket(signed)
 		event.BattleTicket = &ticketCopy
 	}
-	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && kind != "presence" {
+	if kind == "settlement" {
+		if match == nil {
+			return nil, newError(codeInvalidRequest, "match_id or matched ticket_id is required for settlement event")
+		}
+		settlement, ok := s.settlements[settlementKey(match.MatchID, user.UserID)]
+		if !ok || settlement == nil {
+			return nil, newError(codeMatchState, "match settlement is not available")
+		}
+		copy := copyMatchEndEvent(settlement)
+		event.Settlement = &copy
+		event.MatchStatus = "ended"
+		event.MatchID = settlement.MatchID
+		event.ModeID = settlement.Mode
+	}
+	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && event.Settlement == nil && kind != "presence" {
 		return nil, newError(codeInvalidRequest, "business event requires ticket_id, room_code, or match_id")
 	}
 	return event, nil
@@ -4298,6 +4320,10 @@ func firstForbiddenFieldDeep(raw map[string]any) string {
 	return ""
 }
 
+func ForbiddenClientField(raw map[string]any) string {
+	return firstForbiddenFieldDeep(raw)
+}
+
 func sanitizedLobbyMetadata(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
 		return nil
@@ -5737,6 +5763,7 @@ func businessEventClientOperations() []string {
 		"rooms.leave",
 		"rooms.message",
 		"business.event",
+		"business.event.settlement",
 		"match.ready",
 		"match.disconnect",
 		"match.reconnect",

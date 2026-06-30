@@ -844,6 +844,7 @@ type BusinessEvent struct {
 	Ready                          *ReadyResponse          `json:"ready,omitempty"`
 	BattleAllocation               *BattleServerAllocation `json:"battle_allocation,omitempty"`
 	BattleTicket                   *SignedBattleTicket     `json:"battle_ticket,omitempty"`
+	Settlement                     *MatchEndEvent          `json:"settlement,omitempty"`
 	AllowedClientOperations        []string                `json:"allowed_client_operations"`
 	ServiceCallbacks               []string                `json:"service_callbacks"`
 	HighFrequencyBattleTickAllowed bool                    `json:"high_frequency_battle_tick_allowed"`

@@ -154,6 +154,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(request.SessionID, req) })
 	case "business.event":
+		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
+			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
+		}
 		var req core.BusinessEventRequest
 		if err := decodeBody(body, &req); err != nil {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
@@ -288,6 +291,9 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(message.SessionID, req) })
 	case "business.event":
+		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
+			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
+		}
 		var req core.BusinessEventRequest
 		if err := decodeBody(body, &req); err != nil {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())

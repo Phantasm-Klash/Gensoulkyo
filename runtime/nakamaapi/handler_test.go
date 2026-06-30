@@ -1557,11 +1557,43 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if receipt := duplicateResultSubmit.Payload.(*core.BattleResultSubmitResponse); !receipt.Accepted || !receipt.Duplicate || !receipt.ServerAuthoritative {
 		t.Fatalf("duplicate result submit receipt should be idempotent and authoritative: %+v", receipt)
 	}
+	settlementEvent := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(12, "nonce-sql-host-settlement-event", "business_event", map[string]any{
+			"kind":     "settlement",
+			"match_id": match.MatchID,
+		}),
+	})
+	if !settlementEvent.OK || settlementEvent.Status != 200 {
+		t.Fatalf("settlement business event failed: %+v", settlementEvent)
+	}
+	settlementPayload := settlementEvent.Payload.(*core.BusinessEvent)
+	if settlementPayload.Topic != "nakama_wss.business.settlement" || settlementPayload.MatchID != match.MatchID || settlementPayload.Settlement == nil || settlementPayload.Settlement.MatchID != match.MatchID || settlementPayload.Settlement.ModeResult["battle_result_hash"] != "sha256:abcd1234" {
+		t.Fatalf("settlement business event should project verified server settlement: %+v", settlementPayload)
+	}
+	if settlementPayload.HighFrequencyBattleTickAllowed || settlementPayload.ClientResultSubmitAllowed || stringSliceContains(settlementPayload.AllowedClientOperations, "battle.result.submit") {
+		t.Fatalf("settlement business event must not authorize battle tick or client result submit: %+v", settlementPayload)
+	}
+	clientAuthoredSettlement := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(13, "nonce-sql-host-settlement-client-authored", "business_event", map[string]any{
+			"kind":        "settlement",
+			"match_id":    match.MatchID,
+			"result_hash": "client-authored",
+		}),
+	})
+	if clientAuthoredSettlement.OK || clientAuthoredSettlement.Status != 403 || clientAuthoredSettlement.ErrorCode != "forbidden_field" {
+		t.Fatalf("client-authored settlement fields must be rejected before dispatch: %+v", clientAuthoredSettlement)
+	}
 	battleStatus := handler.HandleRPC(RPCRequest{
 		ID:        "battle.audit.status",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload:   envelopePayload(11, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(14, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
 	})
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
