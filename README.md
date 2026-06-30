@@ -115,6 +115,12 @@ Useful endpoints:
 
 Authenticated endpoints accept `Authorization: Bearer <session_token>` or `X-Session-Token`.
 
+The HTTP fallback battle-server callback routes (`/v1/battle/servers/{register,heartbeat,offline}`,
+`/v1/battle/tickets/consume`, and `/v1/battle/results/submit`) are service-origin
+development contracts. They reject player session context and business-envelope-shaped
+payloads, and they do not consume the player HTTP business-envelope replay guard.
+Use Nakama service-origin RPC gating plus mTLS/private networking for production callbacks.
+
 ## Boundary
 
 This repository must not include commercial platform SDK files, private API keys, closed economy parameters, anti-fraud operational secrets, or unlicensed media.
