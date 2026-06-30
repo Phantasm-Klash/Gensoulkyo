@@ -105,6 +105,7 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q service-origin callback must not include player session context", request.ID))
 		}
 		if serviceOriginPayloadHasBusinessEnvelope(request.Payload) {
+			handler.auditRejectedServiceOnlyRPC(request, rpcID)
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("rpc %q service-origin callback must not include business envelope payload", request.ID))
 		}
 	} else {

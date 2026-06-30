@@ -1055,8 +1055,36 @@ func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T)
 			t.Fatalf("service-origin callback %s should reject envelope-shaped payload before core dispatch: %+v", callback.id, response)
 		}
 	}
-	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
-		t.Fatalf("service-origin envelope-shape rejection must not consume replay guard state: %+v", snapshot)
+	snapshot := handler.EnvelopeSnapshot()
+	rejectedCallbacks := int64(len(callbacks))
+	if snapshot.Accepted != 0 || snapshot.Rejected != rejectedCallbacks || snapshot.SessionCount != 0 || len(snapshot.Audits) != len(callbacks) {
+		t.Fatalf("service-origin envelope-shape rejection should audit without accepted replay state: %+v", snapshot)
+	}
+	for _, audit := range snapshot.Audits {
+		if audit.Accepted || audit.Transport != security.BusinessEnvelopeTransportNakamaRPC || !strings.HasPrefix(audit.Endpoint, "rpc.") || audit.Reason != security.ReasonVersion || audit.SessionIDHint == "nonce-service-origin-envelope" {
+			t.Fatalf("service-origin envelope-shape rejection audit should be synthetic and sanitized: %+v", audit)
+		}
+	}
+
+	login := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-service-envelope-replay", "display_name": "Service Envelope Replay"},
+	})
+	if !login.OK {
+		t.Fatalf("login failed: %+v", login)
+	}
+	session := login.Payload.(*core.AuthSession)
+	bootstrap := handler.HandleRPC(RPCRequest{
+		ID:        "bootstrap",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(1, "nonce-service-origin-envelope-battle.result.submit", "bootstrap", map[string]any{}),
+	})
+	if !bootstrap.OK || bootstrap.Status != 200 {
+		t.Fatalf("service-origin envelope-shape rejection must not consume the client seq/nonce, got %+v", bootstrap)
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 1 || snapshot.Rejected != rejectedCallbacks {
+		t.Fatalf("follow-up bootstrap should consume the original client seq/nonce exactly once: %+v", snapshot)
 	}
 }
 
@@ -1076,8 +1104,8 @@ func TestNakamaServiceOriginRPCRejectsNestedBusinessEnvelopePayloadShape(t *test
 			t.Fatalf("service-origin callback with %s wrapper should reject nested envelope before core dispatch: %+v", wrapper, response)
 		}
 	}
-	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
-		t.Fatalf("nested service-origin envelope-shape rejection must not consume replay guard state: %+v", snapshot)
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 3 || snapshot.SessionCount != 0 || len(snapshot.Audits) != 3 {
+		t.Fatalf("nested service-origin envelope-shape rejection should audit without accepted replay state: %+v", snapshot)
 	}
 }
 
@@ -1136,8 +1164,8 @@ func TestNakamaServiceOriginRPCRejectsDirectBusinessEnvelopeFields(t *testing.T)
 			t.Fatalf("service-origin callback payload %d should reject direct envelope fields before core dispatch: %+v", index, response)
 		}
 	}
-	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
-		t.Fatalf("direct service-origin envelope-field rejection must not consume replay guard state: %+v", snapshot)
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 7 || snapshot.SessionCount != 0 || len(snapshot.Audits) != 7 {
+		t.Fatalf("direct service-origin envelope-field rejection should audit without accepted replay state: %+v", snapshot)
 	}
 }
 
