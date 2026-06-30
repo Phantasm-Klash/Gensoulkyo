@@ -813,18 +813,63 @@ func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *
 
 func TestNakamaServiceOriginRPCRejectsBusinessEnvelopePayloadShape(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
-	response := handler.HandleRPC(RPCRequest{
-		ID:      "battle.ticket.consume",
-		Service: true,
-		Payload: envelopePayload(1, "nonce-service-origin-envelope", "battle_ticket_consume", map[string]any{
-			"ticket_id":        "ticket-client-shaped",
-			"match_id":         "match-client-shaped",
-			"battle_server_id": "battle-client-shaped",
-			"ticket_nonce_hex": "nonce-client-shaped",
-		}),
-	})
-	if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "must not include business envelope") {
-		t.Fatalf("service-origin callback should reject envelope-shaped payload before core dispatch: %+v", response)
+	callbacks := []struct {
+		id   string
+		op   string
+		body map[string]any
+	}{
+		{
+			id: "battle.servers.register",
+			op: "battle_servers_register",
+			body: map[string]any{
+				"battle_server_id": "register-client-shaped",
+				"endpoint":         "127.0.0.1:7999",
+				"capacity":         4,
+			},
+		},
+		{
+			id: "battle.servers.heartbeat",
+			op: "battle_servers_heartbeat",
+			body: map[string]any{
+				"battle_server_id": "heartbeat-client-shaped",
+				"active_matches":   1,
+				"load":             0.25,
+			},
+		},
+		{
+			id: "battle.servers.offline",
+			op: "battle_servers_offline",
+			body: map[string]any{
+				"battle_server_id": "offline-client-shaped",
+			},
+		},
+		{
+			id: "battle.ticket.consume",
+			op: "battle_ticket_consume",
+			body: map[string]any{
+				"ticket_id":        "ticket-client-shaped",
+				"match_id":         "match-client-shaped",
+				"battle_server_id": "battle-client-shaped",
+				"ticket_nonce_hex": "nonce-client-shaped",
+			},
+		},
+		{
+			id: "battle.result.submit",
+			op: "battle_result_submit",
+			body: map[string]any{
+				"signed_result": map[string]any{"match_id": "result-client-shaped"},
+			},
+		},
+	}
+	for index, callback := range callbacks {
+		response := handler.HandleRPC(RPCRequest{
+			ID:      callback.id,
+			Service: true,
+			Payload: envelopePayload(int64(index+1), "nonce-service-origin-envelope-"+callback.id, callback.op, callback.body),
+		})
+		if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "must not include business envelope") {
+			t.Fatalf("service-origin callback %s should reject envelope-shaped payload before core dispatch: %+v", callback.id, response)
+		}
 	}
 	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
 		t.Fatalf("service-origin envelope-shape rejection must not consume replay guard state: %+v", snapshot)

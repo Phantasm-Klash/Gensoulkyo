@@ -222,5 +222,5 @@ Status date: 2026-06-28
 ## 2026-06-30 gensoulkyo-lobby service callback envelope-shape guard update
 
 - Hardened service-origin-only Nakama RPC callbacks so payloads carrying the client/business `business_envelope` wrapper are rejected before core dispatch.
-- Added SDK-neutral regression coverage proving an envelope-shaped service callback does not consume business replay guard seq/nonce state and cannot reach ticket/result/battle-server callback validation as if it were a C++ Battle Server message.
+- Added SDK-neutral regression coverage across battle server register/heartbeat/offline, ticket consume, and result submit callbacks proving an envelope-shaped service callback does not consume business replay guard seq/nonce state and cannot reach ticket/result/battle-server callback validation as if it were a C++ Battle Server message.
 - This preserves the split: authenticated clients still use envelope-protected business RPC/WSS reads and lobby actions, while service callbacks stay a separate Nakama RPC origin path.
