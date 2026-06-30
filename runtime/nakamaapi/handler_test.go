@@ -628,7 +628,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 			t.Fatalf("business event should explicitly disallow Nakama client op %q: %+v", forbiddenOp, eventPayload)
 		}
 	}
-	if !eventPayload.BusinessEnvelopeRequired || !stringSliceContains(eventPayload.ForbiddenFields, "damage") || !stringSliceContains(eventPayload.ForbiddenFields, "settlement_key") {
+	if !eventPayload.BusinessEnvelopeRequired || !stringSliceContains(eventPayload.ForbiddenFields, "damage") || !stringSliceContains(eventPayload.ForbiddenFields, "damage_dealt") || !stringSliceContains(eventPayload.ForbiddenFields, "boss_hp_after_global") || !stringSliceContains(eventPayload.ForbiddenFields, "rank_score_delta") || !stringSliceContains(eventPayload.ForbiddenFields, "reward_status") || !stringSliceContains(eventPayload.ForbiddenFields, "settlement_key") {
 		t.Fatalf("business event should expose envelope and forbidden-field contract: %+v", eventPayload)
 	}
 	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.chat") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.announcement") || !stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers") || stringSliceContains(eventPayload.AllowedClientOperations, "battle.servers.register") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
@@ -1996,7 +1996,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if settlementPayload.HighFrequencyBattleTickAllowed || settlementPayload.ClientResultSubmitAllowed || stringSliceContains(settlementPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("settlement business event must not authorize battle tick or client result submit: %+v", settlementPayload)
 	}
-	if !settlementPayload.BusinessEnvelopeRequired || !stringSliceContains(settlementPayload.ForbiddenFields, "final_result") {
+	if !settlementPayload.BusinessEnvelopeRequired || !stringSliceContains(settlementPayload.ForbiddenFields, "final_result") || !stringSliceContains(settlementPayload.ForbiddenFields, "battle_result_hash") || !stringSliceContains(settlementPayload.ForbiddenFields, "boss_hp_after_global") || !stringSliceContains(settlementPayload.ForbiddenFields, "reward_status") {
 		t.Fatalf("settlement business event should retain business security contract: %+v", settlementPayload)
 	}
 	if !stringSliceContains(settlementPayload.BusinessNotifications, "settlement") || stringSliceContains(settlementPayload.BusinessNotifications, "battle.result.submit") {
@@ -2014,11 +2014,25 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if clientAuthoredSettlement.OK || clientAuthoredSettlement.Status != 403 || clientAuthoredSettlement.ErrorCode != "forbidden_field" {
 		t.Fatalf("client-authored settlement fields must be rejected before dispatch: %+v", clientAuthoredSettlement)
 	}
+	clientAuthoredBossHP := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event.settlement",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(18, "nonce-sql-host-settlement-boss-hp", "business_event_settlement", map[string]any{
+			"match_id": match.MatchID,
+			"settlement": map[string]any{
+				"mode_result": map[string]any{"boss_hp_after_global": 0},
+			},
+		}),
+	})
+	if clientAuthoredBossHP.OK || clientAuthoredBossHP.Status != 403 || clientAuthoredBossHP.ErrorCode != "forbidden_field" {
+		t.Fatalf("client-authored settlement projection fields must be rejected before dispatch: %+v", clientAuthoredBossHP)
+	}
 	battleStatus := handler.HandleRPC(RPCRequest{
 		ID:        "battle.audit.status",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload:   envelopePayload(18, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(19, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
 	})
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
@@ -2040,7 +2054,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 17 || tableCounts["lobby_room_audits"] != 12 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 3 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
+	if tableCounts["business_envelope_audits"] < 18 || tableCounts["lobby_room_audits"] != 12 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 3 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasBattleServerLifecycleAudits() {

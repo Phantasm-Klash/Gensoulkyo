@@ -392,7 +392,7 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 				t.Fatalf("business notification topic missing allowed read request field %q: %+v", requestField, topic)
 			}
 		}
-		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
+		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "damage_dealt", "boss_hp_after_global", "rank", "rank_score_delta", "reward_status", "settlement_key"} {
 			if !stringSliceContains(topic.ForbiddenClientRequestFields, forbiddenField) {
 				t.Fatalf("business notification topic missing forbidden client request field %q: %+v", forbiddenField, topic)
 			}
@@ -408,6 +408,14 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	for _, expected := range []string{"matchmaking", "battle.allocation", "battle.ticket", "settlement"} {
 		if !seenKinds[expected] {
 			t.Fatalf("business notification topic contract missing %q: %+v", expected, topics)
+		}
+	}
+	for _, forbiddenField := range []string{"score", "damage_dealt", "boss_hp_after", "boss_hp_after_global", "rank", "rank_score_after", "reward_status", "battle_result_hash"} {
+		if !stringSliceContains(contract.ForbiddenFields, forbiddenField) {
+			t.Fatalf("business contract missing server-authoritative forbidden field %q: %+v", forbiddenField, contract.ForbiddenFields)
+		}
+		if ForbiddenClientField(map[string]any{"projection": []any{map[string]any{forbiddenField: "client-authored"}}}) != forbiddenField {
+			t.Fatalf("forbidden client field %q must be rejected in nested business/event payloads", forbiddenField)
 		}
 	}
 }
