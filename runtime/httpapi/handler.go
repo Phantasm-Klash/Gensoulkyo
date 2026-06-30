@@ -73,6 +73,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.businessEnvelopeStatus(w, r)
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "service-callback" && r.Method == http.MethodGet {
+		h.serviceCallbackStatus(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "battle-audit" && r.Method == http.MethodGet {
 		h.battleAuditStatus(w, r)
 		return
@@ -761,6 +765,27 @@ func (h *Handler) businessEnvelopeStatus(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (h *Handler) serviceCallbackStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"status": map[string]any{
+			"service_callbacks":        core.ServiceCallbackOperations(),
+			"service_callback_context": core.ServiceCallbackContext(),
+			"http_headers": map[string]string{
+				"service_origin":  headerServiceOrigin,
+				"battle_callback": headerBattleCallback,
+			},
+			"accepted_callback_values": []string{
+				serviceCallbackContextValue(serviceCallbackContextKey),
+				"1",
+				"yes",
+			},
+			"player_session_context_allowed": false,
+			"business_envelope_allowed":      false,
+		},
+	})
+}
+
 func (h *Handler) battleAuditStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
@@ -846,7 +871,7 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 	if len(segments) == 3 && segments[1] == "auth" && segments[2] == "anonymous" && method == http.MethodPost {
 		return false
 	}
-	if len(segments) == 3 && segments[1] == "security" && segments[2] == "business-envelope" && method == http.MethodGet {
+	if len(segments) == 3 && segments[1] == "security" && (segments[2] == "business-envelope" || segments[2] == "service-callback") && method == http.MethodGet {
 		return false
 	}
 	if len(segments) == 3 && segments[1] == "security" && (segments[2] == "battle-audit" || segments[2] == "lobby-audit") && method == http.MethodGet {
