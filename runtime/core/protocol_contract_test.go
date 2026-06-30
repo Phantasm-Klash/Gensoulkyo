@@ -92,6 +92,64 @@ func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
 	}
 }
 
+func TestPresenceHeartbeatResponseExposesBattleDescriptorContract(t *testing.T) {
+	response := PresenceHeartbeatResponse{
+		OK:             true,
+		UserID:         "user-contract",
+		PresenceStatus: "in_match",
+		SessionStatus:  "authenticated",
+		MatchID:        "match-contract",
+		MatchStatus:    "running",
+		BattleAllocation: &BattleServerAllocation{
+			OK:                  true,
+			Version:             currentVersionStamp(),
+			MatchID:             "match-contract",
+			ModeID:              "pvp_duel",
+			BattleServerID:      "battle-contract",
+			Endpoint:            "127.0.0.1:7909",
+			ServerAuthoritative: true,
+		},
+		BattleTicket: &SignedBattleTicket{
+			OK: true,
+			Ticket: BattleTicket{
+				Version:             currentVersionStamp(),
+				TicketID:            "ticket-contract",
+				MatchID:             "match-contract",
+				UserID:              "user-contract",
+				PlayerID:            "player-contract",
+				BattleServerID:      "battle-contract",
+				Endpoint:            "127.0.0.1:7909",
+				ServerAuthoritative: true,
+			},
+			SignatureAlg:        "ED25519",
+			KeyID:               "dev-key",
+			SignatureHex:        "abcdef",
+			ServerAuthoritative: true,
+		},
+		ServerAuthoritative: true,
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal heartbeat response: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal heartbeat response: %v", err)
+	}
+	allocation, ok := roundTrip["battle_allocation"].(map[string]any)
+	if !ok || allocation["match_id"] != "match-contract" || allocation["battle_server_id"] != "battle-contract" || allocation["server_authoritative"] != true {
+		t.Fatalf("heartbeat response must expose low-frequency battle allocation descriptor: %s", encoded)
+	}
+	signedTicket, ok := roundTrip["battle_ticket"].(map[string]any)
+	if !ok || signedTicket["signature_alg"] != "ED25519" || signedTicket["server_authoritative"] != true {
+		t.Fatalf("heartbeat response must expose signed battle ticket descriptor: %s", encoded)
+	}
+	ticket, ok := signedTicket["ticket"].(map[string]any)
+	if !ok || ticket["match_id"] != "match-contract" || ticket["user_id"] != "user-contract" || ticket["battle_server_id"] != "battle-contract" || ticket["server_authoritative"] != true {
+		t.Fatalf("heartbeat signed ticket must stay match/user/server bound: %s", encoded)
+	}
+}
+
 func TestBattleResultExposesFullServiceVersionContract(t *testing.T) {
 	result := BattleResult{
 		Version:     currentVersionStamp(),
