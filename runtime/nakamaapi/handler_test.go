@@ -339,6 +339,9 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "business.event") {
 		t.Fatalf("room rules should expose business event WSS/RPC contract: %+v", rulesPayload)
 	}
+	if !stringSliceContains(rulesPayload.ClientOperations, "rooms.chat") || !stringSliceContains(rulesPayload.ClientOperations, "rooms.announcement") {
+		t.Fatalf("room rules should expose registered room message aliases: %+v", rulesPayload.ClientOperations)
+	}
 	if !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should expose service-origin callback operations: %+v", rulesPayload)
 	}
@@ -587,7 +590,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !eventPayload.BusinessEnvelopeRequired || !stringSliceContains(eventPayload.ForbiddenFields, "damage") || !stringSliceContains(eventPayload.ForbiddenFields, "settlement_key") {
 		t.Fatalf("business event should expose envelope and forbidden-field contract: %+v", eventPayload)
 	}
-	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
+	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.chat") || !stringSliceContains(eventPayload.AllowedClientOperations, "rooms.announcement") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
 		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
 	}
 	if !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {

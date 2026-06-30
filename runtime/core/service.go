@@ -5850,6 +5850,8 @@ func contractClientOperations() []string {
 		"rooms.join",
 		"rooms.leave",
 		"rooms.message",
+		"rooms.chat",
+		"rooms.announcement",
 		"business.event",
 		"business.event.settlement",
 		"match.ready",
