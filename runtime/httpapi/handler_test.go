@@ -289,6 +289,9 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 	if !rules.OK || rules.Room.RoomCode != created.RoomCode || rules.Mode.ModeID != "certification" || !rules.ServerAuthoritative {
 		t.Fatalf("room rules invalid: %+v", rules)
 	}
+	if rules.HighFrequencyBattleTickAllowed || rules.ClientResultSubmit {
+		t.Fatalf("HTTP room rules must not authorize business-channel battle tick or client result submit: %+v", rules)
+	}
 	if rules.Room.Participants[0].DeckSnapshotHash == "" || len(rules.ForbiddenFields) == 0 {
 		t.Fatalf("room rules should expose hashes and forbidden fields: %+v", rules)
 	}

@@ -327,8 +327,8 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if len(rulesPayload.ForbiddenFields) == 0 || rulesPayload.Room.Participants[0].DeckSnapshotHash == "" {
 		t.Fatalf("room rules missing protocol fields: %+v", rulesPayload)
 	}
-	if !rulesPayload.BusinessEnvelope || rulesPayload.ClientResultSubmit {
-		t.Fatalf("room rules should require business envelope and forbid client result submit: %+v", rulesPayload)
+	if !rulesPayload.BusinessEnvelope || rulesPayload.ClientResultSubmit || rulesPayload.HighFrequencyBattleTickAllowed {
+		t.Fatalf("room rules should require business envelope and forbid client result submit/high-frequency tick: %+v", rulesPayload)
 	}
 	if !stringSliceContains(rulesPayload.BusinessTransports, "nakama_wss") || !stringSliceContains(rulesPayload.BattleTransports, "kcp_udp") {
 		t.Fatalf("room rules should expose transport split contract: %+v", rulesPayload)

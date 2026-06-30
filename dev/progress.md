@@ -236,3 +236,9 @@ Status date: 2026-06-28
 - Hardened service-origin-only Nakama RPC callbacks so payloads carrying the client/business `business_envelope` wrapper are rejected before core dispatch.
 - Added SDK-neutral regression coverage across battle server register/heartbeat/offline, ticket consume, and result submit callbacks proving an envelope-shaped service callback does not consume business replay guard seq/nonce state and cannot reach ticket/result/battle-server callback validation as if it were a C++ Battle Server message.
 - This preserves the split: authenticated clients still use envelope-protected business RPC/WSS reads and lobby actions, while service callbacks stay a separate Nakama RPC origin path.
+
+## 2026-06-30 gensoulkyo-lobby room rules tick-boundary update
+
+- Added `high_frequency_battle_tick_allowed=false` to `RoomRulesSnapshot`, aligning the room/rules contract with `BusinessEvent` so clients can distinguish low-frequency Nakama HTTPS/WSS lobby notifications from C++ Battle Server KCP tick traffic.
+- Extended core, HTTP fallback, and SDK-neutral Nakama room-rule regressions so the contract keeps business envelope required, client result submission forbidden, and high-frequency battle ticks forbidden on the business channel.
+- Verified `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.

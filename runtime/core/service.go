@@ -1163,11 +1163,12 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"damage",
 			"reward",
 		},
-		ForbiddenFields:     sortedForbiddenClientFields(),
-		BusinessEnvelope:    true,
-		ClientResultSubmit:  false,
-		ServerTime:          now,
-		ServerAuthoritative: true,
+		ForbiddenFields:                sortedForbiddenClientFields(),
+		BusinessEnvelope:               true,
+		ClientResultSubmit:             false,
+		HighFrequencyBattleTickAllowed: false,
+		ServerTime:                     now,
+		ServerAuthoritative:            true,
 	}
 	s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "rules_read", now)
 	return rules, nil

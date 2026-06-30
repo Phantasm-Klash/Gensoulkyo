@@ -2536,8 +2536,8 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if rules.Room.ModeConfigHash == "" || rules.Room.RulesetVersion != RulesetVersion || rules.BattleTicketTTL != BattleTicketTTLSeconds {
 		t.Fatalf("room rules missing version hashes: %+v", rules)
 	}
-	if !rules.BusinessEnvelope || rules.ClientResultSubmit {
-		t.Fatalf("room rules should require business envelope and reject client result submit: %+v", rules)
+	if !rules.BusinessEnvelope || rules.ClientResultSubmit || rules.HighFrequencyBattleTickAllowed {
+		t.Fatalf("room rules should require business envelope and reject client result submit/high-frequency tick: %+v", rules)
 	}
 	if !stringSliceContains(rules.BusinessTransports, "nakama_https_rpc") || !stringSliceContains(rules.BusinessTransports, "nakama_wss") || !stringSliceContains(rules.BattleTransports, "kcp_udp") {
 		t.Fatalf("room rules should publish business and battle transport contract: %+v", rules)
@@ -2573,8 +2573,8 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if event.Version.ProtocolVersion != ProtocolVersion || event.Version.RulesetVersion != RulesetVersion || event.Version.BusinessAPIVersion != BusinessAPIVersion || event.Version.BattleAPIVersion != BattleAPIVersion {
 		t.Fatalf("room business event must expose protocol version stamp: %+v", event.Version)
 	}
-	if event.HighFrequencyBattleTickAllowed || event.ClientResultSubmitAllowed || stringSliceContains(event.AllowedClientOperations, "battle.result.submit") {
-		t.Fatalf("room business event must not authorize battle tick or client result submit: %+v", event)
+	if rules.HighFrequencyBattleTickAllowed != event.HighFrequencyBattleTickAllowed || event.HighFrequencyBattleTickAllowed || event.ClientResultSubmitAllowed || stringSliceContains(event.AllowedClientOperations, "battle.result.submit") {
+		t.Fatalf("room rules/event must not authorize battle tick or client result submit: rules=%+v event=%+v", rules, event)
 	}
 
 	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
