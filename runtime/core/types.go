@@ -791,6 +791,7 @@ type BusinessContractSnapshot struct {
 	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
+	BusinessEventRequestKinds      []string                    `json:"business_event_request_kinds"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
 	ClientAuthority                []string                    `json:"client_authority"`
 	ServerAuthority                []string                    `json:"server_authority"`
@@ -821,6 +822,7 @@ type RoomRulesSnapshot struct {
 	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
+	BusinessEventRequestKinds      []string                    `json:"business_event_request_kinds"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
 	ClientAuthority                []string                    `json:"client_authority"`
 	ServerAuthority                []string                    `json:"server_authority"`
@@ -933,6 +935,7 @@ type BusinessEvent struct {
 	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
+	BusinessEventRequestKinds      []string                    `json:"business_event_request_kinds"`
 	BusinessNotificationTopics     []BusinessNotificationTopic `json:"business_notification_topics"`
 	BusinessEnvelopeRequired       bool                        `json:"business_envelope_required"`
 	ForbiddenFields                []string                    `json:"forbidden_fields"`

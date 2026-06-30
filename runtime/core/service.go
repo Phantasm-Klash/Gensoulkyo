@@ -1147,6 +1147,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		ServiceCallbackAcceptedValues:  contract.ServiceCallbackAcceptedValues,
 		SettlementAuthority:            contract.SettlementAuthority,
 		BusinessNotifications:          contract.BusinessNotifications,
+		BusinessEventRequestKinds:      contract.BusinessEventRequestKinds,
 		BusinessNotificationTopics:     contract.BusinessNotificationTopics,
 		ClientAuthority:                contract.ClientAuthority,
 		ServerAuthority:                contract.ServerAuthority,
@@ -2449,6 +2450,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		ServiceCallbackAcceptedValues:  ServiceCallbackAcceptedValues(),
 		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
 		BusinessNotifications:          businessNotificationKinds(),
+		BusinessEventRequestKinds:      businessEventRequestKinds(),
 		BusinessNotificationTopics:     businessNotificationTopics(),
 		BusinessEnvelopeRequired:       true,
 		ForbiddenFields:                sortedForbiddenClientFields(),
@@ -6041,6 +6043,10 @@ func businessNotificationKinds() []string {
 	}
 }
 
+func ContractBusinessNotificationKinds() []string {
+	return businessNotificationKinds()
+}
+
 func businessNotificationTopics() []BusinessNotificationTopic {
 	kinds := businessNotificationKinds()
 	topics := make([]BusinessNotificationTopic, 0, len(kinds))
@@ -6078,6 +6084,14 @@ func ContractBusinessNotificationTopics() []BusinessNotificationTopic {
 	return businessNotificationTopics()
 }
 
+func businessEventRequestKinds() []string {
+	return businessNotificationKinds()
+}
+
+func ContractBusinessEventRequestKinds() []string {
+	return businessEventRequestKinds()
+}
+
 func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 	return &BusinessContractSnapshot{
 		OK:                            true,
@@ -6093,6 +6107,7 @@ func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 		ServiceCallbackAcceptedValues: ServiceCallbackAcceptedValues(),
 		SettlementAuthority:           settlementAuthorityServiceSignedBattleResult,
 		BusinessNotifications:         businessNotificationKinds(),
+		BusinessEventRequestKinds:     businessEventRequestKinds(),
 		BusinessNotificationTopics:    businessNotificationTopics(),
 		ClientAuthority: []string{
 			"input_packet",

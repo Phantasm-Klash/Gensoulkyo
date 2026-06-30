@@ -2532,6 +2532,9 @@ func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
 	if stringSliceContains(presence.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business notifications must not expose service-origin result submit: %+v", presence.BusinessNotifications)
 	}
+	if !reflect.DeepEqual(presence.BusinessEventRequestKinds, ContractBusinessEventRequestKinds()) || !stringSliceContains(presence.BusinessEventRequestKinds, "settlement") || stringSliceContains(presence.BusinessEventRequestKinds, "battle.result.submit") {
+		t.Fatalf("business event should publish allowed request kinds without service callbacks: %+v", presence.BusinessEventRequestKinds)
+	}
 	activity, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "activity"})
 	if err != nil {
 		t.Fatalf("activity business event: %v", err)
@@ -2702,8 +2705,8 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult || rules.SettlementAuthority != contract.SettlementAuthority {
 		t.Fatalf("business contract and room rules settlement authority drifted: contract=%q rules=%q", contract.SettlementAuthority, rules.SettlementAuthority)
 	}
-	if !reflect.DeepEqual(contract.BusinessNotifications, rules.BusinessNotifications) || !reflect.DeepEqual(contract.BusinessNotificationTopics, rules.BusinessNotificationTopics) {
-		t.Fatalf("business contract and room rules notification contract drifted: contract=%+v topics=%+v rules=%+v topics=%+v", contract.BusinessNotifications, contract.BusinessNotificationTopics, rules.BusinessNotifications, rules.BusinessNotificationTopics)
+	if !reflect.DeepEqual(contract.BusinessNotifications, rules.BusinessNotifications) || !reflect.DeepEqual(contract.BusinessEventRequestKinds, rules.BusinessEventRequestKinds) || !reflect.DeepEqual(contract.BusinessNotificationTopics, rules.BusinessNotificationTopics) {
+		t.Fatalf("business contract and room rules notification contract drifted: contract=%+v request_kinds=%+v topics=%+v rules=%+v request_kinds=%+v topics=%+v", contract.BusinessNotifications, contract.BusinessEventRequestKinds, contract.BusinessNotificationTopics, rules.BusinessNotifications, rules.BusinessEventRequestKinds, rules.BusinessNotificationTopics)
 	}
 	if !reflect.DeepEqual(contract.ForbiddenFields, rules.ForbiddenFields) || !reflect.DeepEqual(contract.ClientAuthority, rules.ClientAuthority) || !reflect.DeepEqual(contract.ServerAuthority, rules.ServerAuthority) {
 		t.Fatalf("business contract and room rules authority fields drifted: contract=%+v/%+v/%+v rules=%+v/%+v/%+v", contract.ForbiddenFields, contract.ClientAuthority, contract.ServerAuthority, rules.ForbiddenFields, rules.ClientAuthority, rules.ServerAuthority)
@@ -2735,6 +2738,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.BusinessNotifications, rules.BusinessNotifications) {
 		t.Fatalf("room rules and business event notification contract drifted: rules=%+v event=%+v", rules.BusinessNotifications, event.BusinessNotifications)
+	}
+	if !reflect.DeepEqual(event.BusinessEventRequestKinds, rules.BusinessEventRequestKinds) {
+		t.Fatalf("room rules and business event request kind contract drifted: rules=%+v event=%+v", rules.BusinessEventRequestKinds, event.BusinessEventRequestKinds)
 	}
 	if !event.BusinessEnvelopeRequired || !reflect.DeepEqual(event.ForbiddenFields, rules.ForbiddenFields) {
 		t.Fatalf("room business event should expose the same security contract as room rules: rules=%+v event=%+v", rules.ForbiddenFields, event.ForbiddenFields)

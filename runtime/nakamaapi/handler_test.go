@@ -649,6 +649,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "activity") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business event should document low-frequency notification kinds only: %+v", eventPayload)
 	}
+	if !reflect.DeepEqual(eventPayload.BusinessEventRequestKinds, core.ContractBusinessEventRequestKinds()) || stringSliceContains(eventPayload.BusinessEventRequestKinds, "battle.result.submit") {
+		t.Fatalf("business event should document allowed request kinds without service callbacks: %+v", eventPayload.BusinessEventRequestKinds)
+	}
 	assertBusinessNotificationTopics(t, eventPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket")
 
 	missingContractEnvelope := handler.HandleRPC(RPCRequest{
@@ -681,6 +684,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 	if !reflect.DeepEqual(contractPayload.ServiceCallbackAcceptedValues, core.ServiceCallbackAcceptedValues()) {
 		t.Fatalf("business contract should document accepted service callback values without granting client authority: %+v", contractPayload.ServiceCallbackAcceptedValues)
+	}
+	if !reflect.DeepEqual(contractPayload.BusinessEventRequestKinds, core.ContractBusinessEventRequestKinds()) || stringSliceContains(contractPayload.BusinessEventRequestKinds, "battle.ticket.consume") {
+		t.Fatalf("business contract should document allowed event request kinds without service callbacks: %+v", contractPayload.BusinessEventRequestKinds)
 	}
 	assertBusinessNotificationTopics(t, contractPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket", "settlement")
 
