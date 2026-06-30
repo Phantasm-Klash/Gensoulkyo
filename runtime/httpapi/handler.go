@@ -66,6 +66,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.businessEnvelopeStatus(w, r)
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "battle-audit" && r.Method == http.MethodGet {
+		h.battleAuditStatus(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "lobby-audit" && r.Method == http.MethodGet {
+		h.lobbyAuditStatus(w, r)
+		return
+	}
 	if routeUsesBusinessEnvelope(r.Method, segments) {
 		if status, code, message := h.validateBusinessEnvelopeHeaders(r); code != "" {
 			writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
@@ -102,6 +110,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "presence" && segments[2] == "heartbeat" && r.Method == http.MethodPost {
 		h.heartbeat(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "business" && segments[2] == "events" && r.Method == http.MethodPost {
+		h.businessEvent(w, r)
 		return
 	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "matchmaking" && segments[2] == "join" && r.Method == http.MethodPost {
@@ -321,6 +333,33 @@ func (h *Handler) heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.service.Heartbeat(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request) {
+	raw := map[string]any{}
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
+	if forbidden := core.ForbiddenClientField(raw); forbidden != "" {
+		writeError(w, core.NewForbiddenClientFieldError(forbidden))
+		return
+	}
+	var req core.BusinessEventRequest
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return
+	}
+	if err := json.Unmarshal(encoded, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return
+	}
+	resp, err := h.service.BusinessEvent(sessionToken(r), req)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -608,6 +647,20 @@ func (h *Handler) businessEnvelopeStatus(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (h *Handler) battleAuditStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": h.service.BattleLifecycleAuditStatus(),
+	})
+}
+
+func (h *Handler) lobbyAuditStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": h.service.LobbyLifecycleAuditStatus(),
+	})
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
@@ -649,6 +702,9 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 		return false
 	}
 	if len(segments) == 3 && segments[1] == "security" && segments[2] == "business-envelope" && method == http.MethodGet {
+		return false
+	}
+	if len(segments) == 3 && segments[1] == "security" && (segments[2] == "battle-audit" || segments[2] == "lobby-audit") && method == http.MethodGet {
 		return false
 	}
 	return true

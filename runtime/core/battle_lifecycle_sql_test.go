@@ -17,6 +17,7 @@ import (
 func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	upSQL := readMigrationFile(t, "001_business_security_audit.up.sql")
 	downSQL := readMigrationFile(t, "001_business_security_audit.down.sql")
+	readme := readMigrationReadme(t)
 
 	assertMigrationCoversInsertColumns(t, upSQL, insertMatchAllocationAuditSQL, "match_allocation_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertBattleTicketAuditSQL, "battle_ticket_audits")
@@ -27,10 +28,43 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	if !strings.Contains(upSQL, "'dev-ed25519-0'") {
 		t.Fatalf("migration must seed dev-ed25519-0 so battle_ticket_audits.key_id foreign key can accept signed ticket audits")
 	}
+	if !strings.Contains(upSQL, "'client-dev-key'") {
+		t.Fatalf("migration must seed client-dev-key so Nakama RPC/WSS envelope audit tests satisfy the key foreign key")
+	}
+	for _, status := range []string{"'server_registered'", "'server_heartbeat'", "'server_offline'"} {
+		if !strings.Contains(upSQL, status) {
+			t.Fatalf("match allocation audit migration must allow battle server lifecycle status %s", status)
+		}
+	}
+	for _, action := range []string{"'listed'", "'snapshot_read'", "'ticket_read'", "'create_retry'", "'join_retry'", "'ready'", "'disconnected'", "'reconnected'", "'heartbeat'"} {
+		if !strings.Contains(upSQL, action) {
+			t.Fatalf("lobby room audit migration must allow read action %s", action)
+		}
+	}
+	assertMigrationHasUniqueIndex(t, upSQL, "ux_lobby_message_audit_duplicate", "lobby_message_audits", []string{"message_id", "room_code", "user_id", "duplicate"})
+	assertMigrationHasUniqueIndex(t, upSQL, "ux_battle_result_audit_accepted", "battle_result_audits", []string{"match_id"})
+	assertMigrationHasUniqueIndex(t, upSQL, "ux_battle_result_audit_duplicate", "battle_result_audits", []string{"match_id", "result_hash", "status"})
+	if !strings.Contains(upSQL, "status IN ('accepted', 'duplicate')") {
+		t.Fatalf("battle result audit migration must allow duplicate callback status")
+	}
 	assertDownMigrationDropsTable(t, downSQL, "lobby_room_audits")
 	assertDownMigrationDropsTable(t, downSQL, "lobby_message_audits")
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")
 	assertDownMigrationDropsTable(t, downSQL, "replay_audits")
+	for _, table := range []string{
+		"business_envelope_audits",
+		"business_envelope_nonce_windows",
+		"battle_ticket_audits",
+		"match_allocation_audits",
+		"battle_result_audits",
+		"replay_audits",
+		"lobby_room_audits",
+		"lobby_message_audits",
+	} {
+		if !strings.Contains(readme, table) {
+			t.Fatalf("migration README must document table %s", table)
+		}
+	}
 }
 
 func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.T) {
@@ -90,6 +124,28 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            "ticket-a",
+		MatchID:             "match-a",
+		UserID:              "user-a",
+		PlayerID:            "player-a",
+		BattleServerID:      "battle-a",
+		Endpoint:            "127.0.0.1:7901",
+		KeyID:               "dev-ed25519-0",
+		RulesetVersion:      RulesetVersion,
+		ProtocolVersion:     "1",
+		DeckSnapshotHash:    "sha256:deck",
+		ModeConfigHash:      "sha256:mode",
+		Nonce:               "nonce-a",
+		SignaturePrefix:     "0123456789abcdef",
+		Status:              "expired",
+		IssuedAt:            now,
+		ExpiresAt:           now.Add(time.Minute),
+		ConsumedAt:          now.Add(2 * time.Minute),
+		ServerAuthoritative: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.RecordBattleResultAudit(BattleResultAuditRecord{
 		MatchID:             "match-a",
 		ModeID:              "pvp_duel",
@@ -99,6 +155,7 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 		KeyID:               "battle-a",
 		PlayerIDs:           []string{"player-a", "player-b"},
 		SettlementKey:       "battle-result:match-a",
+		Status:              "accepted",
 		VerifiedAt:          now,
 		SettledAt:           now,
 		ServerAuthoritative: true,
@@ -123,8 +180,8 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	}
 
 	calls := battleAuditCaptureCalls()
-	if len(calls) != 4 {
-		t.Fatalf("expected four inserts, got %+v", calls)
+	if len(calls) != 5 {
+		t.Fatalf("expected five inserts, got %+v", calls)
 	}
 	if !strings.Contains(calls[0].query, "INSERT INTO match_allocation_audits") || len(calls[0].args) != 14 {
 		t.Fatalf("allocation insert invalid: %+v", calls[0])
@@ -132,23 +189,29 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	if calls[0].args[0] != "match-a" || calls[0].args[2] != "battle-a" || calls[0].args[10] != `{"match_id":"match-a"}` || calls[0].args[12] != true || calls[0].args[13] != now {
 		t.Fatalf("allocation args invalid: %+v", calls[0].args)
 	}
-	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 17 {
+	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 18 {
 		t.Fatalf("ticket insert invalid: %+v", calls[1])
 	}
-	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" || calls[1].args[16] != true {
+	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" || calls[1].args[16] != true || calls[1].args[17] != nil {
 		t.Fatalf("ticket args invalid: %+v", calls[1].args)
 	}
-	if !strings.Contains(calls[2].query, "INSERT INTO battle_result_audits") || len(calls[2].args) != 11 {
-		t.Fatalf("result insert invalid: %+v", calls[2])
+	if !strings.Contains(calls[2].query, "INSERT INTO battle_ticket_audits") || len(calls[2].args) != 18 {
+		t.Fatalf("expired ticket upsert invalid: %+v", calls[2])
 	}
-	if calls[2].args[0] != "match-a" || calls[2].args[6] != `["player-a","player-b"]` || calls[2].args[10] != true {
-		t.Fatalf("result args invalid: %+v", calls[2].args)
+	if calls[2].args[0] != "ticket-a" || calls[2].args[15] != "expired" || calls[2].args[17] != now.Add(2*time.Minute) {
+		t.Fatalf("expired ticket args invalid: %+v", calls[2].args)
 	}
-	if !strings.Contains(calls[3].query, "INSERT INTO replay_audits") || len(calls[3].args) != 12 {
-		t.Fatalf("replay insert invalid: %+v", calls[3])
+	if !strings.Contains(calls[3].query, "INSERT INTO battle_result_audits") || len(calls[3].args) != 12 {
+		t.Fatalf("result insert invalid: %+v", calls[3])
 	}
-	if calls[3].args[0] != "replay-a" || calls[3].args[2] != "user-a" || calls[3].args[11] != true {
-		t.Fatalf("replay args invalid: %+v", calls[3].args)
+	if calls[3].args[0] != "match-a" || calls[3].args[6] != `["player-a","player-b"]` || calls[3].args[8] != "accepted" || calls[3].args[11] != true {
+		t.Fatalf("result args invalid: %+v", calls[3].args)
+	}
+	if !strings.Contains(calls[4].query, "INSERT INTO replay_audits") || len(calls[4].args) != 12 {
+		t.Fatalf("replay insert invalid: %+v", calls[4])
+	}
+	if calls[4].args[0] != "replay-a" || calls[4].args[2] != "user-a" || calls[4].args[11] != true {
+		t.Fatalf("replay args invalid: %+v", calls[4].args)
 	}
 }
 
@@ -252,6 +315,16 @@ func readMigrationFile(t *testing.T, name string) string {
 	return string(raw)
 }
 
+func readMigrationReadme(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join("..", "..", "migrations", "README.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
 func assertMigrationCoversInsertColumns(t *testing.T, migrationSQL string, insertSQL string, table string) {
 	t.Helper()
 	insertColumns := extractSQLColumnList(t, insertSQL, "INSERT INTO "+table)
@@ -267,6 +340,35 @@ func assertDownMigrationDropsTable(t *testing.T, migrationSQL string, table stri
 	t.Helper()
 	if !strings.Contains(migrationSQL, "DROP TABLE IF EXISTS "+table+";") {
 		t.Fatalf("down migration does not drop %s", table)
+	}
+}
+
+func assertMigrationHasUniqueIndex(t *testing.T, migrationSQL string, indexName string, table string, columns []string) {
+	t.Helper()
+	indexPrefix := "CREATE UNIQUE INDEX IF NOT EXISTS " + indexName
+	start := strings.Index(migrationSQL, indexPrefix)
+	if start < 0 {
+		t.Fatalf("migration missing unique index %s", indexName)
+	}
+	tableFragment := "ON " + table
+	tableStart := strings.Index(migrationSQL[start:], tableFragment)
+	if tableStart < 0 {
+		t.Fatalf("unique index %s does not target %s", indexName, table)
+	}
+	tableStart += start
+	open := strings.Index(migrationSQL[tableStart:], "(")
+	if open < 0 {
+		t.Fatalf("unique index %s missing column list", indexName)
+	}
+	open += tableStart
+	close := strings.Index(migrationSQL[open:], ")")
+	if close < 0 {
+		t.Fatalf("unique index %s missing column list close", indexName)
+	}
+	close += open
+	got := splitSQLColumns(migrationSQL[open+1 : close])
+	if strings.Join(got, ",") != strings.Join(columns, ",") {
+		t.Fatalf("unique index %s columns mismatch: got %v want %v", indexName, got, columns)
 	}
 }
 

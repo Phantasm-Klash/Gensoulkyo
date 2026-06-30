@@ -7,18 +7,19 @@ import (
 )
 
 const (
-	ServerVersion          = "0.1.0"
-	ProtocolVersion        = phkv1.ProtocolVersion
-	BusinessAPIVersion     = phkv1.BusinessAPIVersion
-	BattleAPIVersion       = phkv1.BattleAPIVersion
-	RulesetVersion         = phkv1.RulesetVersion
-	TickRate               = 60
-	DefaultInputDelayTick  = 2
-	DefaultMatchTicks      = 60 * 90
-	ReconnectWindowSeconds = 30
-	BattleTicketTTLSeconds = 60
-	DefaultBattleServerID  = "battle-local-dev"
-	DefaultBattleEndpoint  = "127.0.0.1:7901"
+	ServerVersion                   = "0.1.0"
+	ProtocolVersion                 = phkv1.ProtocolVersion
+	BusinessAPIVersion              = phkv1.BusinessAPIVersion
+	BattleAPIVersion                = phkv1.BattleAPIVersion
+	RulesetVersion                  = phkv1.RulesetVersion
+	TickRate                        = 60
+	DefaultInputDelayTick           = 2
+	DefaultMatchTicks               = 60 * 90
+	ReconnectWindowSeconds          = 30
+	BattleTicketTTLSeconds          = 60
+	BattleServerHeartbeatTTLSeconds = 30
+	DefaultBattleServerID           = "battle-local-dev"
+	DefaultBattleEndpoint           = "127.0.0.1:7901"
 )
 
 type ModeConfig struct {
@@ -85,17 +86,24 @@ type Config struct {
 }
 
 type BattleLifecycleAuditStatus struct {
-	OK                  bool      `json:"ok"`
-	Configured          bool      `json:"configured"`
-	AllocationRecords   int       `json:"allocation_records"`
-	TicketRecords       int       `json:"ticket_records"`
-	ResultRecords       int       `json:"result_records"`
-	ReplayRecords       int       `json:"replay_records"`
-	RejectedRecords     int       `json:"rejected_records"`
-	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
-	LastError           string    `json:"last_error,omitempty"`
-	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
-	ServerAuthoritative bool      `json:"server_authoritative"`
+	OK                     bool      `json:"ok"`
+	Configured             bool      `json:"configured"`
+	ServerLifecycleRecords int       `json:"server_lifecycle_records"`
+	AllocationRecords      int       `json:"allocation_records"`
+	TicketRecords          int       `json:"ticket_records"`
+	TicketExpiredRecords   int       `json:"ticket_expired_records"`
+	TicketConsumedRecords  int       `json:"ticket_consumed_records"`
+	ResultRecords          int       `json:"result_records"`
+	ResultDuplicateRecords int       `json:"result_duplicate_records"`
+	ReplayRecords          int       `json:"replay_records"`
+	RejectedRecords        int       `json:"rejected_records"`
+	LastSuccessOperation   string    `json:"last_success_operation,omitempty"`
+	LastSuccessFingerprint string    `json:"last_success_fingerprint,omitempty"`
+	LastSuccessAt          time.Time `json:"last_success_at,omitempty"`
+	LastErrorOperation     string    `json:"last_error_operation,omitempty"`
+	LastError              string    `json:"last_error,omitempty"`
+	LastErrorAt            time.Time `json:"last_error_at,omitempty"`
+	ServerAuthoritative    bool      `json:"server_authoritative"`
 }
 
 type BattleLifecycleAuditRepository interface {
@@ -106,16 +114,22 @@ type BattleLifecycleAuditRepository interface {
 }
 
 type LobbyLifecycleAuditStatus struct {
-	OK                  bool      `json:"ok"`
-	Configured          bool      `json:"configured"`
-	RoomRecords         int       `json:"room_records"`
-	RulesReadRecords    int       `json:"rules_read_records"`
-	MessageRecords      int       `json:"message_records"`
-	RejectedRecords     int       `json:"rejected_records"`
-	LastErrorOperation  string    `json:"last_error_operation,omitempty"`
-	LastError           string    `json:"last_error,omitempty"`
-	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
-	ServerAuthoritative bool      `json:"server_authoritative"`
+	OK                     bool      `json:"ok"`
+	Configured             bool      `json:"configured"`
+	RoomRecords            int       `json:"room_records"`
+	RoomReadRecords        int       `json:"room_read_records"`
+	RulesReadRecords       int       `json:"rules_read_records"`
+	ReadyRecords           int       `json:"ready_records"`
+	ConnectionRecords      int       `json:"connection_records"`
+	MessageRecords         int       `json:"message_records"`
+	RejectedRecords        int       `json:"rejected_records"`
+	LastSuccessOperation   string    `json:"last_success_operation,omitempty"`
+	LastSuccessFingerprint string    `json:"last_success_fingerprint,omitempty"`
+	LastSuccessAt          time.Time `json:"last_success_at,omitempty"`
+	LastErrorOperation     string    `json:"last_error_operation,omitempty"`
+	LastError              string    `json:"last_error,omitempty"`
+	LastErrorAt            time.Time `json:"last_error_at,omitempty"`
+	ServerAuthoritative    bool      `json:"server_authoritative"`
 }
 
 type LobbyLifecycleAuditRepository interface {
@@ -190,6 +204,7 @@ type BattleTicketAuditRecord struct {
 	Status              string    `json:"status"`
 	IssuedAt            time.Time `json:"issued_at"`
 	ExpiresAt           time.Time `json:"expires_at"`
+	ConsumedAt          time.Time `json:"consumed_at,omitempty"`
 	ServerAuthoritative bool      `json:"server_authoritative"`
 }
 
@@ -202,6 +217,7 @@ type BattleResultAuditRecord struct {
 	KeyID               string    `json:"key_id"`
 	PlayerIDs           []string  `json:"player_ids"`
 	SettlementKey       string    `json:"settlement_key"`
+	Status              string    `json:"status"`
 	VerifiedAt          time.Time `json:"verified_at"`
 	SettledAt           time.Time `json:"settled_at"`
 	ServerAuthoritative bool      `json:"server_authoritative"`
@@ -251,6 +267,11 @@ type BattleServerHeartbeatRequest struct {
 	Load           float64  `json:"load"`
 	Status         string   `json:"status,omitempty"`
 	SupportedModes []string `json:"supported_modes,omitempty"`
+}
+
+type BattleServerOfflineRequest struct {
+	BattleServerID string `json:"battle_server_id"`
+	Status         string `json:"status,omitempty"`
 }
 
 type BattleServerStatus struct {
@@ -325,6 +346,29 @@ type SignedBattleTicket struct {
 	KeyID               string       `json:"key_id"`
 	SignatureHex        string       `json:"signature_hex"`
 	PublicKeyHex        string       `json:"public_key_hex"`
+	ServerAuthoritative bool         `json:"server_authoritative"`
+	ServerTime          time.Time    `json:"server_time"`
+}
+
+type BattleTicketConsumeRequest struct {
+	TicketID       string `json:"ticket_id"`
+	MatchID        string `json:"match_id"`
+	UserID         string `json:"user_id,omitempty"`
+	PlayerID       string `json:"player_id,omitempty"`
+	BattleServerID string `json:"battle_server_id"`
+	TicketNonceHex string `json:"ticket_nonce_hex"`
+}
+
+type BattleTicketConsumeResponse struct {
+	OK                  bool         `json:"ok"`
+	Version             VersionStamp `json:"version"`
+	TicketID            string       `json:"ticket_id"`
+	MatchID             string       `json:"match_id"`
+	UserID              string       `json:"user_id"`
+	PlayerID            string       `json:"player_id"`
+	BattleServerID      string       `json:"battle_server_id"`
+	Consumed            bool         `json:"consumed"`
+	Duplicate           bool         `json:"duplicate"`
 	ServerAuthoritative bool         `json:"server_authoritative"`
 	ServerTime          time.Time    `json:"server_time"`
 }
@@ -608,24 +652,27 @@ type ChestOpenResponse struct {
 }
 
 type JoinQueueRequest struct {
-	ModeID       string         `json:"mode_id"`
-	ActiveDeckID string         `json:"active_deck_id"`
-	DeckSnapshot DeckSnapshot   `json:"deck_snapshot"`
-	ModeParams   map[string]any `json:"mode_params"`
+	ModeID        string         `json:"mode_id"`
+	ActiveDeckID  string         `json:"active_deck_id"`
+	DeckSnapshot  DeckSnapshot   `json:"deck_snapshot"`
+	ModeParams    map[string]any `json:"mode_params"`
+	ClientVersion VersionStamp   `json:"client_version"`
 }
 
 type CreateRoomRequest struct {
-	ModeID       string         `json:"mode_id"`
-	ActiveDeckID string         `json:"active_deck_id"`
-	DeckSnapshot DeckSnapshot   `json:"deck_snapshot"`
-	ModeParams   map[string]any `json:"mode_params"`
+	ModeID        string         `json:"mode_id"`
+	ActiveDeckID  string         `json:"active_deck_id"`
+	DeckSnapshot  DeckSnapshot   `json:"deck_snapshot"`
+	ModeParams    map[string]any `json:"mode_params"`
+	ClientVersion VersionStamp   `json:"client_version"`
 }
 
 type JoinRoomRequest struct {
-	ModeID       string         `json:"mode_id"`
-	ActiveDeckID string         `json:"active_deck_id"`
-	DeckSnapshot DeckSnapshot   `json:"deck_snapshot"`
-	ModeParams   map[string]any `json:"mode_params"`
+	ModeID        string         `json:"mode_id"`
+	ActiveDeckID  string         `json:"active_deck_id"`
+	DeckSnapshot  DeckSnapshot   `json:"deck_snapshot"`
+	ModeParams    map[string]any `json:"mode_params"`
+	ClientVersion VersionStamp   `json:"client_version"`
 }
 
 type RoomParticipantSnapshot struct {
@@ -697,9 +744,15 @@ type RoomRulesSnapshot struct {
 	TickRate            int          `json:"tick_rate"`
 	InputDelayTicks     int          `json:"input_delay_ticks"`
 	BattleTicketTTL     int          `json:"battle_ticket_ttl_seconds"`
+	BusinessTransports  []string     `json:"business_transports"`
+	BattleTransports    []string     `json:"battle_transports"`
+	ClientOperations    []string     `json:"client_operations"`
+	ServiceCallbacks    []string     `json:"service_callbacks"`
 	ClientAuthority     []string     `json:"client_authority"`
 	ServerAuthority     []string     `json:"server_authority"`
 	ForbiddenFields     []string     `json:"forbidden_fields"`
+	BusinessEnvelope    bool         `json:"business_envelope_required"`
+	ClientResultSubmit  bool         `json:"client_result_submit_allowed"`
 	ServerTime          time.Time    `json:"server_time"`
 	ServerAuthoritative bool         `json:"server_authoritative"`
 }
@@ -762,6 +815,42 @@ type ReadyResponse struct {
 	RequiredPlayers int                 `json:"required_players"`
 	MatchStart      *MatchStartEvent    `json:"match_start,omitempty"`
 	BattleTicket    *SignedBattleTicket `json:"battle_ticket,omitempty"`
+}
+
+type BusinessEventRequest struct {
+	Kind     string `json:"kind"`
+	TicketID string `json:"ticket_id,omitempty"`
+	RoomCode string `json:"room_code,omitempty"`
+	MatchID  string `json:"match_id,omitempty"`
+}
+
+type BusinessEvent struct {
+	OK                             bool                    `json:"ok"`
+	Kind                           string                  `json:"kind"`
+	Topic                          string                  `json:"topic"`
+	UserID                         string                  `json:"user_id"`
+	ModeID                         string                  `json:"mode_id,omitempty"`
+	RoomCode                       string                  `json:"room_code,omitempty"`
+	TicketID                       string                  `json:"ticket_id,omitempty"`
+	MatchID                        string                  `json:"match_id,omitempty"`
+	QueueStatus                    string                  `json:"queue_status,omitempty"`
+	RoomStatus                     string                  `json:"room_status,omitempty"`
+	MatchStatus                    string                  `json:"match_status,omitempty"`
+	ReadyCount                     int                     `json:"ready_count,omitempty"`
+	RequiredPlayers                int                     `json:"required_players,omitempty"`
+	CurrentPlayers                 int                     `json:"current_players,omitempty"`
+	Room                           *RoomSnapshot           `json:"room,omitempty"`
+	Queue                          *QueueResponse          `json:"queue,omitempty"`
+	Ready                          *ReadyResponse          `json:"ready,omitempty"`
+	BattleAllocation               *BattleServerAllocation `json:"battle_allocation,omitempty"`
+	BattleTicket                   *SignedBattleTicket     `json:"battle_ticket,omitempty"`
+	Settlement                     *MatchEndEvent          `json:"settlement,omitempty"`
+	AllowedClientOperations        []string                `json:"allowed_client_operations"`
+	ServiceCallbacks               []string                `json:"service_callbacks"`
+	HighFrequencyBattleTickAllowed bool                    `json:"high_frequency_battle_tick_allowed"`
+	ClientResultSubmitAllowed      bool                    `json:"client_result_submit_allowed"`
+	ServerTime                     time.Time               `json:"server_time"`
+	ServerAuthoritative            bool                    `json:"server_authoritative"`
 }
 
 type MatchStartEvent struct {

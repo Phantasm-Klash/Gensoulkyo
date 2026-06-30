@@ -111,18 +111,20 @@ CREATE TABLE IF NOT EXISTS match_allocation_audits (
     server_seed_hash TEXT NOT NULL,
     player_count INTEGER NOT NULL,
     allocation_json JSONB NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled')) DEFAULT 'allocated',
+    status TEXT NOT NULL CHECK (status IN ('allocated', 'started', 'settled', 'cancelled', 'server_registered', 'server_heartbeat', 'server_offline')) DEFAULT 'allocated',
     server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_match_allocation_audit_match
-    ON match_allocation_audits (match_id);
+    ON match_allocation_audits (match_id)
+    WHERE status = 'allocated';
 
 CREATE INDEX IF NOT EXISTS ix_match_allocation_audit_server_time
     ON match_allocation_audits (battle_server_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS battle_result_audits (
-    match_id TEXT PRIMARY KEY,
+    audit_id BIGSERIAL PRIMARY KEY,
+    match_id TEXT NOT NULL,
     mode_id TEXT NOT NULL,
     battle_server_id TEXT NOT NULL,
     result_hash TEXT NOT NULL,
@@ -130,10 +132,19 @@ CREATE TABLE IF NOT EXISTS battle_result_audits (
     key_id TEXT NOT NULL,
     player_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     settlement_key TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('accepted', 'duplicate')) DEFAULT 'accepted',
     verified_at TIMESTAMPTZ NOT NULL,
     settled_at TIMESTAMPTZ NOT NULL,
     server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_battle_result_audit_accepted
+    ON battle_result_audits (match_id)
+    WHERE status = 'accepted';
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_battle_result_audit_duplicate
+    ON battle_result_audits (match_id, result_hash, status)
+    WHERE status = 'duplicate';
 
 CREATE INDEX IF NOT EXISTS ix_battle_result_audit_server_time
     ON battle_result_audits (battle_server_id, settled_at DESC);
@@ -165,7 +176,7 @@ CREATE INDEX IF NOT EXISTS ix_replay_audit_user_time
 CREATE TABLE IF NOT EXISTS lobby_room_audits (
     audit_id BIGSERIAL PRIMARY KEY,
     room_code TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (action IN ('created', 'joined', 'matched', 'left', 'rules_read', 'cancelled', 'unknown')),
+    action TEXT NOT NULL CHECK (action IN ('created', 'joined', 'matched', 'left', 'listed', 'snapshot_read', 'rules_read', 'ticket_read', 'create_retry', 'join_retry', 'cancelled', 'ready', 'disconnected', 'reconnected', 'heartbeat', 'unknown')),
     mode_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     ticket_id TEXT NOT NULL DEFAULT '',
@@ -212,6 +223,9 @@ CREATE INDEX IF NOT EXISTS ix_lobby_message_audit_room_time
 CREATE INDEX IF NOT EXISTS ix_lobby_message_audit_user_time
     ON lobby_message_audits (user_id, created_at DESC);
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_lobby_message_audit_duplicate
+    ON lobby_message_audits (message_id, room_code, user_id, duplicate);
+
 INSERT INTO business_envelope_keys (
     key_id,
     protocol_version,
@@ -228,6 +242,24 @@ INSERT INTO business_envelope_keys (
     NULL,
     'local-dev-placeholder',
     'Development scaffold key id used by HTTP fallback tests. Replace before production.'
+) ON CONFLICT (key_id) DO NOTHING;
+
+INSERT INTO business_envelope_keys (
+    key_id,
+    protocol_version,
+    suite,
+    status,
+    public_key_hex,
+    server_key_ref,
+    notes
+) VALUES (
+    'client-dev-key',
+    'business-v0-scaffold',
+    'tls13_plus_x25519_hkdf_chacha20poly1305_client_dev_scaffold',
+    'dev_scaffold',
+    NULL,
+    'local-dev-client-envelope-placeholder',
+    'Development scaffold key id used by Nakama RPC/WSS envelope tests. Replace before production.'
 ) ON CONFLICT (key_id) DO NOTHING;
 
 INSERT INTO business_envelope_keys (

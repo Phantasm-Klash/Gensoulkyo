@@ -7,10 +7,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/nakamaapi"
-	"gensoulkyo/runtime/security"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -25,6 +24,7 @@ var rpcIDs = []string{
 	"chests.list",
 	"chests.open",
 	"presence.heartbeat",
+	"business.event",
 	"matchmaking.join",
 	"matchmaking.ticket",
 	"matchmaking.cancel",
@@ -38,50 +38,51 @@ var rpcIDs = []string{
 	"rooms.chat",
 	"rooms.announcement",
 	"match.ready",
+	"match.disconnect",
+	"match.reconnect",
 	"activity.claim",
+	"battle.servers.register",
+	"battle.servers.heartbeat",
+	"battle.servers.offline",
 	"battle.servers",
+	"business.envelope.audit.status",
 	"battle.audit.status",
 	"lobby.audit.status",
 	"battle.allocation",
 	"battle.ticket",
+	"battle.ticket.consume",
+	"replay.get",
 	"battle.result.submit",
 }
 
+var serviceOriginRPCIDs = map[string]struct{}{
+	"battle.servers.register":  {},
+	"battle.servers.heartbeat": {},
+	"battle.servers.offline":   {},
+	"battle.ticket.consume":    {},
+	"battle.result.submit":     {},
+}
+
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	var battleAuditRepo core.BattleLifecycleAuditRepository
-	var lobbyAuditRepo core.LobbyLifecycleAuditRepository
-	guard := security.NewBusinessEnvelopeGuard()
+	handler := nakamaapi.New(nil)
 	if db != nil {
-		sink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
+		dbHandler, err := nakamaapi.NewWithDatabase(db)
 		if err != nil {
 			return err
 		}
-		guard = security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
-		repo, err := core.NewSQLBattleLifecycleAuditRepository(db)
-		if err != nil {
-			return err
-		}
-		battleAuditRepo = repo
-		lobbyRepo, err := core.NewSQLLobbyLifecycleAuditRepository(db)
-		if err != nil {
-			return err
-		}
-		lobbyAuditRepo = lobbyRepo
+		handler = dbHandler
 	}
-	service := core.NewService(core.Config{
-		BattleLifecycleAuditRepo: battleAuditRepo,
-		LobbyLifecycleAuditRepo:  lobbyAuditRepo,
-	})
-	handler := nakamaapi.New(service, nakamaapi.WithBusinessEnvelopeGuard(guard))
 	for _, id := range rpcIDs {
 		rpcID := id
 		if err := initializer.RegisterRpc(rpcID, func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 			response := handler.HandleRPC(nakamaapi.RPCRequest{
-				ID:          rpcID,
-				SessionID:   runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID),
-				UserID:      runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID),
-				DisplayName: runtimeCtxString(ctx, runtime.RUNTIME_CTX_USERNAME),
-				Payload:     decodePayload(payload),
+				ID:           rpcID,
+				SessionID:    runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID),
+				UserID:       runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID),
+				DisplayName:  runtimeCtxString(ctx, runtime.RUNTIME_CTX_USERNAME),
+				Service:      isServiceOriginRPC(ctx, rpcID),
+				Payload:      decodedPayload(payload),
+				PayloadError: payloadError(payload),
 			})
 			return encodeResponse(response)
 		}); err != nil {
@@ -94,6 +95,17 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 	return nil
 }
 
+func isServiceOriginRPC(ctx context.Context, rpcID string) bool {
+	if _, ok := serviceOriginRPCIDs[rpcID]; !ok {
+		return false
+	}
+	if runtimeCtxString(ctx, runtime.RUNTIME_CTX_SESSION_ID) != "" || runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID) != "" {
+		return false
+	}
+	mode := strings.ToLower(strings.TrimSpace(runtimeCtxString(ctx, runtime.RUNTIME_CTX_MODE)))
+	return mode != "" && mode != "client"
+}
+
 func decodePayload(payload string) map[string]any {
 	if payload == "" {
 		return map[string]any{}
@@ -103,6 +115,28 @@ func decodePayload(payload string) map[string]any {
 		return map[string]any{"body": map[string]any{"raw_payload": payload}}
 	}
 	return out
+}
+
+func decodedPayload(payload string) map[string]any {
+	if err := payloadJSONError(payload); err != nil {
+		return map[string]any{}
+	}
+	return decodePayload(payload)
+}
+
+func payloadError(payload string) string {
+	if err := payloadJSONError(payload); err != nil {
+		return "invalid JSON payload: " + err.Error()
+	}
+	return ""
+}
+
+func payloadJSONError(payload string) error {
+	if strings.TrimSpace(payload) == "" {
+		return nil
+	}
+	out := map[string]any{}
+	return json.Unmarshal([]byte(payload), &out)
 }
 
 func encodeResponse(response nakamaapi.Response) (string, error) {

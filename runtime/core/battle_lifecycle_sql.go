@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 )
 
 const insertMatchAllocationAuditSQL = `
@@ -24,7 +25,7 @@ INSERT INTO match_allocation_audits (
     created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14
-) ON CONFLICT (match_id) DO NOTHING`
+) ON CONFLICT DO NOTHING`
 
 const insertBattleTicketAuditSQL = `
 INSERT INTO battle_ticket_audits (
@@ -44,10 +45,15 @@ INSERT INTO battle_ticket_audits (
     nonce,
     signature_prefix,
     status,
-    server_authoritative
+    server_authoritative,
+    consumed_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
-) ON CONFLICT (ticket_id) DO NOTHING`
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+) ON CONFLICT (ticket_id) DO UPDATE SET
+    status = EXCLUDED.status,
+    consumed_at = COALESCE(EXCLUDED.consumed_at, battle_ticket_audits.consumed_at),
+    server_authoritative = EXCLUDED.server_authoritative
+WHERE battle_ticket_audits.status = 'issued' AND EXCLUDED.status IN ('consumed', 'expired', 'revoked')`
 
 const insertBattleResultAuditSQL = `
 INSERT INTO battle_result_audits (
@@ -59,12 +65,13 @@ INSERT INTO battle_result_audits (
     key_id,
     player_ids_json,
     settlement_key,
+    status,
     verified_at,
     settled_at,
     server_authoritative
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11
-) ON CONFLICT (match_id) DO NOTHING`
+    $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12
+) ON CONFLICT DO NOTHING`
 
 const insertReplayAuditSQL = `
 INSERT INTO replay_audits (
@@ -175,6 +182,7 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordBattleTicketAudit(record Ba
 		record.SignaturePrefix,
 		firstNonEmptyCore(record.Status, "issued"),
 		record.ServerAuthoritative,
+		nullableTime(record.ConsumedAt),
 	)
 	return err
 }
@@ -197,6 +205,7 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordBattleResultAudit(record Ba
 		record.KeyID,
 		string(playerIDsJSON),
 		record.SettlementKey,
+		firstNonEmptyCore(record.Status, "accepted"),
 		record.VerifiedAt,
 		record.SettledAt,
 		record.ServerAuthoritative,
@@ -233,4 +242,11 @@ func firstNonEmptyCore(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
 }

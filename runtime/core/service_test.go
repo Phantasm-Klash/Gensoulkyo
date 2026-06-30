@@ -412,6 +412,206 @@ func TestBattleAllocationAndSignedTicketUseRegisteredServer(t *testing.T) {
 	}
 }
 
+func TestBattleAllocationFallbackAccountsServerLoad(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Fallback Alice")
+	bob := mustLogin(t, service, "Fallback Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	if allocation.BattleServerID != DefaultBattleServerID {
+		t.Fatalf("expected default fallback allocation, got %+v", allocation)
+	}
+
+	servers := service.BattleServers()
+	var fallback BattleServerStatus
+	for _, server := range servers.Servers {
+		if server.BattleServerID == DefaultBattleServerID {
+			fallback = server
+			break
+		}
+	}
+	if fallback.BattleServerID == "" || fallback.ActiveMatches != 1 || fallback.Load <= 0 || !fallback.ServerAuthoritative {
+		t.Fatalf("fallback allocation should update server load accounting: %+v", fallback)
+	}
+
+	again, err := service.BattleAllocation(bob.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("second allocation read: %v", err)
+	}
+	if again.BattleServerID != DefaultBattleServerID {
+		t.Fatalf("second read changed allocation: %+v", again)
+	}
+	servers = service.BattleServers()
+	for _, server := range servers.Servers {
+		if server.BattleServerID == DefaultBattleServerID && server.ActiveMatches != 1 {
+			t.Fatalf("re-reading existing allocation must not double count fallback load: %+v", server)
+		}
+	}
+}
+
+func TestBattleServerOfflineLifecycleSkipsFutureAllocations(t *testing.T) {
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{BattleLifecycleAuditRepo: repo})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-offline-a",
+		Endpoint:       "127.0.0.1:7911",
+		Region:         "local",
+		BuildID:        "offline-a",
+		Capacity:       8,
+		Status:         "offline",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register offline candidate: %v", err)
+	}
+	if repo.allocations[0].AllocationJSON == "" || !strings.Contains(repo.allocations[0].AllocationJSON, `"status":"online"`) {
+		t.Fatalf("register audit must canonicalize callback status to online: %+v", repo.allocations[0])
+	}
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-online-b",
+		Endpoint:       "127.0.0.1:7912",
+		Region:         "local",
+		BuildID:        "online-b",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register online candidate: %v", err)
+	}
+	heartbeat, err := service.BattleServerHeartbeat(BattleServerHeartbeatRequest{
+		BattleServerID: "pvp-offline-a",
+		ActiveMatches:  0,
+		Load:           0.5,
+		Status:         "draining",
+	})
+	if err != nil {
+		t.Fatalf("heartbeat offline candidate: %v", err)
+	}
+	if heartbeat.Status != "online" {
+		t.Fatalf("heartbeat must canonicalize payload status to online: %+v", heartbeat)
+	}
+	offline, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "pvp-offline-a", Status: "online"})
+	if err != nil {
+		t.Fatalf("offline battle server: %v", err)
+	}
+	if offline.Status != "offline" || offline.Load != 0 || !offline.ServerAuthoritative {
+		t.Fatalf("offline status must be canonical even when payload asks for another state: %+v", offline)
+	}
+
+	alice := mustLogin(t, service, "Offline Alice")
+	bob := mustLogin(t, service, "Offline Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation after offline: %v", err)
+	}
+	if allocation.BattleServerID != "pvp-online-b" {
+		t.Fatalf("offline server must be skipped for future allocations: %+v", allocation)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ServerLifecycleRecords != 4 || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.LastSuccessOperation == "" {
+		t.Fatalf("offline lifecycle audit status invalid: %+v", status)
+	}
+	if len(repo.allocations) != 5 || repo.allocations[2].Status != "server_heartbeat" || !strings.Contains(repo.allocations[2].AllocationJSON, `"status":"online"`) || repo.allocations[3].Status != "server_offline" || repo.allocations[3].BattleServerID != "pvp-offline-a" {
+		t.Fatalf("expected register/register/heartbeat/offline/allocation audit records with canonical statuses, got %+v", repo.allocations)
+	}
+	if _, err := service.BattleServerOffline(BattleServerOfflineRequest{BattleServerID: "missing-battle"}); ErrorCode(err) != codeNotFound {
+		t.Fatalf("missing offline should be not_found, got %v", err)
+	}
+}
+
+func TestBattleServerStaleHeartbeatSkipsFutureAllocations(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-stale-a",
+		Endpoint:       "127.0.0.1:7921",
+		Region:         "local",
+		BuildID:        "stale-a",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register stale candidate: %v", err)
+	}
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-fresh-b",
+		Endpoint:       "127.0.0.1:7922",
+		Region:         "local",
+		BuildID:        "fresh-b",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register fresh candidate: %v", err)
+	}
+	now = now.Add(time.Duration(BattleServerHeartbeatTTLSeconds+1) * time.Second)
+	if _, err := service.BattleServerHeartbeat(BattleServerHeartbeatRequest{
+		BattleServerID: "pvp-fresh-b",
+		Endpoint:       "127.0.0.1:7922",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("refresh fresh candidate: %v", err)
+	}
+
+	alice := mustLogin(t, service, "Stale Alice")
+	bob := mustLogin(t, service, "Stale Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation after stale heartbeat: %v", err)
+	}
+	if allocation.BattleServerID != "pvp-fresh-b" {
+		t.Fatalf("stale registered server must be skipped for new allocations: %+v", allocation)
+	}
+	servers := service.BattleServers()
+	for _, server := range servers.Servers {
+		if server.BattleServerID == "pvp-stale-a" && server.Status != "online" {
+			t.Fatalf("stale heartbeat should not mutate discovery status without an offline callback: %+v", server)
+		}
+	}
+}
+
+func TestBattleAllocationReadKeepsExistingServerAfterHeartbeatStales(t *testing.T) {
+	now := time.Date(2026, 6, 29, 13, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "pvp-existing-a",
+		Endpoint:       "127.0.0.1:7923",
+		Region:         "local",
+		BuildID:        "existing-a",
+		Capacity:       8,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register existing candidate: %v", err)
+	}
+
+	alice := mustLogin(t, service, "Existing Alice")
+	bob := mustLogin(t, service, "Existing Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	first, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("initial allocation: %v", err)
+	}
+	if first.BattleServerID != "pvp-existing-a" {
+		t.Fatalf("expected registered server before heartbeat stales: %+v", first)
+	}
+	now = now.Add(time.Duration(BattleServerHeartbeatTTLSeconds+1) * time.Second)
+	second, err := service.BattleAllocation(bob.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("existing allocation read after stale heartbeat: %v", err)
+	}
+	if second.BattleServerID != first.BattleServerID || second.Endpoint != first.Endpoint {
+		t.Fatalf("existing allocation reads must remain stable after heartbeat stales: first=%+v second=%+v", first, second)
+	}
+}
+
 func TestPvPDuelModeContractAllocationAndSettlement(t *testing.T) {
 	now := time.Date(2026, 6, 27, 11, 0, 0, 0, time.UTC)
 	service := NewService(Config{Clock: func() time.Time { return now }})
@@ -616,6 +816,14 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	}); err != nil {
 		t.Fatalf("register battle server: %v", err)
 	}
+	if _, err := service.BattleServerHeartbeat(BattleServerHeartbeatRequest{
+		BattleServerID: "audit-battle-dev",
+		ActiveMatches:  0,
+		Load:           0,
+		Status:         "online",
+	}); err != nil {
+		t.Fatalf("battle server heartbeat: %v", err)
+	}
 	alice := mustLogin(t, service, "Audit Alice")
 	bob := mustLogin(t, service, "Audit Bob")
 	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
@@ -626,10 +834,16 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	if allocation.BattleServerID != "audit-battle-dev" {
 		t.Fatalf("expected audit battle server: %+v", allocation)
 	}
-	if len(repo.allocations) != 1 {
+	if len(repo.allocations) != 3 {
 		t.Fatalf("expected one allocation audit, got %+v", repo.allocations)
 	}
-	allocationAudit := repo.allocations[0]
+	if repo.allocations[0].Status != "server_registered" || repo.allocations[0].MatchID != "battle-server:audit-battle-dev" || repo.allocations[0].ModeID != "battle_server_lifecycle" || repo.allocations[0].PlayerCount != 0 || repo.allocations[0].AllocationJSON == "" {
+		t.Fatalf("registration audit invalid: %+v", repo.allocations[0])
+	}
+	if repo.allocations[1].Status != "server_heartbeat" || repo.allocations[1].MatchID != "battle-server:audit-battle-dev" || repo.allocations[1].PlayerCount != 0 || repo.allocations[1].AllocationJSON == "" {
+		t.Fatalf("heartbeat audit invalid: %+v", repo.allocations[1])
+	}
+	allocationAudit := repo.allocations[2]
 	if allocationAudit.MatchID != matchID || allocationAudit.ModeID != "pvp_duel" || allocationAudit.BattleServerID != "audit-battle-dev" || allocationAudit.PlayerCount != 2 || allocationAudit.AllocationJSON == "" {
 		t.Fatalf("allocation audit invalid: %+v", allocationAudit)
 	}
@@ -661,7 +875,7 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 		t.Fatalf("expected one result audit, got %+v", repo.results)
 	}
 	resultAudit := repo.results[0]
-	if resultAudit.MatchID != matchID || resultAudit.ResultHash != signed.Result.ResultHash || resultAudit.ReplayID != signed.Result.ReplayID || len(resultAudit.PlayerIDs) != 2 || resultAudit.SettlementKey == "" {
+	if resultAudit.MatchID != matchID || resultAudit.ResultHash != signed.Result.ResultHash || resultAudit.ReplayID != signed.Result.ReplayID || len(resultAudit.PlayerIDs) != 2 || resultAudit.SettlementKey == "" || resultAudit.Status != "accepted" {
 		t.Fatalf("result audit invalid: %+v", resultAudit)
 	}
 	if len(repo.replays) != 2 {
@@ -673,8 +887,26 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 		}
 	}
 	status := service.BattleLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.ServerLifecycleRecords != 2 || status.AllocationRecords != 1 || status.TicketRecords == 0 || status.ResultRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 {
 		t.Fatalf("audit status did not account successful lifecycle writes: %+v", status)
+	}
+	if status.LastSuccessOperation != "battle_result" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+		t.Fatalf("audit status should expose a non-secret last-success fingerprint: %+v", status)
+	}
+
+	duplicate, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
+	if err != nil {
+		t.Fatalf("duplicate result callback: %v", err)
+	}
+	if !duplicate.Accepted || !duplicate.Duplicate {
+		t.Fatalf("duplicate result response invalid: %+v", duplicate)
+	}
+	if len(repo.results) != 2 || repo.results[1].Status != "duplicate" || repo.results[1].MatchID != matchID || len(repo.replays) != 2 {
+		t.Fatalf("duplicate callback should record one duplicate result audit without extra replay writes: results=%+v replays=%+v", repo.results, repo.replays)
+	}
+	status = service.BattleLifecycleAuditStatus()
+	if status.ResultRecords != 1 || status.ResultDuplicateRecords != 1 || status.ReplayRecords != 2 || status.LastSuccessOperation != "battle_result_duplicate" {
+		t.Fatalf("duplicate result callback audit status invalid: %+v", status)
 	}
 }
 
@@ -694,6 +926,115 @@ func TestBattleLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
 	}
 	if !status.ServerAuthoritative {
 		t.Fatalf("audit status must stay server authoritative: %+v", status)
+	}
+}
+
+func TestBattleTicketExpiryLifecycleAudit(t *testing.T) {
+	now := time.Date(2026, 6, 29, 14, 0, 0, 0, time.UTC)
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                    func() time.Time { return now },
+		BattleLifecycleAuditRepo: repo,
+	})
+	alice := mustLogin(t, service, "Ticket Expiry Alice")
+	bob := mustLogin(t, service, "Ticket Expiry Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	first, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("first ticket: %v", err)
+	}
+	now = first.Ticket.ExpiresAt.Add(time.Second)
+	second, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("replacement ticket: %v", err)
+	}
+	if second.Ticket.TicketID == first.Ticket.TicketID || !second.Ticket.IssuedAt.Equal(now) {
+		t.Fatalf("expired ticket should be replaced with a fresh signed ticket: first=%+v second=%+v", first.Ticket, second.Ticket)
+	}
+
+	var expired BattleTicketAuditRecord
+	for _, record := range repo.tickets {
+		if record.TicketID == first.Ticket.TicketID && record.Status == "expired" {
+			expired = record
+			break
+		}
+	}
+	if expired.TicketID == "" || !expired.ConsumedAt.Equal(now) || expired.ExpiresAt != first.Ticket.ExpiresAt || !expired.ServerAuthoritative {
+		t.Fatalf("expired ticket audit missing authoritative transition: tickets=%+v", repo.tickets)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.TicketExpiredRecords != 1 || status.LastSuccessOperation != "battle_ticket" {
+		t.Fatalf("ticket expiry status should count expired transition and fresh ticket issue: %+v", status)
+	}
+}
+
+func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
+	now := time.Date(2026, 6, 30, 8, 0, 0, 0, time.UTC)
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                    func() time.Time { return now },
+		BattleLifecycleAuditRepo: repo,
+	})
+	alice := mustLogin(t, service, "Ticket Consume Alice")
+	bob := mustLogin(t, service, "Ticket Consume Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	ticket, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("battle ticket: %v", err)
+	}
+	consume, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       ticket.Ticket.TicketID,
+		MatchID:        matchID,
+		UserID:         alice.UserID,
+		PlayerID:       ticket.Ticket.PlayerID,
+		BattleServerID: ticket.Ticket.BattleServerID,
+		TicketNonceHex: ticket.Ticket.TicketNonceHex,
+	})
+	if err != nil {
+		t.Fatalf("consume ticket: %v", err)
+	}
+	if !consume.Consumed || consume.Duplicate || consume.TicketID != ticket.Ticket.TicketID || !consume.ServerAuthoritative {
+		t.Fatalf("consume response invalid: %+v", consume)
+	}
+	if len(repo.tickets) < 2 || repo.tickets[len(repo.tickets)-1].Status != "consumed" || repo.tickets[len(repo.tickets)-1].ConsumedAt != now {
+		t.Fatalf("consumed ticket audit missing: %+v", repo.tickets)
+	}
+	afterConsumeAuditCount := len(repo.tickets)
+	duplicate, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       ticket.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: ticket.Ticket.BattleServerID,
+		TicketNonceHex: ticket.Ticket.TicketNonceHex,
+	})
+	if err != nil {
+		t.Fatalf("duplicate consume ticket: %v", err)
+	}
+	if !duplicate.Consumed || !duplicate.Duplicate || duplicate.ServerTime != now {
+		t.Fatalf("duplicate consume response invalid: %+v", duplicate)
+	}
+	if len(repo.tickets) != afterConsumeAuditCount {
+		t.Fatalf("duplicate consume should not write another ticket audit: %+v", repo.tickets)
+	}
+	replacement, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("replacement battle ticket: %v", err)
+	}
+	if replacement.Ticket.TicketID == ticket.Ticket.TicketID {
+		t.Fatalf("consumed ticket should not be reissued: old=%+v replacement=%+v", ticket.Ticket, replacement.Ticket)
+	}
+	if _, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
+		TicketID:       replacement.Ticket.TicketID,
+		MatchID:        matchID,
+		BattleServerID: replacement.Ticket.BattleServerID,
+		TicketNonceHex: "wrong-nonce",
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected nonce mismatch rejection, got %v", err)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket" {
+		t.Fatalf("ticket consume status invalid: %+v", status)
 	}
 }
 
@@ -759,11 +1100,38 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if len(repo.rooms) != 1 || repo.rooms[0].Action != "created" || repo.rooms[0].RoomCode != created.RoomCode || repo.rooms[0].DeckSnapshotHash == "" {
 		t.Fatalf("create room audit invalid: %+v", repo.rooms)
 	}
+	retryCreate, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "audit_host_retry_deck",
+		DeckSnapshot: validDeck("audit_host_retry_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("retry create room: %v", err)
+	}
+	if retryCreate.TicketID != created.TicketID || len(repo.rooms) != 2 || repo.rooms[1].Action != "create_retry" || repo.rooms[1].TicketID != created.TicketID || repo.rooms[1].CurrentPlayers != 1 {
+		t.Fatalf("create retry audit invalid: response=%+v audits=%+v", retryCreate, repo.rooms)
+	}
+
+	listed, err := service.ListRooms(guest.SessionToken)
+	if err != nil {
+		t.Fatalf("list rooms: %v", err)
+	}
+	if len(listed.Rooms) != 1 || len(repo.rooms) != 3 || repo.rooms[2].Action != "listed" || repo.rooms[2].UserID != guest.UserID {
+		t.Fatalf("list audit invalid: list=%+v audits=%+v", listed, repo.rooms)
+	}
+
+	if _, err := service.Room(guest.SessionToken, created.RoomCode); err != nil {
+		t.Fatalf("room snapshot: %v", err)
+	}
+	if len(repo.rooms) != 4 || repo.rooms[3].Action != "snapshot_read" || repo.rooms[3].UserID != guest.UserID {
+		t.Fatalf("snapshot read audit invalid: %+v", repo.rooms)
+	}
 
 	if _, err := service.RoomRules(guest.SessionToken, created.RoomCode); err != nil {
 		t.Fatalf("room rules: %v", err)
 	}
-	if len(repo.rooms) != 2 || repo.rooms[1].Action != "rules_read" || repo.rooms[1].UserID != guest.UserID || repo.rooms[1].ModeConfigHash == "" {
+	if len(repo.rooms) != 5 || repo.rooms[4].Action != "rules_read" || repo.rooms[4].UserID != guest.UserID || repo.rooms[4].ModeConfigHash == "" {
 		t.Fatalf("rules audit invalid: %+v", repo.rooms)
 	}
 
@@ -775,8 +1143,27 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if err != nil {
 		t.Fatalf("join room: %v", err)
 	}
-	if len(repo.rooms) != 3 || repo.rooms[2].Action != "joined" || repo.rooms[2].TicketID != joined.TicketID || repo.rooms[2].CurrentPlayers != 2 {
+	if len(repo.rooms) != 6 || repo.rooms[5].Action != "joined" || repo.rooms[5].TicketID != joined.TicketID || repo.rooms[5].CurrentPlayers != 2 {
 		t.Fatalf("join audit invalid: %+v", repo.rooms)
+	}
+	retryJoin, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "audit_guest_retry_deck",
+		DeckSnapshot: validDeck("audit_guest_retry_deck"),
+	})
+	if err != nil {
+		t.Fatalf("retry join room: %v", err)
+	}
+	if retryJoin.TicketID != joined.TicketID || len(repo.rooms) != 7 || repo.rooms[6].Action != "join_retry" || repo.rooms[6].TicketID != joined.TicketID || repo.rooms[6].CurrentPlayers != 2 {
+		t.Fatalf("join retry audit invalid: response=%+v audits=%+v", retryJoin, repo.rooms)
+	}
+
+	polled, err := service.QueueTicket(guest.SessionToken, joined.TicketID)
+	if err != nil {
+		t.Fatalf("poll room ticket: %v", err)
+	}
+	if polled.TicketID != joined.TicketID || len(repo.rooms) != 8 || repo.rooms[7].Action != "ticket_read" || repo.rooms[7].TicketID != joined.TicketID || repo.rooms[7].CurrentPlayers != 2 {
+		t.Fatalf("ticket read audit invalid: response=%+v audits=%+v", polled, repo.rooms)
 	}
 
 	chat, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
@@ -801,6 +1188,18 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if !duplicate.Duplicate || len(repo.messages) != 2 || repo.messages[0].MessageID != chat.MessageID || repo.messages[0].MetadataHash == "" || !repo.messages[1].Duplicate {
 		t.Fatalf("message audits invalid: messages=%+v duplicate=%+v", repo.messages, duplicate)
 	}
+	hostCollision, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: chat.MessageID,
+		Kind:      "announcement",
+		Text:      "host scoped message id",
+	})
+	if err != nil {
+		t.Fatalf("host message id collision should be scoped by user: %v", err)
+	}
+	if hostCollision.Duplicate || hostCollision.UserID != host.UserID || hostCollision.Text != "host scoped message id" || len(repo.messages) != 3 {
+		t.Fatalf("cross-user message id collision should create a new authoritative message: message=%+v audits=%+v", hostCollision, repo.messages)
+	}
 
 	left, err := service.LeaveRoom(guest.SessionToken, created.RoomCode)
 	if err != nil {
@@ -811,8 +1210,11 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 		t.Fatalf("leave audit invalid: response=%+v audit=%+v", left, lastRoomAudit)
 	}
 	status := service.LobbyLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RulesReadRecords != 1 || status.MessageRecords != 2 || status.RejectedRecords != 0 {
+	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 5 || status.RulesReadRecords != 1 || status.MessageRecords != 3 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
+	}
+	if status.LastSuccessOperation != "left" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+		t.Fatalf("lobby audit status should expose a non-secret last-success fingerprint: %+v", status)
 	}
 }
 
@@ -841,10 +1243,298 @@ func TestLobbyLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
 	}
 }
 
+func TestLobbyLifecycleAuditRecordsRoomReadyTransitions(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Ready Audit Host")
+	guest := mustLogin(t, service, "Ready Audit Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "ready_host_deck",
+		DeckSnapshot: validDeck("ready_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "ready_guest_deck",
+		DeckSnapshot: validDeck("ready_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.MatchID == "" {
+		t.Fatalf("pvp room join should allocate a match: %+v", joined)
+	}
+	matchedAudits := filterLobbyRoomAudits(repo.rooms, "matched")
+	if len(matchedAudits) != 2 {
+		t.Fatalf("room match should audit every matched participant, got %+v", matchedAudits)
+	}
+	if matchedAudits[0].UserID != host.UserID || matchedAudits[0].TicketID != created.TicketID || matchedAudits[0].MatchID != joined.MatchID || matchedAudits[0].CurrentPlayers != 2 {
+		t.Fatalf("host matched audit invalid: %+v", matchedAudits[0])
+	}
+	if matchedAudits[1].UserID != guest.UserID || matchedAudits[1].TicketID != joined.TicketID || matchedAudits[1].MatchID != joined.MatchID || matchedAudits[1].CurrentPlayers != 2 {
+		t.Fatalf("guest matched audit invalid: %+v", matchedAudits[1])
+	}
+	beforeReadyAudits := len(repo.rooms)
+
+	hostReady, err := service.ReadyMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("host ready: %v", err)
+	}
+	if hostReady.ReadyStatus != "loading" {
+		t.Fatalf("first ready should keep match loading: %+v", hostReady)
+	}
+	guestReady, err := service.ReadyMatch(guest.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("guest ready: %v", err)
+	}
+	if guestReady.ReadyStatus != "running" || guestReady.MatchStart == nil || guestReady.BattleTicket == nil {
+		t.Fatalf("second ready should start room match: %+v", guestReady)
+	}
+	duplicateHostReady, err := service.ReadyMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("duplicate host ready: %v", err)
+	}
+	if duplicateHostReady.ReadyCount != 2 || duplicateHostReady.ReadyStatus != "running" {
+		t.Fatalf("duplicate ready should remain idempotent: %+v", duplicateHostReady)
+	}
+
+	readyAudits := repo.rooms[beforeReadyAudits:]
+	if len(readyAudits) != 2 {
+		t.Fatalf("expected exactly two first-ready audit records, got %+v", readyAudits)
+	}
+	if readyAudits[0].Action != "ready" || readyAudits[0].UserID != host.UserID || readyAudits[0].MatchID != joined.MatchID || readyAudits[0].CurrentPlayers != 1 || readyAudits[0].RequiredPlayers != 2 {
+		t.Fatalf("host ready audit invalid: %+v", readyAudits[0])
+	}
+	if readyAudits[1].Action != "ready" || readyAudits[1].UserID != guest.UserID || readyAudits[1].MatchID != joined.MatchID || readyAudits[1].CurrentPlayers != 2 || readyAudits[1].RequiredPlayers != 2 {
+		t.Fatalf("guest ready audit invalid: %+v", readyAudits[1])
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ReadyRecords != 2 || status.LastSuccessOperation != "ready" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
+		t.Fatalf("ready audit status invalid: %+v", status)
+	}
+}
+
+func TestLobbyLifecycleAuditRecordsRoomReconnectTransitions(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Reconnect Audit Host")
+	guest := mustLogin(t, service, "Reconnect Audit Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "reconnect_host_deck",
+		DeckSnapshot: validDeck("reconnect_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "reconnect_guest_deck",
+		DeckSnapshot: validDeck("reconnect_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if _, err := service.ReadyMatch(host.SessionToken, joined.MatchID); err != nil {
+		t.Fatalf("host ready: %v", err)
+	}
+	if _, err := service.ReadyMatch(guest.SessionToken, joined.MatchID); err != nil {
+		t.Fatalf("guest ready: %v", err)
+	}
+	beforeConnectionAudits := len(repo.rooms)
+
+	disconnected, err := service.DisconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	if disconnected.ReconnectStatus != "disconnected" || disconnected.Connected {
+		t.Fatalf("disconnect response invalid: %+v", disconnected)
+	}
+	duplicateDisconnect, err := service.DisconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("duplicate disconnect: %v", err)
+	}
+	if duplicateDisconnect.ReconnectStatus != "disconnected" || duplicateDisconnect.Connected {
+		t.Fatalf("duplicate disconnect response invalid: %+v", duplicateDisconnect)
+	}
+	reconnected, err := service.ReconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	if reconnected.ReconnectStatus != "restored" || !reconnected.Connected || reconnected.BattleTicket == nil {
+		t.Fatalf("reconnect response invalid: %+v", reconnected)
+	}
+	duplicateReconnect, err := service.ReconnectMatch(host.SessionToken, joined.MatchID)
+	if err != nil {
+		t.Fatalf("duplicate reconnect: %v", err)
+	}
+	if duplicateReconnect.ReconnectStatus != "restored" || !duplicateReconnect.Connected {
+		t.Fatalf("duplicate reconnect response invalid: %+v", duplicateReconnect)
+	}
+
+	connectionAudits := repo.rooms[beforeConnectionAudits:]
+	if len(connectionAudits) != 2 {
+		t.Fatalf("expected disconnect and reconnect audit records only, got %+v", connectionAudits)
+	}
+	if connectionAudits[0].Action != "disconnected" || connectionAudits[0].UserID != host.UserID || connectionAudits[0].MatchID != joined.MatchID || connectionAudits[0].CurrentPlayers != 1 || connectionAudits[0].RequiredPlayers != 2 {
+		t.Fatalf("disconnect audit invalid: %+v", connectionAudits[0])
+	}
+	if connectionAudits[1].Action != "reconnected" || connectionAudits[1].UserID != host.UserID || connectionAudits[1].MatchID != joined.MatchID || connectionAudits[1].CurrentPlayers != 2 || connectionAudits[1].RequiredPlayers != 2 {
+		t.Fatalf("reconnect audit invalid: %+v", connectionAudits[1])
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ConnectionRecords != 2 || status.LastSuccessOperation != "reconnected" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
+		t.Fatalf("connection audit status invalid: %+v", status)
+	}
+}
+
+func TestLobbyLifecycleAuditRecordsRoomHeartbeatTransitions(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Audit Heartbeat Host")
+	guest := mustLogin(t, service, "Audit Heartbeat Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "audit_heartbeat_host_deck",
+		DeckSnapshot: validDeck("audit_heartbeat_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "starlit_lanes", "character_id": "balanced"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if _, err := service.Heartbeat(host.SessionToken, PresenceHeartbeatRequest{
+		TicketID:        created.TicketID,
+		LastEventCursor: 0,
+		ClientTick:      7,
+	}); err != nil {
+		t.Fatalf("room heartbeat: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "audit_heartbeat_guest_deck",
+		DeckSnapshot: validDeck("audit_heartbeat_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.MatchID == "" {
+		t.Fatalf("join should create match: %+v", joined)
+	}
+	if _, err := service.Heartbeat(host.SessionToken, PresenceHeartbeatRequest{
+		TicketID:        created.TicketID,
+		MatchID:         joined.MatchID,
+		LastEventCursor: 1,
+		ClientTick:      11,
+	}); err != nil {
+		t.Fatalf("match heartbeat: %v", err)
+	}
+
+	heartbeatAudits := filterLobbyRoomAudits(repo.rooms, "heartbeat")
+	if len(heartbeatAudits) != 2 {
+		t.Fatalf("expected queued and matched heartbeat audit records, got %+v", heartbeatAudits)
+	}
+	if heartbeatAudits[0].RoomCode != created.RoomCode || heartbeatAudits[0].MatchID != "" || heartbeatAudits[0].TicketID != created.TicketID || heartbeatAudits[0].CurrentPlayers != 1 {
+		t.Fatalf("queued heartbeat audit invalid: %+v", heartbeatAudits[0])
+	}
+	if heartbeatAudits[1].RoomCode != created.RoomCode || heartbeatAudits[1].MatchID != joined.MatchID || heartbeatAudits[1].TicketID != created.TicketID || heartbeatAudits[1].CurrentPlayers != 2 {
+		t.Fatalf("matched heartbeat audit invalid: %+v", heartbeatAudits[1])
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ConnectionRecords != 2 || status.LastSuccessOperation != "heartbeat" || status.RoomRecords != 3 || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") {
+		t.Fatalf("heartbeat audit status invalid: %+v", status)
+	}
+}
+
+func TestRoomHostLeavePromotesRemainingParticipantAuthority(t *testing.T) {
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
+	host := mustLogin(t, service, "Promoted Host Original")
+	guest := mustLogin(t, service, "Promoted Host Guest")
+	observer := mustLogin(t, service, "Promoted Host Observer")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "promote_host_deck",
+		DeckSnapshot: validDeck("promote_host_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze", "character_id": "precision"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "promote_guest_deck",
+		DeckSnapshot: validDeck("promote_guest_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.CurrentPlayers != 2 || joined.RoomStatus != "waiting" {
+		t.Fatalf("join should leave room waiting with two players: %+v", joined)
+	}
+
+	left, err := service.LeaveRoom(host.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("host leave: %v", err)
+	}
+	if left.QueueStatus != "cancelled" || left.RoomStatus != "cancelled" || left.CurrentPlayers != 1 {
+		t.Fatalf("leaving host ticket response invalid: %+v", left)
+	}
+	room, err := service.Room(observer.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("observer room read: %v", err)
+	}
+	if room.RoomStatus != "waiting" || room.HostUserID != guest.UserID || room.CurrentPlayers != 1 || len(room.Participants) != 1 || room.Participants[0].UserID != guest.UserID {
+		t.Fatalf("room should promote remaining queued participant as host: %+v", room)
+	}
+	if _, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "old-host-announcement",
+		Kind:      "announcement",
+		Text:      "stale host",
+	}); ErrorCode(err) != codeUnauthorized {
+		t.Fatalf("old host must lose room announcement authority, got %v", err)
+	}
+	promotedAnnouncement, err := service.LobbyMessage(guest.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "new-host-announcement",
+		Kind:      "announcement",
+		Text:      "new host ready",
+	})
+	if err != nil {
+		t.Fatalf("promoted host announcement: %v", err)
+	}
+	if promotedAnnouncement.UserID != guest.UserID || promotedAnnouncement.Kind != "announcement" || !promotedAnnouncement.ServerAuthoritative {
+		t.Fatalf("promoted host announcement invalid: %+v", promotedAnnouncement)
+	}
+	lastRoomAudit := repo.rooms[len(repo.rooms)-1]
+	if lastRoomAudit.Action != "snapshot_read" || lastRoomAudit.HostUserID != guest.UserID || lastRoomAudit.CurrentPlayers != 1 {
+		t.Fatalf("room read audit must expose promoted host state: %+v", lastRoomAudit)
+	}
+}
+
 type captureLobbyLifecycleAuditRepo struct {
 	rooms    []LobbyRoomAuditRecord
 	messages []LobbyMessageAuditRecord
 	err      error
+}
+
+func filterLobbyRoomAudits(records []LobbyRoomAuditRecord, action string) []LobbyRoomAuditRecord {
+	out := []LobbyRoomAuditRecord{}
+	for _, record := range records {
+		if record.Action == action {
+			out = append(out, record)
+		}
+	}
+	return out
 }
 
 func (repo *captureLobbyLifecycleAuditRepo) RecordLobbyRoomAudit(record LobbyRoomAuditRecord) error {
@@ -956,6 +1646,61 @@ func TestInventoryDeckSaveAndMatchUsesServerActiveDeck(t *testing.T) {
 	}
 	if alicePlayer.DeckSnapshot.DeckID == clientSubmitted.DeckID {
 		t.Fatalf("match trusted client submitted deck: %+v", alicePlayer.DeckSnapshot)
+	}
+}
+
+func TestMatchEntryRejectsIncompatibleClientVersions(t *testing.T) {
+	now := time.Date(2026, 6, 30, 11, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	alice := mustLogin(t, service, "Version Alice")
+	bob := mustLogin(t, service, "Version Bob")
+	cara := mustLogin(t, service, "Version Cara")
+
+	current := currentVersionStamp()
+	queued, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: current,
+	})
+	if err != nil || queued.QueueStatus != "queued" {
+		t.Fatalf("current version should enter queue: resp=%+v err=%v", queued, err)
+	}
+	if _, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{ProtocolVersion: ProtocolVersion + 1},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected protocol mismatch rejection, got %v", err)
+	}
+	if _, err := service.CreateRoom(bob.SessionToken, CreateRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{BusinessAPIVersion: "business-api-old"},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected business api mismatch rejection, got %v", err)
+	}
+
+	room, err := service.CreateRoom(bob.SessionToken, CreateRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: current,
+	})
+	if err != nil || room.RoomCode == "" {
+		t.Fatalf("current version should create room: resp=%+v err=%v", room, err)
+	}
+	if _, err := service.JoinRoom(cara.SessionToken, room.RoomCode, JoinRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{BattleAPIVersion: "battle-api-old"},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected battle api mismatch rejection, got %v", err)
+	}
+	if _, err := service.JoinRoom(cara.SessionToken, room.RoomCode, JoinRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{RulesetVersion: "ruleset-old"},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected ruleset mismatch rejection, got %v", err)
 	}
 }
 
@@ -1279,7 +2024,8 @@ func TestMatchmakingLoadoutStageBucketAndValidation(t *testing.T) {
 }
 
 func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
-	service := NewService(Config{})
+	repo := &captureLobbyLifecycleAuditRepo{}
+	service := NewService(Config{LobbyLifecycleAuditRepo: repo})
 	alice := mustLogin(t, service, "Cancel Alice")
 	bob := mustLogin(t, service, "Cancel Bob")
 	cara := mustLogin(t, service, "Cancel Cara")
@@ -1352,6 +2098,9 @@ func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
 	if roomCancel.QueueStatus != "cancelled" || roomCancel.RoomStatus != "cancelled" || roomCancel.CurrentPlayers != 0 {
 		t.Fatalf("host room cancel invalid: %+v", roomCancel)
 	}
+	if last := repo.rooms[len(repo.rooms)-1]; last.Action != "cancelled" || last.RoomCode != room.RoomCode || last.UserID != host.UserID || last.CurrentPlayers != 0 || last.RoomStatus != "cancelled" {
+		t.Fatalf("host room cancel audit invalid: %+v", last)
+	}
 	if _, err := service.JoinRoom(guest.SessionToken, room.RoomCode, JoinRoomRequest{
 		ModeID:       "certification",
 		ActiveDeckID: "cancel_guest_deck",
@@ -1383,6 +2132,9 @@ func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
 	if guestCancelled.QueueStatus != "cancelled" || guestCancelled.RoomStatus != "cancelled" || guestCancelled.CurrentPlayers != 1 {
 		t.Fatalf("guest room cancel invalid: %+v", guestCancelled)
 	}
+	if last := repo.rooms[len(repo.rooms)-1]; last.Action != "cancelled" || last.RoomCode != largerRoom.RoomCode || last.UserID != guestCancel.UserID || last.CurrentPlayers != 1 || last.RoomStatus != "waiting" {
+		t.Fatalf("member room cancel audit invalid: %+v", last)
+	}
 	replacementJoined, err := service.JoinRoom(guestReplacement.SessionToken, largerRoom.RoomCode, JoinRoomRequest{
 		ModeID:       "world_boss",
 		ActiveDeckID: "cancel_guest_replacement_deck",
@@ -1393,6 +2145,10 @@ func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
 	}
 	if replacementJoined.RoomStatus != "waiting" || replacementJoined.CurrentPlayers != 2 {
 		t.Fatalf("room should remain waiting after guest cancel: %+v", replacementJoined)
+	}
+	status := service.LobbyLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.RoomRecords != 6 || status.RoomReadRecords != 0 || status.RejectedRecords != 0 {
+		t.Fatalf("cancel audit status invalid: %+v", status)
 	}
 }
 
@@ -1633,6 +2389,18 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if rules.Room.ModeConfigHash == "" || rules.Room.RulesetVersion != RulesetVersion || rules.BattleTicketTTL != BattleTicketTTLSeconds {
 		t.Fatalf("room rules missing version hashes: %+v", rules)
+	}
+	if !rules.BusinessEnvelope || rules.ClientResultSubmit {
+		t.Fatalf("room rules should require business envelope and reject client result submit: %+v", rules)
+	}
+	if !stringSliceContains(rules.BusinessTransports, "nakama_https_rpc") || !stringSliceContains(rules.BusinessTransports, "nakama_wss") || !stringSliceContains(rules.BattleTransports, "kcp_udp") {
+		t.Fatalf("room rules should publish business and battle transport contract: %+v", rules)
+	}
+	if !stringSliceContains(rules.ClientOperations, "battle.ticket") || !stringSliceContains(rules.ClientOperations, "match.ready") || !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
+		t.Fatalf("room rules should keep client operations read/intent only: %+v", rules)
+	}
+	if !stringSliceContains(rules.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rules.ServiceCallbacks, "battle.ticket.consume") {
+		t.Fatalf("room rules should publish service-only battle callbacks: %+v", rules)
 	}
 	if !stringSliceContains(rules.ForbiddenFields, "damage") || !stringSliceContains(rules.ServerAuthority, "state_snapshot") || !stringSliceContains(rules.ClientAuthority, "input_packet") {
 		t.Fatalf("room authority fields missing: %+v", rules)

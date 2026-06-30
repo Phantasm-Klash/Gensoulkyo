@@ -2,10 +2,15 @@ package httpapi
 
 import (
 	"bytes"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -194,6 +199,21 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if settlement.Loadout.RatingCode == "" || settlement.ModeResult["rank_score_delta"] == nil || settlement.ModeResult["next_certification_unlocked"] == nil {
 		t.Fatalf("settlement missing certification result: loadout=%+v mode=%+v", settlement.Loadout, settlement.ModeResult)
 	}
+	settlementEvent := postJSON[core.BusinessEvent](t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
+		"kind":     "settlement",
+		"match_id": queueBob.MatchID,
+	})
+	if settlementEvent.Topic != "nakama_wss.business.settlement" || settlementEvent.Settlement == nil || settlementEvent.Settlement.ReplayID != settlement.ReplayID || settlementEvent.ClientResultSubmitAllowed || settlementEvent.HighFrequencyBattleTickAllowed {
+		t.Fatalf("settlement business event invalid: %+v", settlementEvent)
+	}
+	forbiddenSettlementEvent := postRaw(t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
+		"kind":        "settlement",
+		"match_id":    queueBob.MatchID,
+		"result_hash": "client-authored",
+	})
+	if forbiddenSettlementEvent.Code != http.StatusForbidden || forbiddenSettlementEvent.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden business event settlement authority, got %+v", forbiddenSettlementEvent)
+	}
 	replay := getJSON[core.ReplayRecord](t, server.URL+"/v1/replays/"+settlement.ReplayID, alice.SessionToken)
 	if !replay.OK || replay.ReplayID != settlement.ReplayID || replay.MatchID != queueBob.MatchID || !replay.ServerAuthoritative || replay.StateHash == "" {
 		t.Fatalf("replay invalid: %+v", replay)
@@ -266,6 +286,9 @@ func TestHTTPRoomCodeFlow(t *testing.T) {
 	if rules.Room.Participants[0].DeckSnapshotHash == "" || len(rules.ForbiddenFields) == 0 {
 		t.Fatalf("room rules should expose hashes and forbidden fields: %+v", rules)
 	}
+	if !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || stringSliceContains(rules.ClientOperations, "battle.result.submit") {
+		t.Fatalf("room rules should expose client ticket cancellation without result submit: %+v", rules)
+	}
 
 	joined := postJSON[core.QueueResponse](t, server.URL+"/v1/rooms/"+created.RoomCode+"/join", guest.SessionToken, map[string]any{
 		"mode_id":        "certification",
@@ -337,6 +360,87 @@ func TestHTTPBusinessEnvelopeFallbackGuard(t *testing.T) {
 	statusBody, ok := status["status"].(map[string]any)
 	if !ok || statusBody["version"] != security.BusinessEnvelopeVersion || int(statusBody["accepted"].(float64)) != 1 || int(statusBody["rejected"].(float64)) < 4 {
 		t.Fatalf("business envelope status invalid: %+v", status)
+	}
+}
+
+func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
+	driverName := registerHTTPAuditCaptureDriver(t)
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	wired, err := NewWithDatabase(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(wired.Handler)
+	defer server.Close()
+
+	battle := postJSON[core.BattleServerStatus](t, server.URL+"/v1/battle/servers/register", "", map[string]any{
+		"battle_server_id": "http-sql-battle",
+		"endpoint":         "127.0.0.1:7911",
+		"region":           "local",
+		"build_id":         "http-sql-test",
+		"capacity":         4,
+		"active_matches":   0,
+		"load":             0,
+		"status":           "online",
+		"supported_modes":  []string{"pvp_duel"},
+	})
+	if !battle.OK || battle.BattleServerID != "http-sql-battle" {
+		t.Fatalf("battle server registration failed: %+v", battle)
+	}
+	alice := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-sql-a", "display_name": "HTTP SQL A"})
+	bob := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-sql-b", "display_name": "HTTP SQL B"})
+
+	room := postJSONWithHeaders[core.QueueResponse](t, server.URL+"/v1/rooms/create", alice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_sql_deck_a",
+		"deck_snapshot":  validDeck("http_sql_deck_a"),
+		"mode_params":    map[string]any{"stage_id": "starlit_lanes", "character_id": "balanced"},
+	}, businessEnvelopeHeaders(1, time.Now(), "http-sql-room-create", "rooms_create"))
+	if room.RoomCode == "" {
+		t.Fatalf("room create failed: %+v", room)
+	}
+	joined := postJSONWithHeaders[core.QueueResponse](t, server.URL+"/v1/rooms/"+room.RoomCode+"/join", bob.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_sql_deck_b",
+		"deck_snapshot":  validDeck("http_sql_deck_b"),
+	}, businessEnvelopeHeaders(1, time.Now(), "http-sql-room-join", "rooms_join"))
+	if joined.MatchID == "" || joined.BattleTicket == nil || joined.BattleAllocation == nil {
+		t.Fatalf("room join should allocate battle and ticket: %+v", joined)
+	}
+
+	battleStatus := wired.Service.BattleLifecycleAuditStatus()
+	if !battleStatus.Configured || !battleStatus.OK || battleStatus.ServerLifecycleRecords != 1 || battleStatus.AllocationRecords != 1 || battleStatus.TicketRecords < 1 {
+		t.Fatalf("battle audit status should reflect HTTP SQL repository writes: %+v", battleStatus)
+	}
+	lobbyStatus := wired.Service.LobbyLifecycleAuditStatus()
+	if !lobbyStatus.Configured || !lobbyStatus.OK || lobbyStatus.RoomRecords != 3 {
+		t.Fatalf("lobby audit status should reflect HTTP SQL repository writes: %+v", lobbyStatus)
+	}
+	tableCounts := httpAuditTableCounts()
+	if tableCounts["business_envelope_audits"] != 2 || tableCounts["lobby_room_audits"] != 3 || tableCounts["match_allocation_audits"] != 2 || tableCounts["battle_ticket_audits"] < 1 {
+		t.Fatalf("unexpected HTTP SQL audit writes: counts=%+v calls=%+v", tableCounts, httpAuditCaptureCalls())
+	}
+
+	battleAuditEndpoint := getJSON[map[string]any](t, server.URL+"/v1/security/battle-audit", "")
+	if !battleAuditEndpoint["ok"].(bool) {
+		t.Fatalf("battle audit endpoint should be public status: %+v", battleAuditEndpoint)
+	}
+	battleAuditStatus := battleAuditEndpoint["status"].(map[string]any)
+	if !battleAuditStatus["configured"].(bool) || int(battleAuditStatus["allocation_records"].(float64)) != 1 || int(battleAuditStatus["server_lifecycle_records"].(float64)) != 1 {
+		t.Fatalf("battle audit endpoint status invalid: %+v", battleAuditEndpoint)
+	}
+	lobbyAuditEndpoint := getJSON[map[string]any](t, server.URL+"/v1/security/lobby-audit", "")
+	if !lobbyAuditEndpoint["ok"].(bool) {
+		t.Fatalf("lobby audit endpoint should be public status: %+v", lobbyAuditEndpoint)
+	}
+	lobbyAuditStatus := lobbyAuditEndpoint["status"].(map[string]any)
+	if !lobbyAuditStatus["configured"].(bool) || int(lobbyAuditStatus["room_records"].(float64)) != 3 {
+		t.Fatalf("lobby audit endpoint status invalid: %+v", lobbyAuditEndpoint)
 	}
 }
 
@@ -420,6 +524,50 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	submit := postJSON[core.BattleResultSubmitResponse](t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: result})
 	if !submit.OK || !submit.Accepted || submit.MatchID != queueBob.MatchID {
 		t.Fatalf("battle result submit invalid: %+v", submit)
+	}
+}
+
+func TestHTTPMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	alice := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-version-a", "display_name": "HTTP Version A"})
+	rejected := postRaw(t, server.URL+"/v1/matchmaking/join", alice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_version_a_deck",
+		"deck_snapshot":  validDeck("http_version_a_deck"),
+		"client_version": map[string]any{"protocol_version": core.ProtocolVersion + 1},
+	})
+	if rejected.Code != http.StatusBadRequest || rejected.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected protocol mismatch rejection, got %+v", rejected)
+	}
+
+	host := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-version-host", "display_name": "HTTP Version Host"})
+	room := postJSON[core.QueueResponse](t, server.URL+"/v1/rooms/create", host.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_version_host_deck",
+		"deck_snapshot":  validDeck("http_version_host_deck"),
+		"client_version": map[string]any{
+			"protocol_version":     core.ProtocolVersion,
+			"business_api_version": core.BusinessAPIVersion,
+			"battle_api_version":   core.BattleAPIVersion,
+			"ruleset_version":      core.RulesetVersion,
+		},
+	})
+	if room.RoomCode == "" {
+		t.Fatalf("expected compatible room create, got %+v", room)
+	}
+
+	guest := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-version-guest", "display_name": "HTTP Version Guest"})
+	roomJoin := postRaw(t, server.URL+"/v1/rooms/"+room.RoomCode+"/join", guest.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "http_version_guest_deck",
+		"deck_snapshot":  validDeck("http_version_guest_deck"),
+		"client_version": map[string]any{"ruleset_version": "ruleset-old"},
+	})
+	if roomJoin.Code != http.StatusBadRequest || roomJoin.ErrorCode != "mode_invalid" {
+		t.Fatalf("expected ruleset mismatch rejection, got %+v", roomJoin)
 	}
 }
 
@@ -600,6 +748,37 @@ func postJSON[T any](t *testing.T, url string, token string, body any) T {
 		var errorResp errorBody
 		_ = json.NewDecoder(resp.Body).Decode(&errorResp)
 		t.Fatalf("POST %s returned %d %+v", url, resp.StatusCode, errorResp)
+	}
+	var out T
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func postJSONWithHeaders[T any](t *testing.T, url string, token string, body any, headers map[string]string) T {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var errBody errorBody
+		_ = json.NewDecoder(resp.Body).Decode(&errBody)
+		t.Fatalf("unexpected status %d for %s: %+v", resp.StatusCode, url, errBody)
 	}
 	var out T
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -796,4 +975,134 @@ func validDeck(deckID string) core.DeckSnapshot {
 		RulesetVersion: core.RulesetVersion,
 		CardIDs:        cardIDs,
 	}
+}
+
+type httpAuditCaptureCall struct {
+	query string
+	args  []any
+}
+
+var httpAuditCaptureState = struct {
+	sync.Mutex
+	nextID int
+	calls  []httpAuditCaptureCall
+}{}
+
+func registerHTTPAuditCaptureDriver(t *testing.T) string {
+	t.Helper()
+	httpAuditCaptureState.Lock()
+	defer httpAuditCaptureState.Unlock()
+	httpAuditCaptureState.nextID++
+	httpAuditCaptureState.calls = nil
+	name := fmt.Sprintf("http_audit_capture_driver_%d", httpAuditCaptureState.nextID)
+	sql.Register(name, httpAuditCaptureDriver{})
+	return name
+}
+
+func httpAuditCaptureCalls() []httpAuditCaptureCall {
+	httpAuditCaptureState.Lock()
+	defer httpAuditCaptureState.Unlock()
+	calls := make([]httpAuditCaptureCall, len(httpAuditCaptureState.calls))
+	copy(calls, httpAuditCaptureState.calls)
+	return calls
+}
+
+func httpAuditTableCounts() map[string]int {
+	counts := map[string]int{}
+	for _, call := range httpAuditCaptureCalls() {
+		for _, table := range []string{
+			"business_envelope_audits",
+			"lobby_room_audits",
+			"match_allocation_audits",
+			"battle_ticket_audits",
+		} {
+			if strings.Contains(call.query, "INSERT INTO "+table) {
+				counts[table]++
+			}
+		}
+	}
+	return counts
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+type httpAuditCaptureDriver struct{}
+
+func (httpAuditCaptureDriver) Open(name string) (driver.Conn, error) {
+	return httpAuditCaptureConn{}, nil
+}
+
+type httpAuditCaptureConn struct{}
+
+func (httpAuditCaptureConn) Prepare(query string) (driver.Stmt, error) {
+	return httpAuditCaptureStmt{query: query}, nil
+}
+
+func (httpAuditCaptureConn) Close() error {
+	return nil
+}
+
+func (httpAuditCaptureConn) Begin() (driver.Tx, error) {
+	return httpAuditCaptureTx{}, nil
+}
+
+type httpAuditCaptureTx struct{}
+
+func (httpAuditCaptureTx) Commit() error {
+	return nil
+}
+
+func (httpAuditCaptureTx) Rollback() error {
+	return nil
+}
+
+type httpAuditCaptureStmt struct {
+	query string
+}
+
+func (stmt httpAuditCaptureStmt) Close() error {
+	return nil
+}
+
+func (stmt httpAuditCaptureStmt) NumInput() int {
+	return -1
+}
+
+func (stmt httpAuditCaptureStmt) Exec(args []driver.Value) (driver.Result, error) {
+	values := make([]any, len(args))
+	for index, arg := range args {
+		values[index] = arg
+	}
+	httpAuditCaptureState.Lock()
+	httpAuditCaptureState.calls = append(httpAuditCaptureState.calls, httpAuditCaptureCall{
+		query: stmt.query,
+		args:  values,
+	})
+	httpAuditCaptureState.Unlock()
+	return driver.RowsAffected(1), nil
+}
+
+func (stmt httpAuditCaptureStmt) Query(args []driver.Value) (driver.Rows, error) {
+	return httpAuditCaptureRows{}, nil
+}
+
+type httpAuditCaptureRows struct{}
+
+func (httpAuditCaptureRows) Columns() []string {
+	return []string{}
+}
+
+func (httpAuditCaptureRows) Close() error {
+	return nil
+}
+
+func (httpAuditCaptureRows) Next(dest []driver.Value) error {
+	return io.EOF
 }

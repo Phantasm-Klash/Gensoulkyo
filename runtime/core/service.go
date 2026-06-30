@@ -79,6 +79,11 @@ var forbiddenClientFields = map[string]struct{}{
 	"mode_state":             {},
 	"server_authoritative":   {},
 	"client_authored_reward": {},
+	"final_result":           {},
+	"mode_result":            {},
+	"player_ids":             {},
+	"result_hash":            {},
+	"settlement_key":         {},
 }
 
 type Error struct {
@@ -102,33 +107,39 @@ func newError(code string, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
+func NewForbiddenClientFieldError(field string) *Error {
+	return newError(codeForbiddenField, "client cannot submit %s", strings.TrimSpace(field))
+}
+
 type Service struct {
-	mu                 sync.Mutex
-	clock              Clock
-	matchDurationTicks int
-	battleAuditRepo    BattleLifecycleAuditRepository
-	battleAuditStatus  BattleLifecycleAuditStatus
-	lobbyAuditRepo     LobbyLifecycleAuditRepository
-	lobbyAuditStatus   LobbyLifecycleAuditStatus
-	signingKeyID       string
-	signingPublicKey   ed25519.PublicKey
-	signingPrivateKey  ed25519.PrivateKey
-	nextSeq            int64
-	users              map[string]*userState
-	sessionToUser      map[string]string
-	queues             map[string][]string
-	tickets            map[string]*queueTicket
-	rooms              map[string]*roomState
-	matches            map[string]*matchState
-	rematches          map[string]*rematchState
-	settlements        map[string]*MatchEndEvent
-	replays            map[string]*ReplayRecord
-	activityClaims     map[string]*ActivityClaimResult
-	worldBoss          *worldBossState
-	worldBossAttempts  map[string]map[string]int
-	battleServers      map[string]*battleServerState
-	battleAllocations  map[string]*BattleServerAllocation
-	battleTickets      map[string]*SignedBattleTicket
+	mu                    sync.Mutex
+	clock                 Clock
+	matchDurationTicks    int
+	battleAuditRepo       BattleLifecycleAuditRepository
+	battleAuditStatus     BattleLifecycleAuditStatus
+	lobbyAuditRepo        LobbyLifecycleAuditRepository
+	lobbyAuditStatus      LobbyLifecycleAuditStatus
+	signingKeyID          string
+	signingPublicKey      ed25519.PublicKey
+	signingPrivateKey     ed25519.PrivateKey
+	nextSeq               int64
+	users                 map[string]*userState
+	sessionToUser         map[string]string
+	queues                map[string][]string
+	tickets               map[string]*queueTicket
+	rooms                 map[string]*roomState
+	matches               map[string]*matchState
+	rematches             map[string]*rematchState
+	settlements           map[string]*MatchEndEvent
+	replays               map[string]*ReplayRecord
+	activityClaims        map[string]*ActivityClaimResult
+	worldBoss             *worldBossState
+	worldBossAttempts     map[string]map[string]int
+	battleServers         map[string]*battleServerState
+	battleAllocations     map[string]*BattleServerAllocation
+	battleTickets         map[string]*SignedBattleTicket
+	battleTicketsByID     map[string]*SignedBattleTicket
+	consumedBattleTickets map[string]time.Time
 }
 
 type userState struct {
@@ -403,23 +414,25 @@ func NewService(config Config) *Service {
 			Configured:          config.LobbyLifecycleAuditRepo != nil,
 			ServerAuthoritative: true,
 		},
-		signingKeyID:      "dev-ed25519-0",
-		signingPublicKey:  publicKey,
-		signingPrivateKey: privateKey,
-		users:             map[string]*userState{},
-		sessionToUser:     map[string]string{},
-		queues:            map[string][]string{},
-		tickets:           map[string]*queueTicket{},
-		rooms:             map[string]*roomState{},
-		matches:           map[string]*matchState{},
-		rematches:         map[string]*rematchState{},
-		settlements:       map[string]*MatchEndEvent{},
-		replays:           map[string]*ReplayRecord{},
-		activityClaims:    map[string]*ActivityClaimResult{},
-		worldBossAttempts: map[string]map[string]int{},
-		battleServers:     map[string]*battleServerState{},
-		battleAllocations: map[string]*BattleServerAllocation{},
-		battleTickets:     map[string]*SignedBattleTicket{},
+		signingKeyID:          "dev-ed25519-0",
+		signingPublicKey:      publicKey,
+		signingPrivateKey:     privateKey,
+		users:                 map[string]*userState{},
+		sessionToUser:         map[string]string{},
+		queues:                map[string][]string{},
+		tickets:               map[string]*queueTicket{},
+		rooms:                 map[string]*roomState{},
+		matches:               map[string]*matchState{},
+		rematches:             map[string]*rematchState{},
+		settlements:           map[string]*MatchEndEvent{},
+		replays:               map[string]*ReplayRecord{},
+		activityClaims:        map[string]*ActivityClaimResult{},
+		worldBossAttempts:     map[string]map[string]int{},
+		battleServers:         map[string]*battleServerState{},
+		battleAllocations:     map[string]*BattleServerAllocation{},
+		battleTickets:         map[string]*SignedBattleTicket{},
+		battleTicketsByID:     map[string]*SignedBattleTicket{},
+		consumedBattleTickets: map[string]time.Time{},
 	}
 	service.registerDefaultBattleServerLocked()
 	return service
@@ -839,6 +852,9 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
 	}
+	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
+		return nil, err
+	}
 	deck, err := s.resolveDeckForMatchLocked(user, req.ActiveDeckID, req.DeckSnapshot)
 	if err != nil {
 		return nil, err
@@ -891,6 +907,9 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
 	}
+	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
+		return nil, err
+	}
 	deck, err := s.resolveDeckForMatchLocked(user, req.ActiveDeckID, req.DeckSnapshot)
 	if err != nil {
 		return nil, err
@@ -904,6 +923,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	}
 	if ticket, room := s.waitingRoomTicketForUserLocked(user.UserID); ticket != nil && room != nil {
 		existingMode := ModeConfigs[ticket.ModeID]
+		s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "create_retry", s.clock())
 		return s.queueResponseLocked(ticket, existingMode, s.ticketDepthLocked(ticket), nil), nil
 	}
 	roomCode := s.nextRoomCodeLocked()
@@ -973,12 +993,16 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 	for _, ticketID := range room.TicketIDs {
 		ticket := s.tickets[ticketID]
 		if ticket != nil && ticket.UserID == user.UserID {
+			s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "join_retry", s.clock())
 			return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
 		}
 	}
 	modeID := strings.TrimSpace(req.ModeID)
 	if modeID != "" && modeID != room.ModeID {
 		return nil, newError(codeInvalidMode, "room mode is %q, got %q", room.ModeID, modeID)
+	}
+	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
+		return nil, err
 	}
 	if len(room.TicketIDs) >= mode.MaxPlayers {
 		return nil, newError(codeRoomUnavailable, "room is full")
@@ -1021,7 +1045,14 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		match := s.createMatchLocked(mode, groupIDs)
 		room.MatchID = match.MatchID
 		room.Status = "found"
-		s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "matched", s.clock())
+		now := s.clock()
+		for _, matchedTicketID := range groupIDs {
+			matchedTicket := s.tickets[matchedTicketID]
+			if matchedTicket == nil {
+				continue
+			}
+			s.recordLobbyRoomAuditLocked(room, matchedTicket, matchedTicket.UserID, "matched", now)
+		}
 		return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), match), nil
 	}
 	s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "joined", ticket.CreatedAt)
@@ -1032,7 +1063,8 @@ func (s *Service) ListRooms(sessionToken string) (*RoomListResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
 		return nil, err
 	}
 	now := s.clock()
@@ -1046,8 +1078,10 @@ func (s *Service) ListRooms(sessionToken string) (*RoomListResponse, error) {
 	sort.Strings(codes)
 	rooms := make([]RoomSnapshot, 0, len(codes))
 	for _, roomCode := range codes {
-		if snapshot := s.roomSnapshotLocked(s.rooms[roomCode], now); snapshot.OK {
+		room := s.rooms[roomCode]
+		if snapshot := s.roomSnapshotLocked(room, now); snapshot.OK {
 			rooms = append(rooms, snapshot)
+			s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "listed", now)
 		}
 	}
 	return &RoomListResponse{
@@ -1062,14 +1096,17 @@ func (s *Service) Room(sessionToken string, roomCode string) (*RoomSnapshot, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
 		return nil, err
 	}
 	room, err := s.roomByCodeLocked(roomCode)
 	if err != nil {
 		return nil, err
 	}
-	snapshot := s.roomSnapshotLocked(room, s.clock())
+	now := s.clock()
+	snapshot := s.roomSnapshotLocked(room, now)
+	s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "snapshot_read", now)
 	return &snapshot, nil
 }
 
@@ -1101,6 +1138,42 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		TickRate:        TickRate,
 		InputDelayTicks: DefaultInputDelayTick,
 		BattleTicketTTL: BattleTicketTTLSeconds,
+		BusinessTransports: []string{
+			"nakama_https_rpc",
+			"nakama_wss",
+		},
+		BattleTransports: []string{
+			"kcp_udp",
+			"protobuf",
+			"chacha20_poly1305",
+		},
+		ClientOperations: []string{
+			"rooms.create",
+			"rooms.list",
+			"rooms.get",
+			"rooms.rules",
+			"rooms.join",
+			"rooms.leave",
+			"rooms.message",
+			"business.event",
+			"business.event.settlement",
+			"matchmaking.ticket",
+			"matchmaking.cancel",
+			"match.ready",
+			"match.disconnect",
+			"match.reconnect",
+			"presence.heartbeat",
+			"battle.allocation",
+			"battle.ticket",
+			"replay.get",
+		},
+		ServiceCallbacks: []string{
+			"battle.servers.register",
+			"battle.servers.heartbeat",
+			"battle.servers.offline",
+			"battle.ticket.consume",
+			"battle.result.submit",
+		},
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -1120,6 +1193,8 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"reward",
 		},
 		ForbiddenFields:     forbiddenFields,
+		BusinessEnvelope:    true,
+		ClientResultSubmit:  false,
 		ServerTime:          now,
 		ServerAuthoritative: true,
 	}
@@ -1211,7 +1286,7 @@ func (s *Service) LobbyMessage(sessionToken string, req LobbyMessageRequest) (*L
 	if messageID == "" {
 		return nil, newError(codeInvalidRequest, "message_id is required")
 	}
-	if existing := roomMessageByID(room, messageID); existing != nil {
+	if existing := roomMessageByID(room, messageID, user.UserID); existing != nil {
 		duplicate := copyLobbyMessage(*existing)
 		duplicate.Duplicate = true
 		s.recordLobbyMessageAuditLocked(duplicate)
@@ -1264,6 +1339,11 @@ func (s *Service) QueueTicket(sessionToken string, ticketID string) (*QueueRespo
 	if ticket.MatchID != "" {
 		match = s.matches[ticket.MatchID]
 	}
+	if ticket.RoomCode != "" {
+		record := s.lobbyRoomAuditRecordLocked(s.rooms[normalizeRoomCode(ticket.RoomCode)], ticket, user.UserID, "ticket_read", s.clock())
+		record.CurrentPlayers = s.ticketDepthLocked(ticket)
+		s.recordLobbyRoomAuditRecordLocked(record)
+	}
 	return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), match), nil
 }
 
@@ -1290,7 +1370,21 @@ func (s *Service) CancelTicket(sessionToken string, ticketID string) (*QueueResp
 		return nil, newError(codeMatchState, "ticket is %s", ticket.Status)
 	}
 	if ticket.RoomCode != "" {
+		var roomAudit LobbyRoomAuditRecord
+		if room := s.rooms[normalizeRoomCode(ticket.RoomCode)]; room != nil {
+			roomAudit = s.lobbyRoomAuditRecordLocked(room, ticket, user.UserID, "cancelled", s.clock())
+		}
 		s.cancelRoomTicketLocked(ticket, user.UserID)
+		if roomAudit.RoomCode != "" {
+			roomAudit.RoomStatus = ticket.RoomStatus
+			roomAudit.CurrentPlayers = s.ticketDepthLocked(ticket)
+			if updated := s.rooms[normalizeRoomCode(ticket.RoomCode)]; updated != nil {
+				roomAudit.RoomStatus = updated.Status
+				roomAudit.HostUserID = updated.HostUserID
+				roomAudit.CurrentPlayers = len(updated.TicketIDs)
+			}
+			s.recordLobbyRoomAuditRecordLocked(roomAudit)
+		}
 	} else {
 		s.queues[ticket.QueueKey] = removeString(s.queues[ticket.QueueKey], ticket.TicketID)
 		ticket.Status = "cancelled"
@@ -1319,6 +1413,7 @@ func (s *Service) Heartbeat(sessionToken string, req PresenceHeartbeatRequest) (
 		ticket.LastSeenAt = now
 		matchID = ticket.MatchID
 		if matchID == "" {
+			s.recordLobbyHeartbeatAuditLocked(user.UserID, ticket, nil, now)
 			return s.heartbeatTicketResponseLocked(user, ticket, req, now), nil
 		}
 	}
@@ -1331,6 +1426,7 @@ func (s *Service) Heartbeat(sessionToken string, req PresenceHeartbeatRequest) (
 		if player.Connected {
 			player.DisconnectedAt = time.Time{}
 		}
+		s.recordLobbyHeartbeatAuditLocked(user.UserID, s.tickets[ticketID], match, now)
 		return s.heartbeatMatchResponseLocked(user, match, player, ticketID, req, now), nil
 	}
 	return &PresenceHeartbeatResponse{
@@ -1375,6 +1471,9 @@ func (s *Service) ReadyMatch(sessionToken string, matchID string) (*ReadyRespons
 	if !wasRunning && match.Status == "running" {
 		appendMatchEventLocked(match, MatchEvent{Type: "match_started", Tick: match.Tick})
 	}
+	if !wasReady {
+		s.recordLobbyReadyAuditLocked(match, user.UserID)
+	}
 	var start *MatchStartEvent
 	if match.Status == "running" {
 		event := s.matchStartLocked(match)
@@ -1397,6 +1496,30 @@ func (s *Service) ReadyMatch(sessionToken string, matchID string) (*ReadyRespons
 		MatchStart:      start,
 		BattleTicket:    ticket,
 	}, nil
+}
+
+func (s *Service) BusinessEvent(sessionToken string, req BusinessEventRequest) (*BusinessEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = "presence"
+	}
+	switch kind {
+	case "presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket", "settlement":
+	default:
+		return nil, newError(codeInvalidRequest, "business event kind %q is not supported", kind)
+	}
+	event, err := s.businessEventLocked(user, kind, req)
+	if err != nil {
+		return nil, err
+	}
+	return event, nil
 }
 
 func (s *Service) SubmitInput(sessionToken string, matchID string, raw map[string]any) (*InputResponse, error) {
@@ -1454,10 +1577,14 @@ func (s *Service) DisconnectMatch(sessionToken string, matchID string) (*Reconne
 		return nil, newError(codeMatchState, "match already ended")
 	}
 	now := s.clock()
+	wasConnected := player.Connected
 	player.Connected = false
 	player.DisconnectedAt = now
 	match.LastEvents = []MatchEvent{}
 	appendMatchEventLocked(match, MatchEvent{Type: "player_disconnected", Tick: match.Tick, UserID: user.UserID})
+	if wasConnected {
+		s.recordLobbyConnectionAuditLocked(match, user.UserID, "disconnected")
+	}
 	snapshot := s.snapshotLocked(match, true)
 	return &ReconnectResponse{
 		OK:                true,
@@ -1496,10 +1623,14 @@ func (s *Service) ReconnectMatch(sessionToken string, matchID string) (*Reconnec
 			return nil, newError(codeReconnectExpired, "reconnect window expired")
 		}
 	}
+	wasDisconnected := !player.Connected
 	player.Connected = true
 	player.DisconnectedAt = time.Time{}
 	match.LastEvents = []MatchEvent{}
 	appendMatchEventLocked(match, MatchEvent{Type: "player_reconnected", Tick: match.Tick, UserID: user.UserID})
+	if wasDisconnected {
+		s.recordLobbyConnectionAuditLocked(match, user.UserID, "reconnected")
+	}
 	snapshot := s.snapshotLocked(match, true)
 	var start *MatchStartEvent
 	if match.Status == "running" {
@@ -1800,6 +1931,7 @@ func (s *Service) RegisterBattleServer(req RegisterBattleServerRequest) (*Battle
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	req.Status = "online"
 	server, err := s.upsertBattleServerLocked(BattleServerHeartbeatRequest{
 		BattleServerID: req.BattleServerID,
 		Endpoint:       req.Endpoint,
@@ -1814,6 +1946,7 @@ func (s *Service) RegisterBattleServer(req RegisterBattleServerRequest) (*Battle
 	if err != nil {
 		return nil, err
 	}
+	s.recordBattleServerLifecycleAuditLocked(server, "server_registered")
 	status := battleServerStatusFromState(server)
 	return &status, nil
 }
@@ -1822,12 +1955,34 @@ func (s *Service) BattleServerHeartbeat(req BattleServerHeartbeatRequest) (*Batt
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	req.Status = "online"
 	server, err := s.upsertBattleServerLocked(req)
 	if err != nil {
 		return nil, err
 	}
+	s.recordBattleServerLifecycleAuditLocked(server, "server_heartbeat")
 	status := battleServerStatusFromState(server)
 	return &status, nil
+}
+
+func (s *Service) BattleServerOffline(req BattleServerOfflineRequest) (*BattleServerStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	serverID := strings.TrimSpace(req.BattleServerID)
+	if serverID == "" {
+		return nil, newError(codeInvalidRequest, "battle_server_id is required")
+	}
+	server, ok := s.battleServers[serverID]
+	if !ok || server == nil {
+		return nil, newError(codeNotFound, "battle server %q not found", serverID)
+	}
+	server.Status = "offline"
+	server.Load = 0
+	server.LastSeenAt = s.clock()
+	s.recordBattleServerLifecycleAuditLocked(server, "server_offline")
+	out := battleServerStatusFromState(server)
+	return &out, nil
 }
 
 func (s *Service) BattleServers() *BattleServerListResponse {
@@ -1888,6 +2043,74 @@ func (s *Service) BattleTicket(sessionToken string, matchID string) (*SignedBatt
 	return &copy, nil
 }
 
+func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTicketConsumeResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.clock()
+	ticketID := strings.TrimSpace(req.TicketID)
+	matchID := strings.TrimSpace(req.MatchID)
+	battleServerID := strings.TrimSpace(req.BattleServerID)
+	nonce := strings.TrimSpace(req.TicketNonceHex)
+	if ticketID == "" || matchID == "" || battleServerID == "" || nonce == "" {
+		return nil, newError(codeInvalidRequest, "ticket_id, match_id, battle_server_id, and ticket_nonce_hex are required")
+	}
+	signed := s.signedBattleTicketByIDLocked(ticketID)
+	if signed == nil {
+		return nil, newError(codeNotFound, "battle ticket not found")
+	}
+	ticket := signed.Ticket
+	if ticket.MatchID != matchID {
+		return nil, newError(codeInvalidRequest, "battle ticket match mismatch")
+	}
+	if ticket.BattleServerID != battleServerID {
+		return nil, newError(codeBattleServer, "battle ticket server mismatch")
+	}
+	if ticket.TicketNonceHex != nonce {
+		return nil, newError(codeInvalidRequest, "battle ticket nonce mismatch")
+	}
+	if req.UserID != "" && strings.TrimSpace(req.UserID) != ticket.UserID {
+		return nil, newError(codeUnauthorized, "battle ticket user mismatch")
+	}
+	if req.PlayerID != "" && strings.TrimSpace(req.PlayerID) != ticket.PlayerID {
+		return nil, newError(codeUnauthorized, "battle ticket player mismatch")
+	}
+	if now.After(ticket.ExpiresAt) {
+		s.recordBattleTicketExpiredAuditLocked(signed, now)
+		return nil, newError(codeMatchState, "battle ticket expired")
+	}
+	if consumedAt, ok := s.consumedBattleTickets[ticketID]; ok {
+		return &BattleTicketConsumeResponse{
+			OK:                  true,
+			Version:             currentVersionStamp(),
+			TicketID:            ticket.TicketID,
+			MatchID:             ticket.MatchID,
+			UserID:              ticket.UserID,
+			PlayerID:            ticket.PlayerID,
+			BattleServerID:      ticket.BattleServerID,
+			Consumed:            true,
+			Duplicate:           true,
+			ServerAuthoritative: true,
+			ServerTime:          consumedAt,
+		}, nil
+	}
+	s.consumedBattleTickets[ticketID] = now
+	s.recordBattleTicketConsumedAuditLocked(signed, now)
+	return &BattleTicketConsumeResponse{
+		OK:                  true,
+		Version:             currentVersionStamp(),
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Consumed:            true,
+		Duplicate:           false,
+		ServerAuthoritative: true,
+		ServerTime:          now,
+	}, nil
+}
+
 func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResultSubmitResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1920,6 +2143,7 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	}
 	if match.Status == "ended" {
 		if match.BattleResultHash != "" && match.BattleResultHash == result.ResultHash {
+			s.recordBattleResultDuplicateAuditLocked(match, allocation, signed, now)
 			return &BattleResultSubmitResponse{
 				OK:                  true,
 				Version:             currentVersionStamp(),
@@ -2193,6 +2417,173 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 	}
 }
 
+func (s *Service) businessEventLocked(user *userState, kind string, req BusinessEventRequest) (*BusinessEvent, error) {
+	now := s.clock()
+	event := &BusinessEvent{
+		OK:                             true,
+		Kind:                           kind,
+		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
+		UserID:                         user.UserID,
+		AllowedClientOperations:        businessEventClientOperations(),
+		ServiceCallbacks:               serviceCallbackOperations(),
+		HighFrequencyBattleTickAllowed: false,
+		ClientResultSubmitAllowed:      false,
+		ServerTime:                     now,
+		ServerAuthoritative:            true,
+	}
+	ticket := s.businessEventTicketLocked(user.UserID, req)
+	if strings.TrimSpace(req.TicketID) != "" && ticket == nil {
+		return nil, newError(codeNotFound, "ticket not found")
+	}
+	var match *matchState
+	var player *playerState
+	if ticket != nil && ticket.MatchID != "" {
+		match = s.matches[ticket.MatchID]
+		if match != nil {
+			player = match.Players[user.UserID]
+		}
+	}
+	if match == nil && strings.TrimSpace(req.MatchID) != "" {
+		var err error
+		match, player, err = s.matchPlayerLocked(user.UserID, req.MatchID)
+		if err != nil {
+			return nil, err
+		}
+		if ticket == nil {
+			ticket = s.tickets[s.ticketIDForMatchUserLocked(match.MatchID, user.UserID)]
+		}
+	}
+	if ticket != nil {
+		mode := ModeConfigs[ticket.ModeID]
+		depth := s.ticketDepthLocked(ticket)
+		event.TicketID = ticket.TicketID
+		event.ModeID = ticket.ModeID
+		event.RoomCode = ticket.RoomCode
+		event.QueueStatus = ticket.Status
+		event.RoomStatus = ticket.RoomStatus
+		event.RequiredPlayers = mode.MinPlayers
+		event.CurrentPlayers = depth
+		if ticket.MatchID != "" {
+			event.MatchID = ticket.MatchID
+			event.CurrentPlayers = mode.MinPlayers
+		}
+		if kind != "settlement" {
+			event.Queue = cloneQueueResponse(s.queueResponseLocked(ticket, mode, depth, match))
+		}
+		if ticket.RoomCode != "" {
+			if room := s.rooms[normalizeRoomCode(ticket.RoomCode)]; room != nil {
+				snapshot := s.roomSnapshotLocked(room, now)
+				event.Room = &snapshot
+			}
+		}
+	}
+	if strings.TrimSpace(req.RoomCode) != "" && event.Room == nil {
+		room, err := s.roomByCodeLocked(req.RoomCode)
+		if err != nil {
+			return nil, err
+		}
+		if !s.roomHasUserLocked(room, user.UserID) && room.MatchID == "" {
+			return nil, newError(codeUnauthorized, "user is not in room")
+		}
+		snapshot := s.roomSnapshotLocked(room, now)
+		event.Room = &snapshot
+		event.RoomCode = snapshot.RoomCode
+		event.RoomStatus = snapshot.RoomStatus
+		event.ModeID = snapshot.ModeID
+		event.MatchID = snapshot.MatchID
+		event.RequiredPlayers = snapshot.RequiredPlayers
+		event.CurrentPlayers = snapshot.CurrentPlayers
+		if ticket == nil {
+			ticket = s.roomTicketForUserLocked(snapshot.RoomCode, user.UserID)
+		}
+	}
+	if match != nil {
+		event.MatchID = match.MatchID
+		event.ModeID = match.ModeID
+		event.MatchStatus = match.Status
+		event.RequiredPlayers = len(match.PlayerIDs)
+		event.CurrentPlayers = connectedPlayerCount(match)
+		event.ReadyCount = s.readyCountLocked(match)
+		allocation := copyBattleAllocation(s.ensureBattleAllocationLocked(match))
+		event.BattleAllocation = &allocation
+		if player != nil && kind != "settlement" {
+			if signed, err := s.signedBattleTicketLocked(match, user); err == nil {
+				ticketCopy := copySignedBattleTicket(signed)
+				event.BattleTicket = &ticketCopy
+			}
+			ready := &ReadyResponse{
+				OK:              true,
+				MatchID:         match.MatchID,
+				ReadyStatus:     match.Status,
+				ReadyCount:      event.ReadyCount,
+				RequiredPlayers: len(match.PlayerIDs),
+			}
+			if match.Status == "running" {
+				start := s.matchStartLocked(match)
+				ready.MatchStart = &start
+				if event.BattleTicket != nil {
+					ticketCopy := copySignedBattleTicket(event.BattleTicket)
+					ready.BattleTicket = &ticketCopy
+				}
+			}
+			event.Ready = ready
+			if ticket == nil {
+				event.TicketID = s.ticketIDForMatchUserLocked(match.MatchID, user.UserID)
+			}
+		}
+	}
+	if kind == "battle.allocation" && event.BattleAllocation == nil {
+		return nil, newError(codeInvalidRequest, "match_id or matched ticket_id is required for battle allocation event")
+	}
+	if kind == "battle.ticket" && event.BattleTicket == nil {
+		if match == nil {
+			return nil, newError(codeInvalidRequest, "match_id or matched ticket_id is required for battle ticket event")
+		}
+		signed, err := s.signedBattleTicketLocked(match, user)
+		if err != nil {
+			return nil, err
+		}
+		ticketCopy := copySignedBattleTicket(signed)
+		event.BattleTicket = &ticketCopy
+	}
+	if kind == "settlement" {
+		if match == nil {
+			return nil, newError(codeInvalidRequest, "match_id or matched ticket_id is required for settlement event")
+		}
+		settlement, ok := s.settlements[settlementKey(match.MatchID, user.UserID)]
+		if !ok || settlement == nil {
+			return nil, newError(codeMatchState, "match settlement is not available")
+		}
+		copy := copyMatchEndEvent(settlement)
+		event.Settlement = &copy
+		event.MatchStatus = "ended"
+		event.MatchID = settlement.MatchID
+		event.ModeID = settlement.Mode
+	}
+	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && event.Settlement == nil && kind != "presence" {
+		return nil, newError(codeInvalidRequest, "business event requires ticket_id, room_code, or match_id")
+	}
+	return event, nil
+}
+
+func (s *Service) businessEventTicketLocked(userID string, req BusinessEventRequest) *queueTicket {
+	if ticketID := strings.TrimSpace(req.TicketID); ticketID != "" {
+		if ticket := s.tickets[ticketID]; ticket != nil && ticket.UserID == userID {
+			return ticket
+		}
+		return nil
+	}
+	if roomCode := normalizeRoomCode(req.RoomCode); roomCode != "" {
+		return s.roomTicketForUserLocked(roomCode, userID)
+	}
+	if matchID := strings.TrimSpace(req.MatchID); matchID != "" {
+		if ticketID := s.ticketIDForMatchUserLocked(matchID, userID); ticketID != "" {
+			return s.tickets[ticketID]
+		}
+	}
+	return nil
+}
+
 func (s *Service) roomByCodeLocked(roomCode string) (*roomState, error) {
 	normalizedRoomCode := normalizeRoomCode(roomCode)
 	if normalizedRoomCode == "" {
@@ -2295,12 +2686,12 @@ func (s *Service) roomTicketForUserLocked(roomCode string, userID string) *queue
 	return nil
 }
 
-func roomMessageByID(room *roomState, messageID string) *LobbyMessage {
-	if room == nil || messageID == "" {
+func roomMessageByID(room *roomState, messageID string, userID string) *LobbyMessage {
+	if room == nil || messageID == "" || userID == "" {
 		return nil
 	}
 	for index := range room.Messages {
-		if room.Messages[index].MessageID == messageID {
+		if room.Messages[index].MessageID == messageID && room.Messages[index].UserID == userID {
 			return &room.Messages[index]
 		}
 	}
@@ -3077,6 +3468,65 @@ func (s *Service) readyCountLocked(match *matchState) int {
 	return count
 }
 
+func (s *Service) recordLobbyReadyAuditLocked(match *matchState, userID string) {
+	if s.lobbyAuditRepo == nil || match == nil || userID == "" {
+		return
+	}
+	ticketID := s.ticketIDForMatchUserLocked(match.MatchID, userID)
+	if ticketID == "" {
+		return
+	}
+	ticket := s.tickets[ticketID]
+	if ticket == nil || ticket.RoomCode == "" {
+		return
+	}
+	room := s.rooms[normalizeRoomCode(ticket.RoomCode)]
+	if room == nil {
+		return
+	}
+	record := s.lobbyRoomAuditRecordLocked(room, ticket, userID, "ready", s.clock())
+	record.MatchID = match.MatchID
+	record.CurrentPlayers = s.readyCountLocked(match)
+	record.RequiredPlayers = len(match.PlayerIDs)
+	s.recordLobbyRoomAuditRecordLocked(record)
+}
+
+func (s *Service) recordLobbyConnectionAuditLocked(match *matchState, userID string, action string) {
+	if s.lobbyAuditRepo == nil || match == nil || userID == "" {
+		return
+	}
+	ticketID := s.ticketIDForMatchUserLocked(match.MatchID, userID)
+	if ticketID == "" {
+		return
+	}
+	ticket := s.tickets[ticketID]
+	if ticket == nil || ticket.RoomCode == "" {
+		return
+	}
+	room := s.rooms[normalizeRoomCode(ticket.RoomCode)]
+	if room == nil {
+		return
+	}
+	record := s.lobbyRoomAuditRecordLocked(room, ticket, userID, action, s.clock())
+	record.MatchID = match.MatchID
+	record.CurrentPlayers = connectedPlayerCountLocked(match)
+	record.RequiredPlayers = len(match.PlayerIDs)
+	s.recordLobbyRoomAuditRecordLocked(record)
+}
+
+func connectedPlayerCountLocked(match *matchState) int {
+	if match == nil {
+		return 0
+	}
+	count := 0
+	for _, player := range match.Players {
+		if player.Connected {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *Service) userBySessionLocked(sessionToken string) (*userState, error) {
 	token := strings.TrimSpace(strings.TrimPrefix(sessionToken, "Bearer "))
 	if token == "" {
@@ -3160,6 +3610,22 @@ func validateLoadout(modeID string, modeParams map[string]any, profile Certifica
 		RulesetVersion:      RulesetVersion,
 		ServerAuthoritative: true,
 	}, nil
+}
+
+func validateClientMatchVersion(version VersionStamp) error {
+	if version.ProtocolVersion != 0 && version.ProtocolVersion != ProtocolVersion {
+		return newError(codeInvalidMode, "protocol version mismatch")
+	}
+	if trimmed := strings.TrimSpace(version.BusinessAPIVersion); trimmed != "" && trimmed != BusinessAPIVersion {
+		return newError(codeInvalidMode, "business api version mismatch")
+	}
+	if trimmed := strings.TrimSpace(version.BattleAPIVersion); trimmed != "" && trimmed != BattleAPIVersion {
+		return newError(codeInvalidMode, "battle api version mismatch")
+	}
+	if trimmed := strings.TrimSpace(version.RulesetVersion); trimmed != "" && trimmed != RulesetVersion {
+		return newError(codeInvalidMode, "ruleset version mismatch")
+	}
+	return nil
 }
 
 func hasLoadoutStageParam(modeParams map[string]any) bool {
@@ -3858,6 +4324,10 @@ func firstForbiddenFieldDeep(raw map[string]any) string {
 	return ""
 }
 
+func ForbiddenClientField(raw map[string]any) string {
+	return firstForbiddenFieldDeep(raw)
+}
+
 func sanitizedLobbyMetadata(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
 		return nil
@@ -4244,7 +4714,7 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 	bestModeBreadth := math.MaxInt
 	for _, id := range ids {
 		server := s.battleServers[id]
-		if server == nil || server.Status != "online" || !serverSupportsMode(server, modeID) {
+		if server == nil || !s.battleServerEligibleForAllocationLocked(server, modeID) {
 			continue
 		}
 		if server.Capacity > 0 && server.ActiveMatches >= server.Capacity {
@@ -4259,8 +4729,7 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 		}
 	}
 	if best != nil {
-		best.ActiveMatches++
-		best.Load = clamp(float64(best.ActiveMatches)/float64(max(1, best.Capacity)), best.Load, 1)
+		s.accountBattleServerAllocationLocked(best)
 		return best
 	}
 	fallback := s.battleServers[DefaultBattleServerID]
@@ -4268,7 +4737,30 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 		s.registerDefaultBattleServerLocked()
 		fallback = s.battleServers[DefaultBattleServerID]
 	}
+	s.accountBattleServerAllocationLocked(fallback)
 	return fallback
+}
+
+func (s *Service) battleServerEligibleForAllocationLocked(server *battleServerState, modeID string) bool {
+	if server == nil || server.Status != "online" || !serverSupportsMode(server, modeID) {
+		return false
+	}
+	if server.BattleServerID == DefaultBattleServerID {
+		return true
+	}
+	lastSeen := server.LastSeenAt
+	if lastSeen.IsZero() {
+		return false
+	}
+	return !s.clock().After(lastSeen.Add(time.Duration(BattleServerHeartbeatTTLSeconds) * time.Second))
+}
+
+func (s *Service) accountBattleServerAllocationLocked(server *battleServerState) {
+	if server == nil {
+		return
+	}
+	server.ActiveMatches++
+	server.Load = clamp(float64(server.ActiveMatches)/float64(max(1, server.Capacity)), server.Load, 1)
 }
 
 func battleServerModeBreadth(server *battleServerState) int {
@@ -4310,8 +4802,13 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 	}
 	cacheKey := battleTicketCacheKey(match.MatchID, user.UserID)
 	now := s.clock()
-	if existing := s.battleTickets[cacheKey]; existing != nil && existing.Ticket.ExpiresAt.After(now) {
-		return existing, nil
+	if existing := s.battleTickets[cacheKey]; existing != nil {
+		if _, consumed := s.consumedBattleTickets[existing.Ticket.TicketID]; !consumed && existing.Ticket.ExpiresAt.After(now) {
+			return existing, nil
+		}
+		if _, consumed := s.consumedBattleTickets[existing.Ticket.TicketID]; !consumed {
+			s.recordBattleTicketExpiredAuditLocked(existing, now)
+		}
 	}
 	ticketID := s.nextIDLocked("battle_ticket")
 	issuedAt := now
@@ -4348,8 +4845,16 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 		ServerTime:          now,
 	}
 	s.battleTickets[cacheKey] = signed
+	s.battleTicketsByID[ticket.TicketID] = signed
 	s.recordBattleTicketAuditLocked(signed)
 	return signed, nil
+}
+
+func (s *Service) signedBattleTicketByIDLocked(ticketID string) *SignedBattleTicket {
+	if ticketID == "" {
+		return nil
+	}
+	return s.battleTicketsByID[ticketID]
 }
 
 func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAllocation, server *battleServerState) {
@@ -4380,7 +4885,49 @@ func (s *Service) recordMatchAllocationAuditLocked(allocation *BattleServerAlloc
 		CreatedAt:           allocation.AllocatedAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("match_allocation", err)
+	fingerprint := lifecycleFingerprint("battle:allocation", allocation.MatchID, allocation.ModeID, allocation.BattleServerID, allocation.ModeConfigHash, fmt.Sprintf("%d", len(allocation.Players)))
+	s.recordBattleAuditOutcomeLocked("match_allocation", fingerprint, allocation.AllocatedAt, err)
+}
+
+func (s *Service) recordBattleServerLifecycleAuditLocked(server *battleServerState, status string) {
+	if s.battleAuditRepo == nil || server == nil || server.BattleServerID == "" {
+		return
+	}
+	now := s.clock()
+	metadata := map[string]any{
+		"battle_server_id": server.BattleServerID,
+		"endpoint":         server.Endpoint,
+		"region":           server.Region,
+		"build_id":         server.BuildID,
+		"capacity":         server.Capacity,
+		"active_matches":   server.ActiveMatches,
+		"load":             server.Load,
+		"status":           server.Status,
+		"supported_modes":  append([]string{}, server.SupportedModes...),
+		"last_seen_at":     server.LastSeenAt,
+	}
+	metadataJSON := "{}"
+	if encoded, err := json.Marshal(metadata); err == nil {
+		metadataJSON = string(encoded)
+	}
+	err := s.battleAuditRepo.RecordMatchAllocationAudit(BattleAllocationAuditRecord{
+		MatchID:             "battle-server:" + server.BattleServerID,
+		ModeID:              "battle_server_lifecycle",
+		BattleServerID:      server.BattleServerID,
+		Endpoint:            server.Endpoint,
+		Region:              server.Region,
+		ProtocolVersion:     fmt.Sprintf("%d", ProtocolVersion),
+		RulesetVersion:      RulesetVersion,
+		ModeConfigHash:      "sha256:" + shortHash(strings.Join(server.SupportedModes, ",")),
+		ServerSeedHash:      "sha256:" + shortHash(server.BuildID+"|"+server.Endpoint+"|"+server.Region),
+		PlayerCount:         server.ActiveMatches,
+		AllocationJSON:      metadataJSON,
+		Status:              status,
+		CreatedAt:           now,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:server", status, server.BattleServerID, server.Endpoint, server.BuildID, fmt.Sprintf("%d", server.ActiveMatches), fmt.Sprintf("%.3f", server.Load))
+	s.recordBattleAuditOutcomeLocked(status, fingerprint, now, err)
 }
 
 func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
@@ -4407,7 +4954,72 @@ func (s *Service) recordBattleTicketAuditLocked(signed *SignedBattleTicket) {
 		ExpiresAt:           ticket.ExpiresAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("battle_ticket", err)
+	fingerprint := lifecycleFingerprint("battle:ticket", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	s.recordBattleAuditOutcomeLocked("battle_ticket", fingerprint, ticket.IssuedAt, err)
+}
+
+func (s *Service) recordBattleTicketExpiredAuditLocked(signed *SignedBattleTicket, expiredAt time.Time) {
+	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
+		return
+	}
+	ticket := signed.Ticket
+	if expiredAt.IsZero() {
+		expiredAt = s.clock()
+	}
+	err := s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Endpoint:            ticket.Endpoint,
+		KeyID:               signed.KeyID,
+		RulesetVersion:      ticket.RulesetVersion,
+		ProtocolVersion:     fmt.Sprintf("%d", ticket.Version.ProtocolVersion),
+		DeckSnapshotHash:    ticket.DeckSnapshotHash,
+		ModeConfigHash:      modeConfigHash(ticket.ModeID),
+		Nonce:               ticket.TicketNonceHex,
+		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
+		Status:              "expired",
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ConsumedAt:          expiredAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:ticket:expired", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	s.recordBattleAuditOutcomeLocked("battle_ticket_expired", fingerprint, expiredAt, err)
+}
+
+func (s *Service) recordBattleTicketConsumedAuditLocked(signed *SignedBattleTicket, consumedAt time.Time) {
+	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
+		return
+	}
+	ticket := signed.Ticket
+	if consumedAt.IsZero() {
+		consumedAt = s.clock()
+	}
+	err := s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Endpoint:            ticket.Endpoint,
+		KeyID:               signed.KeyID,
+		RulesetVersion:      ticket.RulesetVersion,
+		ProtocolVersion:     fmt.Sprintf("%d", ticket.Version.ProtocolVersion),
+		DeckSnapshotHash:    ticket.DeckSnapshotHash,
+		ModeConfigHash:      modeConfigHash(ticket.ModeID),
+		Nonce:               ticket.TicketNonceHex,
+		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
+		Status:              "consumed",
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ConsumedAt:          consumedAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:ticket:consumed", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.TicketNonceHex)
+	s.recordBattleAuditOutcomeLocked("battle_ticket_consumed", fingerprint, consumedAt, err)
 }
 
 func (s *Service) recordLobbyRoomAuditLocked(room *roomState, ticket *queueTicket, userID string, action string, createdAt time.Time) {
@@ -4501,7 +5113,8 @@ func (s *Service) recordLobbyRoomAuditRecordLocked(record LobbyRoomAuditRecord) 
 		return
 	}
 	err := s.lobbyAuditRepo.RecordLobbyRoomAudit(record)
-	s.recordLobbyAuditOutcomeLocked(record.Action, err)
+	fingerprint := lifecycleFingerprint("lobby:room", record.Action, record.RoomCode, record.UserID, record.TicketID, record.MatchID, record.RoomStatus, record.DeckSnapshotHash)
+	s.recordLobbyAuditOutcomeLocked(record.Action, fingerprint, record.CreatedAt, err)
 }
 
 func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
@@ -4526,10 +5139,30 @@ func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
 		CreatedAt:           message.CreatedAt,
 		ServerAuthoritative: true,
 	})
-	s.recordLobbyAuditOutcomeLocked("message", err)
+	fingerprint := lifecycleFingerprint("lobby:message", message.MessageID, message.RoomCode, message.UserID, message.Kind, fmt.Sprintf("%t", message.Duplicate), metadataHash)
+	s.recordLobbyAuditOutcomeLocked("message", fingerprint, message.CreatedAt, err)
 }
 
-func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
+func (s *Service) recordLobbyHeartbeatAuditLocked(userID string, ticket *queueTicket, match *matchState, occurredAt time.Time) {
+	if ticket == nil && match != nil {
+		if ticketID := s.ticketIDForMatchUserLocked(match.MatchID, userID); ticketID != "" {
+			ticket = s.tickets[ticketID]
+		}
+	}
+	if ticket == nil || ticket.RoomCode == "" {
+		return
+	}
+	room := s.rooms[normalizeRoomCode(ticket.RoomCode)]
+	record := s.lobbyRoomAuditRecordLocked(room, ticket, userID, "heartbeat", occurredAt)
+	record.CurrentPlayers = s.ticketDepthLocked(ticket)
+	if match != nil {
+		record.MatchID = match.MatchID
+		record.CurrentPlayers = connectedPlayerCount(match)
+	}
+	s.recordLobbyRoomAuditRecordLocked(record)
+}
+
+func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint string, occurredAt time.Time, err error) {
 	s.lobbyAuditStatus.Configured = s.lobbyAuditRepo != nil
 	s.lobbyAuditStatus.ServerAuthoritative = true
 	if err != nil {
@@ -4541,13 +5174,27 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, err error) {
 		return
 	}
 	switch operation {
+	case "listed", "snapshot_read", "ticket_read":
+		s.lobbyAuditStatus.RoomReadRecords++
 	case "rules_read":
 		s.lobbyAuditStatus.RulesReadRecords++
 	case "message":
 		s.lobbyAuditStatus.MessageRecords++
+	case "create_retry", "join_retry":
+		s.lobbyAuditStatus.RoomReadRecords++
+	case "ready":
+		s.lobbyAuditStatus.ReadyRecords++
+	case "disconnected", "reconnected", "heartbeat":
+		s.lobbyAuditStatus.ConnectionRecords++
 	default:
 		s.lobbyAuditStatus.RoomRecords++
 	}
+	s.lobbyAuditStatus.LastSuccessOperation = operation
+	s.lobbyAuditStatus.LastSuccessFingerprint = fingerprint
+	if occurredAt.IsZero() {
+		occurredAt = s.clock()
+	}
+	s.lobbyAuditStatus.LastSuccessAt = occurredAt
 	if s.lobbyAuditStatus.Configured {
 		s.lobbyAuditStatus.OK = s.lobbyAuditStatus.LastError == ""
 	}
@@ -4570,11 +5217,39 @@ func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *B
 		KeyID:               signed.KeyID,
 		PlayerIDs:           copyStringSlice(signed.Result.PlayerIDs),
 		SettlementKey:       battleResultSettlementKey(match.MatchID),
+		Status:              "accepted",
 		VerifiedAt:          verifiedAt,
 		SettledAt:           match.BattleResultAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("battle_result", err)
+	fingerprint := lifecycleFingerprint("battle:result", match.MatchID, match.ModeID, battleServerID, signed.Result.ResultHash, signed.Result.ReplayID, fmt.Sprintf("%d", signed.Result.SettledAtMS))
+	s.recordBattleAuditOutcomeLocked("battle_result", fingerprint, verifiedAt, err)
+}
+
+func (s *Service) recordBattleResultDuplicateAuditLocked(match *matchState, allocation *BattleServerAllocation, signed SignedBattleResult, verifiedAt time.Time) {
+	if s.battleAuditRepo == nil || match == nil {
+		return
+	}
+	battleServerID := signed.KeyID
+	if allocation != nil && allocation.BattleServerID != "" {
+		battleServerID = allocation.BattleServerID
+	}
+	err := s.battleAuditRepo.RecordBattleResultAudit(BattleResultAuditRecord{
+		MatchID:             match.MatchID,
+		ModeID:              match.ModeID,
+		BattleServerID:      battleServerID,
+		ResultHash:          signed.Result.ResultHash,
+		ReplayID:            signed.Result.ReplayID,
+		KeyID:               signed.KeyID,
+		PlayerIDs:           copyStringSlice(signed.Result.PlayerIDs),
+		SettlementKey:       battleResultSettlementKey(match.MatchID),
+		Status:              "duplicate",
+		VerifiedAt:          verifiedAt,
+		SettledAt:           match.BattleResultAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:result:duplicate", match.MatchID, match.ModeID, battleServerID, signed.Result.ResultHash, signed.Result.ReplayID, fmt.Sprintf("%d", signed.Result.SettledAtMS))
+	s.recordBattleAuditOutcomeLocked("battle_result_duplicate", fingerprint, verifiedAt, err)
 }
 
 func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
@@ -4595,10 +5270,11 @@ func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
 		SettledAt:           replay.SettledAt,
 		ServerAuthoritative: true,
 	})
-	s.recordBattleAuditOutcomeLocked("replay", err)
+	fingerprint := lifecycleFingerprint("battle:replay", replay.ReplayID, replay.MatchID, replay.UserID, replay.StateHash, replay.Settlement.SettlementKey)
+	s.recordBattleAuditOutcomeLocked("replay", fingerprint, replay.SettledAt, err)
 }
 
-func (s *Service) recordBattleAuditOutcomeLocked(operation string, err error) {
+func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint string, occurredAt time.Time, err error) {
 	s.battleAuditStatus.Configured = s.battleAuditRepo != nil
 	s.battleAuditStatus.ServerAuthoritative = true
 	if err != nil {
@@ -4610,15 +5286,29 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, err error) {
 		return
 	}
 	switch operation {
+	case "server_registered", "server_heartbeat", "server_offline":
+		s.battleAuditStatus.ServerLifecycleRecords++
 	case "match_allocation":
 		s.battleAuditStatus.AllocationRecords++
 	case "battle_ticket":
 		s.battleAuditStatus.TicketRecords++
+	case "battle_ticket_expired":
+		s.battleAuditStatus.TicketExpiredRecords++
+	case "battle_ticket_consumed":
+		s.battleAuditStatus.TicketConsumedRecords++
 	case "battle_result":
 		s.battleAuditStatus.ResultRecords++
+	case "battle_result_duplicate":
+		s.battleAuditStatus.ResultDuplicateRecords++
 	case "replay":
 		s.battleAuditStatus.ReplayRecords++
 	}
+	s.battleAuditStatus.LastSuccessOperation = operation
+	s.battleAuditStatus.LastSuccessFingerprint = fingerprint
+	if occurredAt.IsZero() {
+		occurredAt = s.clock()
+	}
+	s.battleAuditStatus.LastSuccessAt = occurredAt
 	if s.battleAuditStatus.Configured {
 		s.battleAuditStatus.OK = s.battleAuditStatus.LastError == ""
 	}
@@ -4854,6 +5544,10 @@ func shortHash(value string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
+func lifecycleFingerprint(parts ...string) string {
+	return "sha256:" + shortHash(strings.Join(parts, "\x1f"))
+}
+
 func prefixString(value string, length int) string {
 	if length <= 0 || len(value) <= length {
 		return value
@@ -5035,6 +5729,61 @@ func copySignedBattleTicket(source *SignedBattleTicket) SignedBattleTicket {
 	}
 	out := *source
 	return out
+}
+
+func cloneQueueResponse(source *QueueResponse) *QueueResponse {
+	if source == nil {
+		return nil
+	}
+	out := *source
+	if source.MatchStart != nil {
+		matchStart := *source.MatchStart
+		matchStart.ModeState = copyAnyMap(source.MatchStart.ModeState)
+		if source.MatchStart.BattleAllocation != nil {
+			allocation := copyBattleAllocation(source.MatchStart.BattleAllocation)
+			matchStart.BattleAllocation = &allocation
+		}
+		out.MatchStart = &matchStart
+	}
+	if source.BattleAllocation != nil {
+		allocation := copyBattleAllocation(source.BattleAllocation)
+		out.BattleAllocation = &allocation
+	}
+	if source.BattleTicket != nil {
+		ticket := copySignedBattleTicket(source.BattleTicket)
+		out.BattleTicket = &ticket
+	}
+	return &out
+}
+
+func businessEventClientOperations() []string {
+	return []string{
+		"presence.heartbeat",
+		"matchmaking.ticket",
+		"matchmaking.cancel",
+		"rooms.get",
+		"rooms.rules",
+		"rooms.join",
+		"rooms.leave",
+		"rooms.message",
+		"business.event",
+		"business.event.settlement",
+		"match.ready",
+		"match.disconnect",
+		"match.reconnect",
+		"battle.allocation",
+		"battle.ticket",
+	}
+}
+
+func serviceCallbackOperations() []string {
+	return []string{
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+		"battle.servers.offline",
+		"battle.ticket.consume",
+		"battle.result.submit",
+	}
 }
 
 func copyDeckRecord(source DeckRecord) DeckRecord {

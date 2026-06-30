@@ -14,6 +14,7 @@ import (
 const (
 	CodeInvalidRequest           = "invalid_request"
 	CodeBusinessEnvelopeRequired = "business_envelope_required"
+	CodeServiceOriginRequired    = "service_origin_required"
 )
 
 type Handler struct {
@@ -25,11 +26,13 @@ type Handler struct {
 type Option func(*Handler)
 
 type RPCRequest struct {
-	ID          string
-	SessionID   string
-	UserID      string
-	DisplayName string
-	Payload     map[string]any
+	ID           string
+	SessionID    string
+	UserID       string
+	DisplayName  string
+	Service      bool
+	Payload      map[string]any
+	PayloadError string
 }
 
 type WSSMessage struct {
@@ -85,9 +88,22 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	if rpcID == "" {
 		return errorResponse(http.StatusBadRequest, CodeInvalidRequest, "rpc id is required")
 	}
+	if response := payloadErrorResponse(request.PayloadError); !response.OK {
+		return response
+	}
 	if rpcSkipsEnvelope(rpcID) {
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
 			return response
+		}
+	} else if rpcRequiresServiceOrigin(rpcID) {
+		if !request.Service {
+			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q requires service-to-service origin", request.ID))
+		}
+		if strings.TrimSpace(request.SessionID) != "" || strings.TrimSpace(request.UserID) != "" {
+			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q service-origin callback must not include player session context", request.ID))
+		}
+		if _, ok := request.Payload[security.BusinessEnvelopePayloadKey]; ok {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("rpc %q service-origin callback must not include business envelope payload", request.ID))
 		}
 	} else {
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
@@ -137,6 +153,15 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(request.SessionID, req) })
+	case "business.event":
+		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
+			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
+		}
+		var req core.BusinessEventRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BusinessEvent(request.SessionID, req) })
 	case "matchmaking.join":
 		var req core.JoinQueueRequest
 		if err := decodeBody(body, &req); err != nil {
@@ -182,10 +207,36 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(request.SessionID, matchID) })
+	case "match.disconnect", "matches.disconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.DisconnectMatch(request.SessionID, matchID) })
+	case "match.reconnect", "matches.reconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.ReconnectMatch(request.SessionID, matchID) })
 	case "activity.claim":
 		return handler.call(func() (any, error) { return handler.service.ClaimActivity(request.SessionID, body) })
+	case "battle.servers.register":
+		var req core.RegisterBattleServerRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.RegisterBattleServer(req) })
+	case "battle.servers.heartbeat":
+		var req core.BattleServerHeartbeatRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BattleServerHeartbeat(req) })
+	case "battle.servers.offline":
+		var req core.BattleServerOfflineRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BattleServerOffline(req) })
 	case "battle.servers":
 		return successResponse(handler.service.BattleServers())
+	case "business.envelope.audit.status":
+		return successResponse(handler.EnvelopeSnapshot())
 	case "battle.audit.status":
 		return successResponse(handler.service.BattleLifecycleAuditStatus())
 	case "lobby.audit.status":
@@ -196,6 +247,15 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "battle.ticket":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleTicket(request.SessionID, matchID) })
+	case "battle.ticket.consume":
+		var req core.BattleTicketConsumeRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.ConsumeBattleTicket(req) })
+	case "replay.get", "replay":
+		replayID := fieldString(body, "replay_id", "replayId")
+		return handler.call(func() (any, error) { return handler.service.Replay(request.SessionID, replayID) })
 	case "battle.result.submit":
 		var req core.BattleResultSubmitRequest
 		if err := decodeBody(body, &req); err != nil {
@@ -212,6 +272,10 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	if name == "" {
 		return errorResponse(http.StatusBadRequest, CodeInvalidRequest, "message name is required")
 	}
+	if rpcRequiresServiceOrigin(name) {
+		handler.auditRejectedServiceOnlyWSS(message, name)
+		return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("wss message %q is service-origin RPC only", message.Name))
+	}
 	if response := handler.ensureExternalWSSSession(message); !response.OK {
 		return response
 	}
@@ -226,12 +290,24 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(message.SessionID, req) })
+	case "business.event":
+		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
+			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
+		}
+		var req core.BusinessEventRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BusinessEvent(message.SessionID, req) })
 	case "matchmaking.join":
 		var req core.JoinQueueRequest
 		if err := decodeBody(body, &req); err != nil {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.JoinQueue(message.SessionID, req) })
+	case "matchmaking.ticket":
+		ticketID := fieldString(body, "ticket_id", "ticketId")
+		return handler.call(func() (any, error) { return handler.service.QueueTicket(message.SessionID, ticketID) })
 	case "matchmaking.cancel":
 		ticketID := fieldString(body, "ticket_id", "ticketId")
 		return handler.call(func() (any, error) { return handler.service.CancelTicket(message.SessionID, ticketID) })
@@ -268,12 +344,25 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(message.SessionID, matchID) })
+	case "match.disconnect", "matches.disconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.DisconnectMatch(message.SessionID, matchID) })
+	case "match.reconnect", "matches.reconnect":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.ReconnectMatch(message.SessionID, matchID) })
+	case "battle.servers":
+		return successResponse(handler.service.BattleServers())
 	case "battle.allocation":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleAllocation(message.SessionID, matchID) })
 	case "battle.ticket":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.BattleTicket(message.SessionID, matchID) })
+	case "replay.get", "replay":
+		replayID := fieldString(body, "replay_id", "replayId")
+		return handler.call(func() (any, error) { return handler.service.Replay(message.SessionID, replayID) })
+	case "business.envelope.audit.status":
+		return successResponse(handler.EnvelopeSnapshot())
 	case "battle.audit.status":
 		return successResponse(handler.service.BattleLifecycleAuditStatus())
 	case "lobby.audit.status":
@@ -355,6 +444,16 @@ func (handler *Handler) auditMissingEnvelope(sessionID string, userID string, tr
 	})
 }
 
+func (handler *Handler) auditRejectedServiceOnlyWSS(message WSSMessage, name string) {
+	_ = security.ValidateBusinessEnvelopeRequest(handler.envelopeGuard, security.BusinessEnvelopeRequest{
+		SessionID: "blocked-service-wss:" + name,
+		Transport: security.BusinessEnvelopeTransportNakamaWSS,
+		Endpoint:  endpointName("wss", name),
+		UserID:    strings.TrimSpace(message.UserID),
+		Op:        endpointName("wss", name),
+	})
+}
+
 func (handler *Handler) call(fn func() (any, error)) Response {
 	payload, err := fn()
 	if err != nil {
@@ -369,6 +468,14 @@ func successResponse(payload any) Response {
 
 func errorResponse(status int, code string, message string) Response {
 	return Response{OK: false, Status: status, ErrorCode: code, Message: message}
+}
+
+func payloadErrorResponse(message string) Response {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return successResponse(nil)
+	}
+	return errorResponse(http.StatusBadRequest, CodeInvalidRequest, message)
 }
 
 func envelopeErrorResponse(result security.BusinessEnvelopeRequestResult) Response {
@@ -399,6 +506,15 @@ func coreErrorResponse(err error) Response {
 
 func rpcSkipsEnvelope(rpcID string) bool {
 	return rpcID == "auth.anonymous"
+}
+
+func rpcRequiresServiceOrigin(rpcID string) bool {
+	switch rpcID {
+	case "battle.result.submit", "battle.ticket.consume", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeName(name string) string {
