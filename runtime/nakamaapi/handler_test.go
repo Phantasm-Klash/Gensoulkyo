@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -370,6 +371,9 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if rulesPayload.ServiceCallbackContext[core.ServiceCallbackRuntimeModeKey] != core.ServiceCallbackRuntimeModeRPC || rulesPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer || rulesPayload.ServiceCallbackContext[core.ServiceCallbackFlagKey] != core.ServiceCallbackRequiredValue {
 		t.Fatalf("room rules should expose service callback context requirements: %+v", rulesPayload.ServiceCallbackContext)
 	}
+	if !reflect.DeepEqual(rulesPayload.ServiceCallbackAcceptedValues, core.ServiceCallbackAcceptedValues()) {
+		t.Fatalf("room rules should expose accepted service callback values: %+v", rulesPayload.ServiceCallbackAcceptedValues)
+	}
 	if !stringSliceContains(rulesPayload.ClientOperations, "rooms.chat") || !stringSliceContains(rulesPayload.ClientOperations, "rooms.announcement") {
 		t.Fatalf("room rules should expose registered room message aliases: %+v", rulesPayload.ClientOperations)
 	}
@@ -633,6 +637,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if eventPayload.ServiceCallbackContext[core.ServiceCallbackRuntimeModeKey] != core.ServiceCallbackRuntimeModeRPC || eventPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer || eventPayload.ServiceCallbackContext[core.ServiceCallbackFlagKey] != core.ServiceCallbackRequiredValue {
 		t.Fatalf("business event should document service callback context requirements: %+v", eventPayload.ServiceCallbackContext)
 	}
+	if !reflect.DeepEqual(eventPayload.ServiceCallbackAcceptedValues, core.ServiceCallbackAcceptedValues()) {
+		t.Fatalf("business event should document accepted service callback values: %+v", eventPayload.ServiceCallbackAcceptedValues)
+	}
 	if !stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.allocation") || !stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket") || stringSliceContains(eventPayload.AllowedClientRPCOperations, "battle.result.submit") || stringSliceContains(eventPayload.AllowedClientWSSOperations, "battle.ticket.consume") {
 		t.Fatalf("business event should document split client RPC/WSS operations without service callbacks: %+v", eventPayload)
 	}
@@ -671,6 +678,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 	if !stringSliceContains(contractPayload.ServiceCallbacks, "battle.result.submit") || contractPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer {
 		t.Fatalf("business contract should document service callback requirements without granting client authority: %+v", contractPayload)
+	}
+	if !reflect.DeepEqual(contractPayload.ServiceCallbackAcceptedValues, core.ServiceCallbackAcceptedValues()) {
+		t.Fatalf("business contract should document accepted service callback values without granting client authority: %+v", contractPayload.ServiceCallbackAcceptedValues)
 	}
 	assertBusinessNotificationTopics(t, contractPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket", "settlement")
 
