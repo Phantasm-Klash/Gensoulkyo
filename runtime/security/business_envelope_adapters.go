@@ -140,6 +140,12 @@ func payloadMap(value any) (map[string]any, bool) {
 
 func payloadContainsEnvelopeField(payload map[string]any) bool {
 	for _, key := range BusinessEnvelopeFieldAliases() {
+		if key == "version" {
+			if payloadString(payload, "version") != "" {
+				return true
+			}
+			continue
+		}
 		if _, ok := payload[key]; ok {
 			return true
 		}

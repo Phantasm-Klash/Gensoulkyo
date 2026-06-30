@@ -89,6 +89,29 @@ func TestBusinessEnvelopeRequestAdaptersDetectAbsentEnvelope(t *testing.T) {
 	}
 }
 
+func TestBusinessEnvelopeRequestAdapterKeepsStructuredVersionPayloadsPlain(t *testing.T) {
+	payload := map[string]any{
+		"version": map[string]any{
+			"protocol_version":     1,
+			"business_api_version": "business-v0",
+			"battle_api_version":   "battle-v0",
+			"ruleset_version":      "ruleset-local-s0",
+		},
+		"signed_result": map[string]any{"match_id": "service-callback"},
+	}
+	if _, ok := BusinessEnvelopeRequestFromNakamaRPCPayload("service-session", "battle.result.submit", "service-user", payload); ok {
+		t.Fatalf("structured protocol version payload must not be treated as a business envelope")
+	}
+
+	scalarPayload := map[string]any{
+		"version": BusinessEnvelopeVersion,
+		"seq":     int64(1),
+	}
+	if request, ok := BusinessEnvelopeRequestFromNakamaRPCPayload("session", "bootstrap", "user", scalarPayload); !ok || request.Version != BusinessEnvelopeVersion {
+		t.Fatalf("scalar envelope version payload should still be detected: ok=%v request=%+v", ok, request)
+	}
+}
+
 func validEnvelopeRequest(seq int64, timestamp time.Time, nonce string) BusinessEnvelopeRequest {
 	return BusinessEnvelopeRequest{
 		SessionID:   "test-session",
