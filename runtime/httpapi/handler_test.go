@@ -199,6 +199,21 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if settlement.Loadout.RatingCode == "" || settlement.ModeResult["rank_score_delta"] == nil || settlement.ModeResult["next_certification_unlocked"] == nil {
 		t.Fatalf("settlement missing certification result: loadout=%+v mode=%+v", settlement.Loadout, settlement.ModeResult)
 	}
+	settlementEvent := postJSON[core.BusinessEvent](t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
+		"kind":     "settlement",
+		"match_id": queueBob.MatchID,
+	})
+	if settlementEvent.Topic != "nakama_wss.business.settlement" || settlementEvent.Settlement == nil || settlementEvent.Settlement.ReplayID != settlement.ReplayID || settlementEvent.ClientResultSubmitAllowed || settlementEvent.HighFrequencyBattleTickAllowed {
+		t.Fatalf("settlement business event invalid: %+v", settlementEvent)
+	}
+	forbiddenSettlementEvent := postRaw(t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
+		"kind":        "settlement",
+		"match_id":    queueBob.MatchID,
+		"result_hash": "client-authored",
+	})
+	if forbiddenSettlementEvent.Code != http.StatusForbidden || forbiddenSettlementEvent.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden business event settlement authority, got %+v", forbiddenSettlementEvent)
+	}
 	replay := getJSON[core.ReplayRecord](t, server.URL+"/v1/replays/"+settlement.ReplayID, alice.SessionToken)
 	if !replay.OK || replay.ReplayID != settlement.ReplayID || replay.MatchID != queueBob.MatchID || !replay.ServerAuthoritative || replay.StateHash == "" {
 		t.Fatalf("replay invalid: %+v", replay)

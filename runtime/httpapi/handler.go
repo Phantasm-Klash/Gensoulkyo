@@ -112,6 +112,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.heartbeat(w, r)
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "business" && segments[2] == "events" && r.Method == http.MethodPost {
+		h.businessEvent(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "matchmaking" && segments[2] == "join" && r.Method == http.MethodPost {
 		h.joinQueue(w, r)
 		return
@@ -329,6 +333,33 @@ func (h *Handler) heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.service.Heartbeat(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request) {
+	raw := map[string]any{}
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
+	if forbidden := core.ForbiddenClientField(raw); forbidden != "" {
+		writeError(w, core.NewForbiddenClientFieldError(forbidden))
+		return
+	}
+	var req core.BusinessEventRequest
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return
+	}
+	if err := json.Unmarshal(encoded, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return
+	}
+	resp, err := h.service.BusinessEvent(sessionToken(r), req)
 	if err != nil {
 		writeError(w, err)
 		return

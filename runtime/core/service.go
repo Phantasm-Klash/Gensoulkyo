@@ -107,6 +107,10 @@ func newError(code string, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
+func NewForbiddenClientFieldError(field string) *Error {
+	return newError(codeForbiddenField, "client cannot submit %s", strings.TrimSpace(field))
+}
+
 type Service struct {
 	mu                    sync.Mutex
 	clock                 Clock
