@@ -603,7 +603,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 			"match_id": found.MatchID,
 		}),
 	})
-	if wssResultSubmit.OK || wssResultSubmit.Status != 404 {
+	if wssResultSubmit.OK || wssResultSubmit.Status != 403 || wssResultSubmit.ErrorCode != CodeServiceOriginRequired {
 		t.Fatalf("battle result submit must stay out of client WSS dispatch: %+v", wssResultSubmit)
 	}
 }
@@ -808,6 +808,32 @@ func TestNakamaRPCAllowsServiceOriginBattleResultSubmitToReachCoreValidation(t *
 	})
 	if serviceSubmit.OK || serviceSubmit.Status != 400 || serviceSubmit.ErrorCode != "invalid_request" || strings.Contains(serviceSubmit.Message, CodeServiceOriginRequired) {
 		t.Fatalf("service-origin battle result submit should reach core validation, got %+v", serviceSubmit)
+	}
+}
+
+func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeEnvelopeAudit(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	for index, name := range []string{
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+		"battle.servers.offline",
+		"battle.result.submit",
+	} {
+		response := handler.HandleWSSMessage(WSSMessage{
+			Name:      name,
+			SessionID: "player-session",
+			UserID:    "player-user",
+			Payload: envelopePayload(int64(index+1), "nonce-wss-service-only-"+name, strings.ReplaceAll(name, ".", "_"), map[string]any{
+				"match_id":         "client-authored",
+				"battle_server_id": "client-battle-server",
+			}),
+		})
+		if response.OK || response.Status != 403 || response.ErrorCode != CodeServiceOriginRequired {
+			t.Fatalf("WSS %s should fail as service-origin RPC only before dispatch, got %+v", name, response)
+		}
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
+		t.Fatalf("service-origin WSS rejections should not consume envelope audit state: %+v", snapshot)
 	}
 }
 

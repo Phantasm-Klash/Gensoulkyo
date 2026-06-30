@@ -254,6 +254,9 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	if name == "" {
 		return errorResponse(http.StatusBadRequest, CodeInvalidRequest, "message name is required")
 	}
+	if rpcRequiresServiceOrigin(name) {
+		return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("wss message %q is service-origin RPC only", message.Name))
+	}
 	if response := handler.ensureExternalWSSSession(message); !response.OK {
 		return response
 	}
