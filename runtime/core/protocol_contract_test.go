@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	phkv1 "github.com/phantasm-klash/phk-protocol/gen/go/phk/v1"
 )
@@ -300,6 +301,10 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if strings.TrimSpace(value) == "" {
 			t.Fatalf("service callback accepted values must not expose blanks: %+v", acceptedCallbackValues)
 		}
+	}
+	contract := businessContractSnapshot(time.Unix(1782800000, 0))
+	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult {
+		t.Fatalf("business contract must publish service-signed settlement authority, got %+v", contract)
 	}
 	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
 		if !stringSliceContains(ops, "battle.servers") {
