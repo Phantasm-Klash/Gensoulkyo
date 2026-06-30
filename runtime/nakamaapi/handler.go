@@ -97,9 +97,11 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		}
 	} else if rpcRequiresServiceOrigin(rpcID) {
 		if !request.Service {
+			handler.auditRejectedServiceOnlyRPC(request, rpcID)
 			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q requires service-to-service origin", request.ID))
 		}
 		if strings.TrimSpace(request.SessionID) != "" || strings.TrimSpace(request.UserID) != "" {
+			handler.auditRejectedServiceOnlyRPC(request, rpcID)
 			return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("rpc %q service-origin callback must not include player session context", request.ID))
 		}
 		if serviceOriginPayloadHasBusinessEnvelope(request.Payload) {
@@ -451,6 +453,16 @@ func (handler *Handler) auditRejectedServiceOnlyWSS(message WSSMessage, name str
 		Endpoint:  endpointName("wss", name),
 		UserID:    strings.TrimSpace(message.UserID),
 		Op:        endpointName("wss", name),
+	})
+}
+
+func (handler *Handler) auditRejectedServiceOnlyRPC(request RPCRequest, rpcID string) {
+	_ = security.ValidateBusinessEnvelopeRequest(handler.envelopeGuard, security.BusinessEnvelopeRequest{
+		SessionID: "blocked-service-rpc:" + rpcID,
+		Transport: security.BusinessEnvelopeTransportNakamaRPC,
+		Endpoint:  endpointName("rpc", rpcID),
+		UserID:    strings.TrimSpace(request.UserID),
+		Op:        endpointName("rpc", rpcID),
 	})
 }
 

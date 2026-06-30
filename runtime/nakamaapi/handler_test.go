@@ -917,8 +917,26 @@ func TestNakamaRPCRejectsClientOriginBattleResultSubmit(t *testing.T) {
 	if clientSubmit.OK || clientSubmit.Status != 403 || clientSubmit.ErrorCode != CodeServiceOriginRequired {
 		t.Fatalf("client-origin battle result submit must be rejected before core dispatch: %+v", clientSubmit)
 	}
-	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 {
-		t.Fatalf("service-origin rejection should not consume envelope seq/nonce: %+v", snapshot)
+	snapshot := handler.EnvelopeSnapshot()
+	if snapshot.Accepted != 0 || snapshot.Rejected != 1 || snapshot.SessionCount != 0 || len(snapshot.Audits) != 1 {
+		t.Fatalf("service-origin rejection should audit without accepted replay state: %+v", snapshot)
+	}
+	audit := snapshot.Audits[0]
+	if audit.Accepted || audit.Transport != security.BusinessEnvelopeTransportNakamaRPC || audit.Endpoint != "rpc.battle.result.submit" || audit.Reason != security.ReasonVersion || audit.UserID != session.UserID || audit.SessionIDHint == session.SessionToken {
+		t.Fatalf("service-origin RPC rejection audit should be non-secret and synthetic: %+v", audit)
+	}
+
+	bootstrap := handler.HandleRPC(RPCRequest{
+		ID:        "bootstrap",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(1, "nonce-client-result-submit", "bootstrap", map[string]any{}),
+	})
+	if !bootstrap.OK || bootstrap.Status != 200 {
+		t.Fatalf("client service-origin rejection must not consume the original envelope seq/nonce, got %+v", bootstrap)
+	}
+	if snapshot := handler.EnvelopeSnapshot(); snapshot.Accepted != 1 || snapshot.Rejected != 1 {
+		t.Fatalf("follow-up bootstrap should consume the original client seq/nonce exactly once: %+v", snapshot)
 	}
 }
 
@@ -951,6 +969,14 @@ func TestNakamaRPCRejectsServiceOriginBattleResultSubmitWithPlayerContext(t *tes
 	})
 	if response.OK || response.Status != 403 || response.ErrorCode != CodeServiceOriginRequired || !strings.Contains(response.Message, "must not include player session context") {
 		t.Fatalf("service-origin result submit with player context must fail closed before core dispatch, got %+v", response)
+	}
+	snapshot := handler.EnvelopeSnapshot()
+	if snapshot.Accepted != 0 || snapshot.Rejected != 1 || snapshot.SessionCount != 0 || len(snapshot.Audits) != 1 {
+		t.Fatalf("miswired service-origin player context should audit without replay state: %+v", snapshot)
+	}
+	audit := snapshot.Audits[0]
+	if audit.Accepted || audit.Transport != security.BusinessEnvelopeTransportNakamaRPC || audit.Endpoint != "rpc.battle.result.submit" || audit.UserID != "player-user" || audit.SessionIDHint == "player-session" {
+		t.Fatalf("miswired service-origin player context audit should be synthetic and sanitized: %+v", audit)
 	}
 }
 
