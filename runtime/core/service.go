@@ -2110,21 +2110,30 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	if !ok {
 		return nil, newError(codeNotFound, "match not found")
 	}
-	if result.ModeID != match.ModeID {
-		return nil, newError(codeInvalidMode, "battle result mode is %q, match mode is %q", result.ModeID, match.ModeID)
-	}
-	if err := validateBattleResultVersion(result.Version, match); err != nil {
-		return nil, err
-	}
 	allocation := s.ensureBattleAllocationLocked(match)
 	if allocation == nil {
-		return nil, newError(codeBattleServer, "battle allocation unavailable")
+		err := newError(codeBattleServer, "battle allocation unavailable")
+		s.recordBattleResultRejectedAuditLocked(match, nil, signed, ErrorCode(err), now)
+		return nil, err
+	}
+	if result.ModeID != match.ModeID {
+		err := newError(codeInvalidMode, "battle result mode is %q, match mode is %q", result.ModeID, match.ModeID)
+		s.recordBattleResultRejectedAuditLocked(match, allocation, signed, ErrorCode(err), now)
+		return nil, err
+	}
+	if err := validateBattleResultVersion(result.Version, match); err != nil {
+		s.recordBattleResultRejectedAuditLocked(match, allocation, signed, ErrorCode(err), now)
+		return nil, err
 	}
 	if signed.KeyID != allocation.BattleServerID {
-		return nil, newError(codeBattleServer, "battle result key id %q does not match battle server %q", signed.KeyID, allocation.BattleServerID)
+		err := newError(codeBattleServer, "battle result key id %q does not match battle server %q", signed.KeyID, allocation.BattleServerID)
+		s.recordBattleResultRejectedAuditLocked(match, allocation, signed, ErrorCode(err), now)
+		return nil, err
 	}
 	if !sameStringSet(result.PlayerIDs, allocationPlayerIDs(allocation)) {
-		return nil, newError(codeInvalidRequest, "battle result players do not match allocation")
+		err := newError(codeInvalidRequest, "battle result players do not match allocation")
+		s.recordBattleResultRejectedAuditLocked(match, allocation, signed, ErrorCode(err), now)
+		return nil, err
 	}
 	if match.Status == "ended" {
 		if match.BattleResultHash != "" && match.BattleResultHash == result.ResultHash {
@@ -2140,7 +2149,9 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 				ServerTime:          now,
 			}, nil
 		}
-		return nil, newError(codeMatchState, "match is already ended")
+		err := newError(codeMatchState, "match is already ended")
+		s.recordBattleResultRejectedAuditLocked(match, allocation, signed, ErrorCode(err), now)
+		return nil, err
 	}
 
 	match.BattleResultHash = result.ResultHash
@@ -5373,6 +5384,33 @@ func (s *Service) recordBattleResultDuplicateAuditLocked(match *matchState, allo
 	s.recordBattleAuditOutcomeLocked("battle_result_duplicate", fingerprint, verifiedAt, err)
 }
 
+func (s *Service) recordBattleResultRejectedAuditLocked(match *matchState, allocation *BattleServerAllocation, signed SignedBattleResult, reason string, verifiedAt time.Time) {
+	if s.battleAuditRepo == nil || match == nil {
+		return
+	}
+	battleServerID := signed.KeyID
+	if allocation != nil && allocation.BattleServerID != "" {
+		battleServerID = allocation.BattleServerID
+	}
+	err := s.battleAuditRepo.RecordBattleResultAudit(BattleResultAuditRecord{
+		MatchID:             match.MatchID,
+		ModeID:              match.ModeID,
+		BattleServerID:      battleServerID,
+		ResultHash:          signed.Result.ResultHash,
+		ReplayID:            signed.Result.ReplayID,
+		KeyID:               signed.KeyID,
+		PlayerIDs:           copyStringSlice(signed.Result.PlayerIDs),
+		SettlementKey:       battleResultSettlementKey(match.MatchID),
+		Status:              "rejected",
+		RejectReason:        firstNonEmptyCore(reason, "invalid_request"),
+		VerifiedAt:          verifiedAt,
+		SettledAt:           verifiedAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:result:rejected", match.MatchID, match.ModeID, battleServerID, signed.Result.ResultHash, signed.Result.ReplayID, fmt.Sprintf("%d", signed.Result.SettledAtMS))
+	s.recordBattleAuditOutcomeLocked("battle_result_rejected", fingerprint, verifiedAt, err)
+}
+
 func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
 	if s.battleAuditRepo == nil || replay == nil || replay.ReplayID == "" {
 		return
@@ -5421,6 +5459,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		s.battleAuditStatus.ResultRecords++
 	case "battle_result_duplicate":
 		s.battleAuditStatus.ResultDuplicateRecords++
+	case "battle_result_rejected":
+		s.battleAuditStatus.ResultRejectedRecords++
 	case "replay":
 		s.battleAuditStatus.ReplayRecords++
 	}

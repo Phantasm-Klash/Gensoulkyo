@@ -95,6 +95,7 @@ type BattleLifecycleAuditStatus struct {
 	TicketConsumedRecords  int       `json:"ticket_consumed_records"`
 	ResultRecords          int       `json:"result_records"`
 	ResultDuplicateRecords int       `json:"result_duplicate_records"`
+	ResultRejectedRecords  int       `json:"result_rejected_records"`
 	ReplayRecords          int       `json:"replay_records"`
 	RejectedRecords        int       `json:"rejected_records"`
 	LastSuccessOperation   string    `json:"last_success_operation,omitempty"`
@@ -218,6 +219,7 @@ type BattleResultAuditRecord struct {
 	PlayerIDs           []string  `json:"player_ids"`
 	SettlementKey       string    `json:"settlement_key"`
 	Status              string    `json:"status"`
+	RejectReason        string    `json:"reject_reason,omitempty"`
 	VerifiedAt          time.Time `json:"verified_at"`
 	SettledAt           time.Time `json:"settled_at"`
 	ServerAuthoritative bool      `json:"server_authoritative"`

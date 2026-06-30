@@ -941,6 +941,49 @@ func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRe
 	}
 }
 
+func TestBattleLifecycleAuditRecordsRejectedResultCallbacks(t *testing.T) {
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{BattleLifecycleAuditRepo: repo})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "reject-battle-dev",
+		Endpoint:       "127.0.0.1:7921",
+		Capacity:       4,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register battle server: %v", err)
+	}
+	alice := mustLogin(t, service, "Rejected Result Alice")
+	bob := mustLogin(t, service, "Rejected Result Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	signed := signedBattleResultForAllocation(allocation)
+	signed.KeyID = "wrong-battle-server"
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed}); ErrorCode(err) != codeBattleServer {
+		t.Fatalf("expected battle server rejection, got %v", err)
+	}
+	if len(repo.results) != 1 {
+		t.Fatalf("expected rejected result audit, got %+v", repo.results)
+	}
+	rejected := repo.results[0]
+	if rejected.Status != "rejected" || rejected.RejectReason != codeBattleServer || rejected.MatchID != matchID || rejected.BattleServerID != allocation.BattleServerID || rejected.KeyID != "wrong-battle-server" || rejected.SettlementKey == "" {
+		t.Fatalf("rejected result audit invalid: %+v", rejected)
+	}
+	if len(repo.replays) != 0 {
+		t.Fatalf("rejected battle result must not write replay audits: %+v", repo.replays)
+	}
+	if match := service.matches[matchID]; match.Status == "ended" || match.BattleResultHash != "" {
+		t.Fatalf("rejected battle result must not settle or stamp match: %+v", match)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ResultRejectedRecords != 1 || status.ResultRecords != 0 || status.ResultDuplicateRecords != 0 || status.ReplayRecords != 0 || status.RejectedRecords != 0 || status.LastSuccessOperation != "battle_result_rejected" {
+		t.Fatalf("rejected result audit status invalid: %+v", status)
+	}
+}
+
 func TestBattleLifecycleAuditStatusTracksRepositoryWriteFailures(t *testing.T) {
 	repo := &captureBattleLifecycleAuditRepo{err: errors.New("audit db offline")}
 	service := NewService(Config{BattleLifecycleAuditRepo: repo})
