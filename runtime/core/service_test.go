@@ -2370,6 +2370,37 @@ func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
 	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "battle.result.submit"}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("service-origin result submit must not be accepted as a business event kind, got %v", err)
 	}
+
+	queued, err := service.JoinQueue(user.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "business_event_queue_deck",
+		DeckSnapshot: validDeck("business_event_queue_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join queue for business event: %v", err)
+	}
+	queueEvent, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{
+		Kind:     "queue",
+		TicketID: queued.TicketID,
+	})
+	if err != nil {
+		t.Fatalf("queue business event: %v", err)
+	}
+	if queueEvent.Queue == nil || queueEvent.Queue.TicketID != queued.TicketID || queueEvent.Room != nil || queueEvent.Ready != nil {
+		t.Fatalf("queue business event should expose queue state only: %+v", queueEvent)
+	}
+	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{
+		Kind:     "room",
+		TicketID: queued.TicketID,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("room business event must require room-bound state, got %v", err)
+	}
+	if _, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{
+		Kind:     "match.ready",
+		TicketID: queued.TicketID,
+	}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("match.ready business event must require matched state, got %v", err)
+	}
 }
 
 func TestRoomLobbyListRulesAndLeave(t *testing.T) {

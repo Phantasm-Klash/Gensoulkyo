@@ -2545,6 +2545,9 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		event.MatchID = settlement.MatchID
 		event.ModeID = settlement.Mode
 	}
+	if err := validateBusinessEventPayload(kind, event); err != nil {
+		return nil, err
+	}
 	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && event.Settlement == nil && kind != "presence" {
 		return nil, newError(codeInvalidRequest, "business event requires ticket_id, room_code, or match_id")
 	}
@@ -5795,6 +5798,43 @@ func isBusinessNotificationKind(kind string) bool {
 		}
 	}
 	return false
+}
+
+func validateBusinessEventPayload(kind string, event *BusinessEvent) error {
+	if event == nil {
+		return newError(codeInvalidRequest, "business event payload is unavailable")
+	}
+	switch kind {
+	case "presence":
+		return nil
+	case "queue", "matchmaking":
+		if event.Queue == nil {
+			return newError(codeInvalidRequest, "%s business event requires ticket_id or room_code", kind)
+		}
+	case "room":
+		if event.Room == nil {
+			return newError(codeInvalidRequest, "room business event requires room_code or room-bound ticket_id")
+		}
+	case "match.ready":
+		if event.Ready == nil {
+			return newError(codeInvalidRequest, "match.ready business event requires match_id or matched ticket_id")
+		}
+	case "battle.allocation":
+		if event.BattleAllocation == nil {
+			return newError(codeInvalidRequest, "battle allocation event requires match_id or matched ticket_id")
+		}
+	case "battle.ticket":
+		if event.BattleTicket == nil {
+			return newError(codeInvalidRequest, "battle ticket event requires match_id or matched ticket_id")
+		}
+	case "settlement":
+		if event.Settlement == nil {
+			return newError(codeInvalidRequest, "settlement event requires settled match_id or matched ticket_id")
+		}
+	default:
+		return newError(codeInvalidRequest, "business event kind %q is not supported", kind)
+	}
+	return nil
 }
 
 func contractClientOperations() []string {
