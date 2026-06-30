@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS battle_result_audits (
     key_id TEXT NOT NULL,
     player_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     settlement_key TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('accepted', 'duplicate')) DEFAULT 'accepted',
+    status TEXT NOT NULL CHECK (status IN ('accepted', 'duplicate', 'rejected')) DEFAULT 'accepted',
+    reject_reason TEXT,
     verified_at TIMESTAMPTZ NOT NULL,
     settled_at TIMESTAMPTZ NOT NULL,
     server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
@@ -145,6 +146,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_battle_result_audit_accepted
 CREATE UNIQUE INDEX IF NOT EXISTS ux_battle_result_audit_duplicate
     ON battle_result_audits (match_id, result_hash, status)
     WHERE status = 'duplicate';
+
+CREATE INDEX IF NOT EXISTS ix_battle_result_audit_rejected
+    ON battle_result_audits (battle_server_id, verified_at DESC)
+    WHERE status = 'rejected';
 
 CREATE INDEX IF NOT EXISTS ix_battle_result_audit_server_time
     ON battle_result_audits (battle_server_id, settled_at DESC);

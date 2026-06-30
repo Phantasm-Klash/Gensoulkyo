@@ -2038,10 +2038,10 @@ func nakamaSQLHasDuplicateLobbyMessageAudit() bool {
 
 func nakamaSQLHasDuplicateBattleResultAudit() bool {
 	for _, call := range nakamaSQLCaptureCalls() {
-		if !strings.Contains(call.query, "INSERT INTO battle_result_audits") || len(call.args) < 12 {
+		if !strings.Contains(call.query, "INSERT INTO battle_result_audits") || len(call.args) < 13 {
 			continue
 		}
-		if strings.HasPrefix(fmt.Sprint(call.args[0]), "match_") && call.args[3] == "sha256:abcd1234" && call.args[8] == "duplicate" && call.args[11] == true {
+		if strings.HasPrefix(fmt.Sprint(call.args[0]), "match_") && call.args[3] == "sha256:abcd1234" && call.args[8] == "duplicate" && call.args[9] == "" && call.args[12] == true {
 			return true
 		}
 	}
