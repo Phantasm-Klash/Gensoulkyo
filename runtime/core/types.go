@@ -826,6 +826,7 @@ type BusinessEventRequest struct {
 
 type BusinessEvent struct {
 	OK                             bool                    `json:"ok"`
+	Version                        VersionStamp            `json:"version"`
 	Kind                           string                  `json:"kind"`
 	Topic                          string                  `json:"topic"`
 	UserID                         string                  `json:"user_id"`

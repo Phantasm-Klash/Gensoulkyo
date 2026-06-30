@@ -575,6 +575,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if eventPayload.Topic != "nakama_wss.business.matchmaking" || eventPayload.MatchID != found.MatchID || eventPayload.QueueStatus != "found" || eventPayload.BattleAllocation == nil || eventPayload.BattleTicket == nil {
 		t.Fatalf("business event should include low-frequency matchmaking allocation/ticket state: %+v", eventPayload)
 	}
+	if eventPayload.Version.ProtocolVersion != core.ProtocolVersion || eventPayload.Version.RulesetVersion != core.RulesetVersion || eventPayload.Version.BusinessAPIVersion != core.BusinessAPIVersion || eventPayload.Version.BattleAPIVersion != core.BattleAPIVersion {
+		t.Fatalf("business event should include shared protocol version stamp: %+v", eventPayload.Version)
+	}
 	if eventPayload.HighFrequencyBattleTickAllowed || eventPayload.ClientResultSubmitAllowed || stringSliceContains(eventPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("business event must not authorize high-frequency tick or client result submit: %+v", eventPayload)
 	}

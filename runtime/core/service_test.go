@@ -2416,6 +2416,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !reflect.DeepEqual(event.AllowedClientOperations, rules.ClientOperations) || !reflect.DeepEqual(event.ServiceCallbacks, rules.ServiceCallbacks) {
 		t.Fatalf("room rules and business event contract drifted: rules=%+v callbacks=%+v event=%+v callbacks=%+v", rules.ClientOperations, rules.ServiceCallbacks, event.AllowedClientOperations, event.ServiceCallbacks)
 	}
+	if event.Version.ProtocolVersion != ProtocolVersion || event.Version.RulesetVersion != RulesetVersion || event.Version.BusinessAPIVersion != BusinessAPIVersion || event.Version.BattleAPIVersion != BattleAPIVersion {
+		t.Fatalf("room business event must expose protocol version stamp: %+v", event.Version)
+	}
 	if event.HighFrequencyBattleTickAllowed || event.ClientResultSubmitAllowed || stringSliceContains(event.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("room business event must not authorize battle tick or client result submit: %+v", event)
 	}

@@ -206,6 +206,9 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if settlementEvent.Topic != "nakama_wss.business.settlement" || settlementEvent.Settlement == nil || settlementEvent.Settlement.ReplayID != settlement.ReplayID || settlementEvent.ClientResultSubmitAllowed || settlementEvent.HighFrequencyBattleTickAllowed {
 		t.Fatalf("settlement business event invalid: %+v", settlementEvent)
 	}
+	if settlementEvent.Version.ProtocolVersion != core.ProtocolVersion || settlementEvent.Version.RulesetVersion != core.RulesetVersion || settlementEvent.Version.BusinessAPIVersion != core.BusinessAPIVersion || settlementEvent.Version.BattleAPIVersion != core.BattleAPIVersion {
+		t.Fatalf("settlement business event missing version stamp: %+v", settlementEvent.Version)
+	}
 	forbiddenSettlementEvent := postRaw(t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
 		"kind":        "settlement",
 		"match_id":    queueBob.MatchID,

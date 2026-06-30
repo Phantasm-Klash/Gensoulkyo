@@ -2396,6 +2396,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 	now := s.clock()
 	event := &BusinessEvent{
 		OK:                             true,
+		Version:                        currentVersionStamp(),
 		Kind:                           kind,
 		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 		UserID:                         user.UserID,
