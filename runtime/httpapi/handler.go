@@ -803,6 +803,9 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 	if len(segments) == 0 || segments[0] != "v1" {
 		return false
 	}
+	if isServiceCallbackRoute(method, segments) {
+		return false
+	}
 	if len(segments) == 3 && segments[1] == "auth" && segments[2] == "anonymous" && method == http.MethodPost {
 		return false
 	}
@@ -813,6 +816,22 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 		return false
 	}
 	return true
+}
+
+func isServiceCallbackRoute(method string, segments []string) bool {
+	if method != http.MethodPost || len(segments) < 4 || segments[0] != "v1" {
+		return false
+	}
+	if len(segments) == 4 && segments[1] == "battle" && segments[2] == "servers" {
+		return segments[3] == "register" || segments[3] == "heartbeat" || segments[3] == "offline"
+	}
+	if len(segments) == 4 && segments[1] == "battle" && segments[2] == "tickets" && segments[3] == "consume" {
+		return true
+	}
+	if len(segments) == 4 && segments[1] == "battle" && segments[2] == "results" && segments[3] == "submit" {
+		return true
+	}
+	return false
 }
 
 func rejectPlayerContextForServiceRoute(w http.ResponseWriter, r *http.Request) bool {

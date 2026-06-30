@@ -522,6 +522,31 @@ func TestHTTPServiceCallbacksRejectBusinessEnvelopePayloadShape(t *testing.T) {
 	}
 }
 
+func TestHTTPServiceCallbacksBypassPlayerEnvelopeHeaderGuard(t *testing.T) {
+	service := core.NewService(core.Config{})
+	guard := security.NewBusinessEnvelopeGuard()
+	server := httptest.NewServer(NewWithOptions(service, WithBusinessEnvelopeGuard(guard)))
+	defer server.Close()
+
+	player := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "http-service-envelope-player", "display_name": "HTTP Service Envelope Player"})
+	routes := []string{
+		"/v1/battle/servers/register",
+		"/v1/battle/servers/heartbeat",
+		"/v1/battle/servers/offline",
+		"/v1/battle/tickets/consume",
+		"/v1/battle/results/submit",
+	}
+	for index, route := range routes {
+		response := postRawWithHeaders(t, server.URL+route, player.SessionToken, map[string]any{}, businessEnvelopeHeaders(int64(index+1), time.Now(), "http-service-header-"+itoa(index), "service_callback"))
+		if response.Code != http.StatusForbidden || response.ErrorCode != "service_origin_required" || !strings.Contains(response.Message, "player session context") {
+			t.Fatalf("service callback %s should reject player context without player envelope guard, got %+v", route, response)
+		}
+	}
+	if snapshot := guard.Snapshot(); snapshot.Accepted != 0 || snapshot.Rejected != 0 || len(snapshot.Audits) != 0 {
+		t.Fatalf("service callback HTTP routes must not consume player business envelope guard state: %+v", snapshot)
+	}
+}
+
 func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	driverName := registerHTTPAuditCaptureDriver(t)
 	db, err := sql.Open(driverName, "")
