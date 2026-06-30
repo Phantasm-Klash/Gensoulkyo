@@ -843,6 +843,9 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
 	}
+	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
+		return nil, err
+	}
 	deck, err := s.resolveDeckForMatchLocked(user, req.ActiveDeckID, req.DeckSnapshot)
 	if err != nil {
 		return nil, err
@@ -894,6 +897,9 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	mode, ok := ModeConfigs[modeID]
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
+	}
+	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
+		return nil, err
 	}
 	deck, err := s.resolveDeckForMatchLocked(user, req.ActiveDeckID, req.DeckSnapshot)
 	if err != nil {
@@ -985,6 +991,9 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 	modeID := strings.TrimSpace(req.ModeID)
 	if modeID != "" && modeID != room.ModeID {
 		return nil, newError(codeInvalidMode, "room mode is %q, got %q", room.ModeID, modeID)
+	}
+	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
+		return nil, err
 	}
 	if len(room.TicketIDs) >= mode.MaxPlayers {
 		return nil, newError(codeRoomUnavailable, "room is full")
@@ -3575,6 +3584,22 @@ func validateLoadout(modeID string, modeParams map[string]any, profile Certifica
 		RulesetVersion:      RulesetVersion,
 		ServerAuthoritative: true,
 	}, nil
+}
+
+func validateClientMatchVersion(version VersionStamp) error {
+	if version.ProtocolVersion != 0 && version.ProtocolVersion != ProtocolVersion {
+		return newError(codeInvalidMode, "protocol version mismatch")
+	}
+	if trimmed := strings.TrimSpace(version.BusinessAPIVersion); trimmed != "" && trimmed != BusinessAPIVersion {
+		return newError(codeInvalidMode, "business api version mismatch")
+	}
+	if trimmed := strings.TrimSpace(version.BattleAPIVersion); trimmed != "" && trimmed != BattleAPIVersion {
+		return newError(codeInvalidMode, "battle api version mismatch")
+	}
+	if trimmed := strings.TrimSpace(version.RulesetVersion); trimmed != "" && trimmed != RulesetVersion {
+		return newError(codeInvalidMode, "ruleset version mismatch")
+	}
+	return nil
 }
 
 func hasLoadoutStageParam(modeParams map[string]any) bool {

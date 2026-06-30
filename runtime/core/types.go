@@ -652,24 +652,27 @@ type ChestOpenResponse struct {
 }
 
 type JoinQueueRequest struct {
-	ModeID       string         `json:"mode_id"`
-	ActiveDeckID string         `json:"active_deck_id"`
-	DeckSnapshot DeckSnapshot   `json:"deck_snapshot"`
-	ModeParams   map[string]any `json:"mode_params"`
+	ModeID        string         `json:"mode_id"`
+	ActiveDeckID  string         `json:"active_deck_id"`
+	DeckSnapshot  DeckSnapshot   `json:"deck_snapshot"`
+	ModeParams    map[string]any `json:"mode_params"`
+	ClientVersion VersionStamp   `json:"client_version"`
 }
 
 type CreateRoomRequest struct {
-	ModeID       string         `json:"mode_id"`
-	ActiveDeckID string         `json:"active_deck_id"`
-	DeckSnapshot DeckSnapshot   `json:"deck_snapshot"`
-	ModeParams   map[string]any `json:"mode_params"`
+	ModeID        string         `json:"mode_id"`
+	ActiveDeckID  string         `json:"active_deck_id"`
+	DeckSnapshot  DeckSnapshot   `json:"deck_snapshot"`
+	ModeParams    map[string]any `json:"mode_params"`
+	ClientVersion VersionStamp   `json:"client_version"`
 }
 
 type JoinRoomRequest struct {
-	ModeID       string         `json:"mode_id"`
-	ActiveDeckID string         `json:"active_deck_id"`
-	DeckSnapshot DeckSnapshot   `json:"deck_snapshot"`
-	ModeParams   map[string]any `json:"mode_params"`
+	ModeID        string         `json:"mode_id"`
+	ActiveDeckID  string         `json:"active_deck_id"`
+	DeckSnapshot  DeckSnapshot   `json:"deck_snapshot"`
+	ModeParams    map[string]any `json:"mode_params"`
+	ClientVersion VersionStamp   `json:"client_version"`
 }
 
 type RoomParticipantSnapshot struct {

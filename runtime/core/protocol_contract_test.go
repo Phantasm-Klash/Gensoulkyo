@@ -42,6 +42,31 @@ func TestCoreDependsOnRequiredProtocolFields(t *testing.T) {
 	}
 }
 
+func TestMatchEntryRequestsExposeClientVersionContract(t *testing.T) {
+	requests := []any{
+		JoinQueueRequest{ClientVersion: currentVersionStamp()},
+		CreateRoomRequest{ClientVersion: currentVersionStamp()},
+		JoinRoomRequest{ClientVersion: currentVersionStamp()},
+	}
+	for _, request := range requests {
+		encoded, err := json.Marshal(request)
+		if err != nil {
+			t.Fatalf("marshal %T: %v", request, err)
+		}
+		var roundTrip map[string]any
+		if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+			t.Fatalf("unmarshal %T: %v", request, err)
+		}
+		version, ok := roundTrip["client_version"].(map[string]any)
+		if !ok {
+			t.Fatalf("%T must expose client_version: %s", request, encoded)
+		}
+		if version["protocol_version"] == nil || version["business_api_version"] == "" || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
+			t.Fatalf("%T client_version missing version gates: %+v", request, version)
+		}
+	}
+}
+
 func TestBattleModeActionFixtureContract(t *testing.T) {
 	action := struct {
 		Version                   int    `json:"version"`

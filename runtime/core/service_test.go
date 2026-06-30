@@ -1649,6 +1649,61 @@ func TestInventoryDeckSaveAndMatchUsesServerActiveDeck(t *testing.T) {
 	}
 }
 
+func TestMatchEntryRejectsIncompatibleClientVersions(t *testing.T) {
+	now := time.Date(2026, 6, 30, 11, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	alice := mustLogin(t, service, "Version Alice")
+	bob := mustLogin(t, service, "Version Bob")
+	cara := mustLogin(t, service, "Version Cara")
+
+	current := currentVersionStamp()
+	queued, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: current,
+	})
+	if err != nil || queued.QueueStatus != "queued" {
+		t.Fatalf("current version should enter queue: resp=%+v err=%v", queued, err)
+	}
+	if _, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{ProtocolVersion: ProtocolVersion + 1},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected protocol mismatch rejection, got %v", err)
+	}
+	if _, err := service.CreateRoom(bob.SessionToken, CreateRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{BusinessAPIVersion: "business-api-old"},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected business api mismatch rejection, got %v", err)
+	}
+
+	room, err := service.CreateRoom(bob.SessionToken, CreateRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: current,
+	})
+	if err != nil || room.RoomCode == "" {
+		t.Fatalf("current version should create room: resp=%+v err=%v", room, err)
+	}
+	if _, err := service.JoinRoom(cara.SessionToken, room.RoomCode, JoinRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{BattleAPIVersion: "battle-api-old"},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected battle api mismatch rejection, got %v", err)
+	}
+	if _, err := service.JoinRoom(cara.SessionToken, room.RoomCode, JoinRoomRequest{
+		ModeID:        "pvp_duel",
+		ActiveDeckID:  defaultDeckID,
+		ClientVersion: VersionStamp{RulesetVersion: "ruleset-old"},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected ruleset mismatch rejection, got %v", err)
+	}
+}
+
 func TestChestOpenUsesServerPoolPityInventoryAndAudit(t *testing.T) {
 	now := time.Date(2026, 6, 26, 15, 0, 0, 0, time.UTC)
 	service := NewService(Config{Clock: func() time.Time { return now }})
