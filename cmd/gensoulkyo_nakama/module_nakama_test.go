@@ -12,7 +12,7 @@ import (
 func TestServiceOriginRPCContextGate(t *testing.T) {
 	base := context.WithValue(context.Background(), runtime.RUNTIME_CTX_MODE, "rpc")
 	trustedVars := map[string]string{
-		serviceOriginVarKey:   serviceOriginBattle,
+		serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
 		serviceCallbackVarKey: "true",
 	}
 	if isServiceOriginRPC(base, "battle.result.submit") {
@@ -23,14 +23,14 @@ func TestServiceOriginRPCContextGate(t *testing.T) {
 		t.Fatalf("trusted battle callback vars should allow service-origin RPC")
 	}
 	withAnyVars := context.WithValue(base, runtime.RUNTIME_CTX_VARS, map[string]any{
-		serviceOriginVarKey:   serviceOriginBattle,
+		serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
 		serviceCallbackVarKey: "yes",
 	})
 	if !isServiceOriginRPC(withAnyVars, "battle.ticket.consume") {
 		t.Fatalf("trusted battle callback vars from map[string]any should allow service-origin RPC")
 	}
 	withNumericCallback := context.WithValue(base, runtime.RUNTIME_CTX_VARS, map[string]string{
-		serviceOriginVarKey:   serviceOriginBattle,
+		serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
 		serviceCallbackVarKey: "1",
 	})
 	if !isServiceOriginRPC(withNumericCallback, "battle.servers.heartbeat") {
@@ -38,8 +38,8 @@ func TestServiceOriginRPCContextGate(t *testing.T) {
 	}
 	for name, vars := range map[string]map[string]string{
 		"wrong origin":     {serviceOriginVarKey: "player", serviceCallbackVarKey: "true"},
-		"missing callback": {serviceOriginVarKey: serviceOriginBattle},
-		"false callback":   {serviceOriginVarKey: serviceOriginBattle, serviceCallbackVarKey: "false"},
+		"missing callback": {serviceOriginVarKey: serviceCallbackContextValue(serviceOriginVarKey)},
+		"false callback":   {serviceOriginVarKey: serviceCallbackContextValue(serviceOriginVarKey), serviceCallbackVarKey: "false"},
 	} {
 		untrusted := context.WithValue(base, runtime.RUNTIME_CTX_VARS, vars)
 		if isServiceOriginRPC(untrusted, "battle.result.submit") {
