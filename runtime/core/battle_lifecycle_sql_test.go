@@ -98,6 +98,8 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 		Endpoint:            "127.0.0.1:7901",
 		Region:              "local",
 		ProtocolVersion:     "1",
+		BusinessAPIVersion:  BusinessAPIVersion,
+		BattleAPIVersion:    BattleAPIVersion,
 		RulesetVersion:      RulesetVersion,
 		ModeConfigHash:      "sha256:mode",
 		ServerSeedHash:      "sha256:seed",
@@ -119,6 +121,8 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 		KeyID:               "dev-ed25519-0",
 		RulesetVersion:      RulesetVersion,
 		ProtocolVersion:     "1",
+		BusinessAPIVersion:  BusinessAPIVersion,
+		BattleAPIVersion:    BattleAPIVersion,
 		DeckSnapshotHash:    "sha256:deck",
 		ModeConfigHash:      "sha256:mode",
 		Nonce:               "nonce-a",
@@ -140,6 +144,8 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 		KeyID:               "dev-ed25519-0",
 		RulesetVersion:      RulesetVersion,
 		ProtocolVersion:     "1",
+		BusinessAPIVersion:  BusinessAPIVersion,
+		BattleAPIVersion:    BattleAPIVersion,
 		DeckSnapshotHash:    "sha256:deck",
 		ModeConfigHash:      "sha256:mode",
 		Nonce:               "nonce-a",
@@ -189,22 +195,22 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	if len(calls) != 5 {
 		t.Fatalf("expected five inserts, got %+v", calls)
 	}
-	if !strings.Contains(calls[0].query, "INSERT INTO match_allocation_audits") || len(calls[0].args) != 14 {
+	if !strings.Contains(calls[0].query, "INSERT INTO match_allocation_audits") || len(calls[0].args) != 16 {
 		t.Fatalf("allocation insert invalid: %+v", calls[0])
 	}
-	if calls[0].args[0] != "match-a" || calls[0].args[2] != "battle-a" || calls[0].args[10] != `{"match_id":"match-a"}` || calls[0].args[12] != true || calls[0].args[13] != now {
+	if calls[0].args[0] != "match-a" || calls[0].args[2] != "battle-a" || calls[0].args[6] != BusinessAPIVersion || calls[0].args[7] != BattleAPIVersion || calls[0].args[12] != `{"match_id":"match-a"}` || calls[0].args[14] != true || calls[0].args[15] != now {
 		t.Fatalf("allocation args invalid: %+v", calls[0].args)
 	}
-	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 18 {
+	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 20 {
 		t.Fatalf("ticket insert invalid: %+v", calls[1])
 	}
-	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[14] != "0123456789abcdef" || calls[1].args[16] != true || calls[1].args[17] != nil {
+	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[11] != BusinessAPIVersion || calls[1].args[12] != BattleAPIVersion || calls[1].args[16] != "0123456789abcdef" || calls[1].args[18] != true || calls[1].args[19] != nil {
 		t.Fatalf("ticket args invalid: %+v", calls[1].args)
 	}
-	if !strings.Contains(calls[2].query, "INSERT INTO battle_ticket_audits") || len(calls[2].args) != 18 {
+	if !strings.Contains(calls[2].query, "INSERT INTO battle_ticket_audits") || len(calls[2].args) != 20 {
 		t.Fatalf("expired ticket upsert invalid: %+v", calls[2])
 	}
-	if calls[2].args[0] != "ticket-a" || calls[2].args[15] != "expired" || calls[2].args[17] != now.Add(2*time.Minute) {
+	if calls[2].args[0] != "ticket-a" || calls[2].args[17] != "expired" || calls[2].args[19] != now.Add(2*time.Minute) {
 		t.Fatalf("expired ticket args invalid: %+v", calls[2].args)
 	}
 	if !strings.Contains(calls[3].query, "INSERT INTO battle_result_audits") || len(calls[3].args) != 13 {

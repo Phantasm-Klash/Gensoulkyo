@@ -178,6 +178,8 @@ type BattleAllocationAuditRecord struct {
 	Endpoint            string    `json:"endpoint"`
 	Region              string    `json:"region"`
 	ProtocolVersion     string    `json:"protocol_version"`
+	BusinessAPIVersion  string    `json:"business_api_version"`
+	BattleAPIVersion    string    `json:"battle_api_version"`
 	RulesetVersion      string    `json:"ruleset_version"`
 	ModeConfigHash      string    `json:"mode_config_hash"`
 	ServerSeedHash      string    `json:"server_seed_hash"`
@@ -198,6 +200,8 @@ type BattleTicketAuditRecord struct {
 	KeyID               string    `json:"key_id"`
 	RulesetVersion      string    `json:"ruleset_version"`
 	ProtocolVersion     string    `json:"protocol_version"`
+	BusinessAPIVersion  string    `json:"business_api_version"`
+	BattleAPIVersion    string    `json:"battle_api_version"`
 	DeckSnapshotHash    string    `json:"deck_snapshot_hash"`
 	ModeConfigHash      string    `json:"mode_config_hash"`
 	Nonce               string    `json:"nonce"`
