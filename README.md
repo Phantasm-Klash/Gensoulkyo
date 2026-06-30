@@ -72,6 +72,7 @@ Useful endpoints:
 
 - `GET /health`
 - `GET /v1/security/business-envelope`
+- `GET /v1/security/service-callback`
 - `GET /v1/security/battle-audit`
 - `GET /v1/security/lobby-audit`
 - `POST /v1/auth/anonymous`
@@ -120,6 +121,8 @@ The HTTP fallback battle-server callback routes (`/v1/battle/servers/{register,h
 development contracts. They require `X-PhK-Service-Origin: battle_server` plus
 `X-PhK-Battle-Callback: true`/`1`/`yes`, reject player session context and
 business-envelope-shaped payloads, and do not consume the player HTTP business-envelope replay guard.
+`GET /v1/security/service-callback` exposes the same non-secret callback operation and
+context contract used by room rules, Nakama RPC gating, and the HTTP fallback header gate.
 Use Nakama service-origin RPC gating plus mTLS/private networking for production callbacks.
 
 ## Boundary

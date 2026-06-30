@@ -430,6 +430,37 @@ func TestHTTPBusinessEnvelopeFallbackGuard(t *testing.T) {
 	}
 }
 
+func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	status := getJSON[map[string]any](t, server.URL+"/v1/security/service-callback", "")
+	statusBody, ok := status["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("service callback status missing body: %+v", status)
+	}
+	callbacks, ok := statusBody["service_callbacks"].([]any)
+	if !ok || !anySliceContainsString(callbacks, "battle.result.submit") || !anySliceContainsString(callbacks, "battle.ticket.consume") {
+		t.Fatalf("service callback status missing callback operations: %+v", statusBody)
+	}
+	context, ok := statusBody["service_callback_context"].(map[string]any)
+	if !ok || context[serviceOriginContextKey] != core.ServiceCallbackContext()[serviceOriginContextKey] || context[serviceCallbackContextKey] != core.ServiceCallbackContext()[serviceCallbackContextKey] {
+		t.Fatalf("service callback status drifted from core context: %+v", statusBody)
+	}
+	headers, ok := statusBody["http_headers"].(map[string]any)
+	if !ok || headers["service_origin"] != headerServiceOrigin || headers["battle_callback"] != headerBattleCallback {
+		t.Fatalf("service callback status missing HTTP header contract: %+v", statusBody)
+	}
+	values, ok := statusBody["accepted_callback_values"].([]any)
+	if !ok || !anySliceContainsString(values, core.ServiceCallbackContext()[serviceCallbackContextKey]) || !anySliceContainsString(values, "1") || !anySliceContainsString(values, "yes") {
+		t.Fatalf("service callback status missing accepted values: %+v", statusBody)
+	}
+	if statusBody["player_session_context_allowed"] != false || statusBody["business_envelope_allowed"] != false {
+		t.Fatalf("service callback status must keep callbacks out of player/envelope paths: %+v", statusBody)
+	}
+}
+
 func TestHTTPServiceCallbacksRejectPlayerSessionContext(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := httptest.NewServer(New(service))
@@ -1332,6 +1363,15 @@ func serviceCallbackHeaders() map[string]string {
 func hasEventType(events []core.MatchEvent, eventType string) bool {
 	for _, event := range events {
 		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func anySliceContainsString(values []any, target string) bool {
+	for _, value := range values {
+		if text, ok := value.(string); ok && text == target {
 			return true
 		}
 	}
