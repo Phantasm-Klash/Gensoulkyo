@@ -153,6 +153,12 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(request.SessionID, req) })
+	case "business.event":
+		var req core.BusinessEventRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BusinessEvent(request.SessionID, req) })
 	case "matchmaking.join":
 		var req core.JoinQueueRequest
 		if err := decodeBody(body, &req); err != nil {
@@ -281,6 +287,12 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.Heartbeat(message.SessionID, req) })
+	case "business.event":
+		var req core.BusinessEventRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.BusinessEvent(message.SessionID, req) })
 	case "matchmaking.join":
 		var req core.JoinQueueRequest
 		if err := decodeBody(body, &req); err != nil {

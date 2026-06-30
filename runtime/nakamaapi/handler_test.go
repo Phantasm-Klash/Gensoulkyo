@@ -274,6 +274,9 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "battle.ticket") || !stringSliceContains(rulesPayload.ClientOperations, "matchmaking.cancel") || stringSliceContains(rulesPayload.ClientOperations, "battle.result.submit") {
 		t.Fatalf("room rules should expose client RPC/WSS operations without result submit: %+v", rulesPayload)
 	}
+	if !stringSliceContains(rulesPayload.ClientOperations, "business.event") {
+		t.Fatalf("room rules should expose business event WSS/RPC contract: %+v", rulesPayload)
+	}
 	if !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should expose service-origin callback operations: %+v", rulesPayload)
 	}
@@ -494,6 +497,29 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("room ticket WSS poll should return match allocation and signed ticket: %+v", polled)
 	}
 
+	matchEvent := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(4, "nonce-external-guest-business-event", "business_event", map[string]any{
+			"kind":      "matchmaking",
+			"ticket_id": found.TicketID,
+		}),
+	})
+	if !matchEvent.OK || matchEvent.Status != 200 {
+		t.Fatalf("business event WSS read failed: %+v", matchEvent)
+	}
+	eventPayload := matchEvent.Payload.(*core.BusinessEvent)
+	if eventPayload.Topic != "nakama_wss.business.matchmaking" || eventPayload.MatchID != found.MatchID || eventPayload.QueueStatus != "found" || eventPayload.BattleAllocation == nil || eventPayload.BattleTicket == nil {
+		t.Fatalf("business event should include low-frequency matchmaking allocation/ticket state: %+v", eventPayload)
+	}
+	if eventPayload.HighFrequencyBattleTickAllowed || eventPayload.ClientResultSubmitAllowed || stringSliceContains(eventPayload.AllowedClientOperations, "battle.result.submit") {
+		t.Fatalf("business event must not authorize high-frequency tick or client result submit: %+v", eventPayload)
+	}
+	if !stringSliceContains(eventPayload.AllowedClientOperations, "business.event") || !stringSliceContains(eventPayload.ServiceCallbacks, "battle.result.submit") {
+		t.Fatalf("business event should document client operations and service callbacks: %+v", eventPayload)
+	}
+
 	hostReady := handler.HandleRPC(RPCRequest{
 		ID:        "match.ready",
 		SessionID: hostSession,
@@ -509,7 +535,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "match.ready",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(4, "nonce-external-guest-ready", "match_ready", map[string]any{
+		Payload: envelopePayload(5, "nonce-external-guest-ready", "match_ready", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
@@ -536,7 +562,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "presence.heartbeat",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(5, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
+		Payload: envelopePayload(6, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})

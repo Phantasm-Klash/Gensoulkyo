@@ -1137,6 +1137,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 			"rooms.join",
 			"rooms.leave",
 			"rooms.message",
+			"business.event",
 			"matchmaking.ticket",
 			"matchmaking.cancel",
 			"match.ready",
@@ -1476,6 +1477,30 @@ func (s *Service) ReadyMatch(sessionToken string, matchID string) (*ReadyRespons
 		MatchStart:      start,
 		BattleTicket:    ticket,
 	}, nil
+}
+
+func (s *Service) BusinessEvent(sessionToken string, req BusinessEventRequest) (*BusinessEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = "presence"
+	}
+	switch kind {
+	case "presence", "queue", "room", "matchmaking", "match.ready", "battle.allocation", "battle.ticket":
+	default:
+		return nil, newError(codeInvalidRequest, "business event kind %q is not supported", kind)
+	}
+	event, err := s.businessEventLocked(user, kind, req)
+	if err != nil {
+		return nil, err
+	}
+	return event, nil
 }
 
 func (s *Service) SubmitInput(sessionToken string, matchID string, raw map[string]any) (*InputResponse, error) {
@@ -2371,6 +2396,157 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 		ServerTime:           now,
 		ServerAuthoritative:  true,
 	}
+}
+
+func (s *Service) businessEventLocked(user *userState, kind string, req BusinessEventRequest) (*BusinessEvent, error) {
+	now := s.clock()
+	event := &BusinessEvent{
+		OK:                             true,
+		Kind:                           kind,
+		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
+		UserID:                         user.UserID,
+		AllowedClientOperations:        businessEventClientOperations(),
+		ServiceCallbacks:               serviceCallbackOperations(),
+		HighFrequencyBattleTickAllowed: false,
+		ClientResultSubmitAllowed:      false,
+		ServerTime:                     now,
+		ServerAuthoritative:            true,
+	}
+	ticket := s.businessEventTicketLocked(user.UserID, req)
+	if strings.TrimSpace(req.TicketID) != "" && ticket == nil {
+		return nil, newError(codeNotFound, "ticket not found")
+	}
+	var match *matchState
+	var player *playerState
+	if ticket != nil && ticket.MatchID != "" {
+		match = s.matches[ticket.MatchID]
+		if match != nil {
+			player = match.Players[user.UserID]
+		}
+	}
+	if match == nil && strings.TrimSpace(req.MatchID) != "" {
+		var err error
+		match, player, err = s.matchPlayerLocked(user.UserID, req.MatchID)
+		if err != nil {
+			return nil, err
+		}
+		if ticket == nil {
+			ticket = s.tickets[s.ticketIDForMatchUserLocked(match.MatchID, user.UserID)]
+		}
+	}
+	if ticket != nil {
+		mode := ModeConfigs[ticket.ModeID]
+		depth := s.ticketDepthLocked(ticket)
+		event.TicketID = ticket.TicketID
+		event.ModeID = ticket.ModeID
+		event.RoomCode = ticket.RoomCode
+		event.QueueStatus = ticket.Status
+		event.RoomStatus = ticket.RoomStatus
+		event.RequiredPlayers = mode.MinPlayers
+		event.CurrentPlayers = depth
+		if ticket.MatchID != "" {
+			event.MatchID = ticket.MatchID
+			event.CurrentPlayers = mode.MinPlayers
+		}
+		event.Queue = cloneQueueResponse(s.queueResponseLocked(ticket, mode, depth, match))
+		if ticket.RoomCode != "" {
+			if room := s.rooms[normalizeRoomCode(ticket.RoomCode)]; room != nil {
+				snapshot := s.roomSnapshotLocked(room, now)
+				event.Room = &snapshot
+			}
+		}
+	}
+	if strings.TrimSpace(req.RoomCode) != "" && event.Room == nil {
+		room, err := s.roomByCodeLocked(req.RoomCode)
+		if err != nil {
+			return nil, err
+		}
+		if !s.roomHasUserLocked(room, user.UserID) && room.MatchID == "" {
+			return nil, newError(codeUnauthorized, "user is not in room")
+		}
+		snapshot := s.roomSnapshotLocked(room, now)
+		event.Room = &snapshot
+		event.RoomCode = snapshot.RoomCode
+		event.RoomStatus = snapshot.RoomStatus
+		event.ModeID = snapshot.ModeID
+		event.MatchID = snapshot.MatchID
+		event.RequiredPlayers = snapshot.RequiredPlayers
+		event.CurrentPlayers = snapshot.CurrentPlayers
+		if ticket == nil {
+			ticket = s.roomTicketForUserLocked(snapshot.RoomCode, user.UserID)
+		}
+	}
+	if match != nil {
+		event.MatchID = match.MatchID
+		event.ModeID = match.ModeID
+		event.MatchStatus = match.Status
+		event.RequiredPlayers = len(match.PlayerIDs)
+		event.CurrentPlayers = connectedPlayerCount(match)
+		event.ReadyCount = s.readyCountLocked(match)
+		allocation := copyBattleAllocation(s.ensureBattleAllocationLocked(match))
+		event.BattleAllocation = &allocation
+		if player != nil {
+			if signed, err := s.signedBattleTicketLocked(match, user); err == nil {
+				ticketCopy := copySignedBattleTicket(signed)
+				event.BattleTicket = &ticketCopy
+			}
+			ready := &ReadyResponse{
+				OK:              true,
+				MatchID:         match.MatchID,
+				ReadyStatus:     match.Status,
+				ReadyCount:      event.ReadyCount,
+				RequiredPlayers: len(match.PlayerIDs),
+			}
+			if match.Status == "running" {
+				start := s.matchStartLocked(match)
+				ready.MatchStart = &start
+				if event.BattleTicket != nil {
+					ticketCopy := copySignedBattleTicket(event.BattleTicket)
+					ready.BattleTicket = &ticketCopy
+				}
+			}
+			event.Ready = ready
+			if ticket == nil {
+				event.TicketID = s.ticketIDForMatchUserLocked(match.MatchID, user.UserID)
+			}
+		}
+	}
+	if kind == "battle.allocation" && event.BattleAllocation == nil {
+		return nil, newError(codeInvalidRequest, "match_id or matched ticket_id is required for battle allocation event")
+	}
+	if kind == "battle.ticket" && event.BattleTicket == nil {
+		if match == nil {
+			return nil, newError(codeInvalidRequest, "match_id or matched ticket_id is required for battle ticket event")
+		}
+		signed, err := s.signedBattleTicketLocked(match, user)
+		if err != nil {
+			return nil, err
+		}
+		ticketCopy := copySignedBattleTicket(signed)
+		event.BattleTicket = &ticketCopy
+	}
+	if event.Queue == nil && event.Room == nil && event.Ready == nil && event.BattleAllocation == nil && event.BattleTicket == nil && kind != "presence" {
+		return nil, newError(codeInvalidRequest, "business event requires ticket_id, room_code, or match_id")
+	}
+	return event, nil
+}
+
+func (s *Service) businessEventTicketLocked(userID string, req BusinessEventRequest) *queueTicket {
+	if ticketID := strings.TrimSpace(req.TicketID); ticketID != "" {
+		if ticket := s.tickets[ticketID]; ticket != nil && ticket.UserID == userID {
+			return ticket
+		}
+		return nil
+	}
+	if roomCode := normalizeRoomCode(req.RoomCode); roomCode != "" {
+		return s.roomTicketForUserLocked(roomCode, userID)
+	}
+	if matchID := strings.TrimSpace(req.MatchID); matchID != "" {
+		if ticketID := s.ticketIDForMatchUserLocked(matchID, userID); ticketID != "" {
+			return s.tickets[ticketID]
+		}
+	}
+	return nil
 }
 
 func (s *Service) roomByCodeLocked(roomCode string) (*roomState, error) {
@@ -5498,6 +5674,60 @@ func copySignedBattleTicket(source *SignedBattleTicket) SignedBattleTicket {
 	}
 	out := *source
 	return out
+}
+
+func cloneQueueResponse(source *QueueResponse) *QueueResponse {
+	if source == nil {
+		return nil
+	}
+	out := *source
+	if source.MatchStart != nil {
+		matchStart := *source.MatchStart
+		matchStart.ModeState = copyAnyMap(source.MatchStart.ModeState)
+		if source.MatchStart.BattleAllocation != nil {
+			allocation := copyBattleAllocation(source.MatchStart.BattleAllocation)
+			matchStart.BattleAllocation = &allocation
+		}
+		out.MatchStart = &matchStart
+	}
+	if source.BattleAllocation != nil {
+		allocation := copyBattleAllocation(source.BattleAllocation)
+		out.BattleAllocation = &allocation
+	}
+	if source.BattleTicket != nil {
+		ticket := copySignedBattleTicket(source.BattleTicket)
+		out.BattleTicket = &ticket
+	}
+	return &out
+}
+
+func businessEventClientOperations() []string {
+	return []string{
+		"presence.heartbeat",
+		"matchmaking.ticket",
+		"matchmaking.cancel",
+		"rooms.get",
+		"rooms.rules",
+		"rooms.join",
+		"rooms.leave",
+		"rooms.message",
+		"business.event",
+		"match.ready",
+		"match.disconnect",
+		"match.reconnect",
+		"battle.allocation",
+		"battle.ticket",
+	}
+}
+
+func serviceCallbackOperations() []string {
+	return []string{
+		"battle.servers.register",
+		"battle.servers.heartbeat",
+		"battle.servers.offline",
+		"battle.ticket.consume",
+		"battle.result.submit",
+	}
 }
 
 func copyDeckRecord(source DeckRecord) DeckRecord {

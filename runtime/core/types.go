@@ -814,6 +814,41 @@ type ReadyResponse struct {
 	BattleTicket    *SignedBattleTicket `json:"battle_ticket,omitempty"`
 }
 
+type BusinessEventRequest struct {
+	Kind     string `json:"kind"`
+	TicketID string `json:"ticket_id,omitempty"`
+	RoomCode string `json:"room_code,omitempty"`
+	MatchID  string `json:"match_id,omitempty"`
+}
+
+type BusinessEvent struct {
+	OK                             bool                    `json:"ok"`
+	Kind                           string                  `json:"kind"`
+	Topic                          string                  `json:"topic"`
+	UserID                         string                  `json:"user_id"`
+	ModeID                         string                  `json:"mode_id,omitempty"`
+	RoomCode                       string                  `json:"room_code,omitempty"`
+	TicketID                       string                  `json:"ticket_id,omitempty"`
+	MatchID                        string                  `json:"match_id,omitempty"`
+	QueueStatus                    string                  `json:"queue_status,omitempty"`
+	RoomStatus                     string                  `json:"room_status,omitempty"`
+	MatchStatus                    string                  `json:"match_status,omitempty"`
+	ReadyCount                     int                     `json:"ready_count,omitempty"`
+	RequiredPlayers                int                     `json:"required_players,omitempty"`
+	CurrentPlayers                 int                     `json:"current_players,omitempty"`
+	Room                           *RoomSnapshot           `json:"room,omitempty"`
+	Queue                          *QueueResponse          `json:"queue,omitempty"`
+	Ready                          *ReadyResponse          `json:"ready,omitempty"`
+	BattleAllocation               *BattleServerAllocation `json:"battle_allocation,omitempty"`
+	BattleTicket                   *SignedBattleTicket     `json:"battle_ticket,omitempty"`
+	AllowedClientOperations        []string                `json:"allowed_client_operations"`
+	ServiceCallbacks               []string                `json:"service_callbacks"`
+	HighFrequencyBattleTickAllowed bool                    `json:"high_frequency_battle_tick_allowed"`
+	ClientResultSubmitAllowed      bool                    `json:"client_result_submit_allowed"`
+	ServerTime                     time.Time               `json:"server_time"`
+	ServerAuthoritative            bool                    `json:"server_authoritative"`
+}
+
 type MatchStartEvent struct {
 	Type               string                  `json:"type"`
 	MatchID            string                  `json:"match_id"`
