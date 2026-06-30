@@ -1706,6 +1706,34 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if first, duplicate := consumedTicket.Payload.(*core.BattleTicketConsumeResponse), duplicateConsumedTicket.Payload.(*core.BattleTicketConsumeResponse); duplicate.ConsumedAtMS != first.ConsumedAtMS || duplicate.ExpiresAtMS != first.ExpiresAtMS {
 		t.Fatalf("duplicate ticket consume should preserve original lifecycle timestamps: first=%+v duplicate=%+v", first, duplicate)
 	}
+	freshTicket := handler.HandleRPC(RPCRequest{
+		ID:        "battle.ticket",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(15, "nonce-sql-host-ticket-after-consume", "battle_ticket", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !freshTicket.OK {
+		t.Fatalf("fresh host battle ticket failed: %+v", freshTicket)
+	}
+	freshAllocation := freshTicket.Payload.(*core.SignedBattleTicket)
+	staleConsumeVersion := freshAllocation.Ticket.Version
+	staleConsumeVersion.RulesetVersion = "ruleset-stale"
+	staleConsumedTicket := handler.HandleRPC(RPCRequest{
+		ID:      "battle.ticket.consume",
+		Service: true,
+		Payload: map[string]any{
+			"version":          staleConsumeVersion,
+			"ticket_id":        freshAllocation.Ticket.TicketID,
+			"match_id":         match.MatchID,
+			"battle_server_id": freshAllocation.Ticket.BattleServerID,
+			"ticket_nonce_hex": freshAllocation.Ticket.TicketNonceHex,
+		},
+	})
+	if staleConsumedTicket.OK || staleConsumedTicket.Status != 400 || staleConsumedTicket.ErrorCode != "invalid_request" || !strings.Contains(staleConsumedTicket.Message, "ruleset version mismatch") {
+		t.Fatalf("service-origin ticket consume must reject stale version stamp: %+v", staleConsumedTicket)
+	}
 	playerIDs := []string{}
 	for _, player := range match.BattleAllocation.Players {
 		playerIDs = append(playerIDs, player.PlayerID)
@@ -1813,7 +1841,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		Name:      "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(12, "nonce-sql-host-settlement-event", "business_event_settlement", map[string]any{
+		Payload: envelopePayload(16, "nonce-sql-host-settlement-event", "business_event_settlement", map[string]any{
 			"match_id": match.MatchID,
 		}),
 	})
@@ -1837,7 +1865,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:        "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(13, "nonce-sql-host-settlement-client-authored", "business_event_settlement", map[string]any{
+		Payload: envelopePayload(17, "nonce-sql-host-settlement-client-authored", "business_event_settlement", map[string]any{
 			"match_id":    match.MatchID,
 			"result_hash": "client-authored",
 		}),
@@ -1849,7 +1877,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:        "battle.audit.status",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload:   envelopePayload(14, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(18, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
 	})
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
