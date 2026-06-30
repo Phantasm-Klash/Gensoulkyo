@@ -817,6 +817,7 @@ func TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState(t *testing.
 		"battle.servers.register",
 		"battle.servers.heartbeat",
 		"battle.servers.offline",
+		"battle.ticket.consume",
 		"battle.result.submit",
 	}
 	for index, name := range callbacks {

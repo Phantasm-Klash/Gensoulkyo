@@ -212,3 +212,9 @@ Status date: 2026-06-28
 - Hardened battle server `register` and `heartbeat` lifecycle callbacks so service-origin payload status is canonicalized to `online`; `offline` remains available only through the explicit `battle.servers.offline` callback.
 - Extended core and SDK-neutral Nakama regressions so malformed `offline`/`draining` register-heartbeat payloads cannot leak into discovery status or PostgreSQL-compatible lifecycle audit metadata.
 - Verified `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
+
+## 2026-06-30 gensoulkyo-lobby WSS ticket-consume guard update
+
+- Extended the SDK-neutral Nakama WSS callback regression so `battle.ticket.consume` is covered with the other service-origin-only callback names.
+- This pins the intended boundary after ticket-consume wiring: clients may read battle tickets through business RPC/WSS, but ticket acceptance callbacks remain RPC service-origin-only and WSS attempts are rejected before envelope replay state is consumed.
+- Verified `go test ./runtime/nakamaapi -run TestNakamaWSSRejectsServiceOriginOnlyCallbacksBeforeReplayState -count=1`, `go test ./...`, `docker-compose --profile test run --rm test`, `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`, and `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`.
