@@ -779,6 +779,24 @@ func TestBattleResultSubmitVerifiesAllocationAndSettlesMatch(t *testing.T) {
 		t.Fatalf("expected mode projection authority-field rejection, got %v", err)
 	}
 
+	missingBusinessVersion := signedBattleResultForAllocation(allocation)
+	missingBusinessVersion.Result.Version.BusinessAPIVersion = ""
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: missingBusinessVersion}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected missing result business api version rejection, got %v", err)
+	}
+
+	staleBusinessVersion := signedBattleResultForAllocation(allocation)
+	staleBusinessVersion.Result.Version.BusinessAPIVersion = "0.0.0-stale"
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: staleBusinessVersion}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale result business api version rejection, got %v", err)
+	}
+
+	staleRulesetVersion := signedBattleResultForAllocation(allocation)
+	staleRulesetVersion.Result.Version.RulesetVersion = "ruleset-stale"
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: staleRulesetVersion}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected stale result ruleset version rejection, got %v", err)
+	}
+
 	signed := signedBattleResultForAllocation(allocation)
 	resp, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
 	if err != nil {

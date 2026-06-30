@@ -92,6 +92,33 @@ func TestBattleTicketConsumeRequestExposesServiceVersionContract(t *testing.T) {
 	}
 }
 
+func TestBattleResultExposesFullServiceVersionContract(t *testing.T) {
+	result := BattleResult{
+		Version:     currentVersionStamp(),
+		MatchID:     "match-contract",
+		ModeID:      "pvp_duel",
+		ResultHash:  "sha256:abc123",
+		ReplayID:    "replay-contract",
+		PlayerIDs:   []string{"p1", "p2"},
+		SettledAtMS: 1782800000000,
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal battle result: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal battle result: %v", err)
+	}
+	version, ok := roundTrip["version"].(map[string]any)
+	if !ok {
+		t.Fatalf("battle result must expose version stamp: %s", encoded)
+	}
+	if version["protocol_version"] == nil || version["business_api_version"] == "" || version["battle_api_version"] == "" || version["ruleset_version"] == "" {
+		t.Fatalf("battle result version missing service gates: %+v", version)
+	}
+}
+
 func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testing.T) {
 	clientOps := ContractClientOperations()
 	serviceCallbacks := ServiceCallbackOperations()

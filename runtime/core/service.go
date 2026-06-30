@@ -2112,8 +2112,8 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	if result.ModeID != match.ModeID {
 		return nil, newError(codeInvalidMode, "battle result mode is %q, match mode is %q", result.ModeID, match.ModeID)
 	}
-	if result.Version.ProtocolVersion != ProtocolVersion || result.Version.RulesetVersion != match.RulesetVersion {
-		return nil, newError(codeInvalidRequest, "battle result version mismatch")
+	if err := validateBattleResultVersion(result.Version, match); err != nil {
+		return nil, err
 	}
 	allocation := s.ensureBattleAllocationLocked(match)
 	if allocation == nil {
@@ -3643,6 +3643,38 @@ func validateBattleTicketConsumeVersion(version VersionStamp, ticket BattleTicke
 	}
 	if version.RulesetVersion != ticket.RulesetVersion {
 		return newError(codeInvalidRequest, "battle ticket consume ruleset version mismatch")
+	}
+	return nil
+}
+
+func validateBattleResultVersion(version VersionStamp, match *matchState) error {
+	if version.ProtocolVersion == 0 {
+		return newError(codeInvalidRequest, "battle result version.protocol_version is required")
+	}
+	if version.ProtocolVersion != ProtocolVersion {
+		return newError(codeInvalidRequest, "battle result protocol version mismatch")
+	}
+	if strings.TrimSpace(version.BusinessAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle result version.business_api_version is required")
+	}
+	if version.BusinessAPIVersion != BusinessAPIVersion {
+		return newError(codeInvalidRequest, "battle result business api version mismatch")
+	}
+	if strings.TrimSpace(version.BattleAPIVersion) == "" {
+		return newError(codeInvalidRequest, "battle result version.battle_api_version is required")
+	}
+	if version.BattleAPIVersion != BattleAPIVersion {
+		return newError(codeInvalidRequest, "battle result battle api version mismatch")
+	}
+	expectedRuleset := RulesetVersion
+	if match != nil && match.RulesetVersion != "" {
+		expectedRuleset = match.RulesetVersion
+	}
+	if strings.TrimSpace(version.RulesetVersion) == "" {
+		return newError(codeInvalidRequest, "battle result version.ruleset_version is required")
+	}
+	if version.RulesetVersion != expectedRuleset {
+		return newError(codeInvalidRequest, "battle result ruleset version mismatch")
 	}
 	return nil
 }
