@@ -370,6 +370,19 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if topic.ClientEventRequestOperation != expectedRequestOp || !topic.ServerPush {
 			t.Fatalf("business notification topic must remain low-frequency business WSS/event contract: %+v", topic)
 		}
+		if !topic.ServerAuthoritativeProjection {
+			t.Fatalf("business notification topic must be a server-authoritative projection: %+v", topic)
+		}
+		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
+			if !stringSliceContains(topic.ClientRequestFields, requestField) {
+				t.Fatalf("business notification topic missing allowed read request field %q: %+v", requestField, topic)
+			}
+		}
+		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
+			if !stringSliceContains(topic.ForbiddenClientRequestFields, forbiddenField) {
+				t.Fatalf("business notification topic missing forbidden client request field %q: %+v", forbiddenField, topic)
+			}
+		}
 		if topic.ServiceCallback || topic.HighFrequencyBattleTickAllowed || topic.ClientResultSubmitAllowed {
 			t.Fatalf("business notification topic must not authorize service callbacks, tick, or client result submit: %+v", topic)
 		}

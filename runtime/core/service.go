@@ -6048,6 +6048,9 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 			Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 			Transport:                      "nakama_wss",
 			ClientEventRequestOperation:    businessNotificationRequestOperation(kind),
+			ClientRequestFields:            businessNotificationClientRequestFields(kind),
+			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
+			ServerAuthoritativeProjection:  true,
 			ServerPush:                     true,
 			ServiceCallback:                false,
 			HighFrequencyBattleTickAllowed: false,
@@ -6062,6 +6065,10 @@ func businessNotificationRequestOperation(kind string) string {
 		return "business.event.settlement"
 	}
 	return "business.event"
+}
+
+func businessNotificationClientRequestFields(kind string) []string {
+	return []string{"kind", "ticket_id", "room_code", "match_id"}
 }
 
 func ContractBusinessNotificationTopics() []BusinessNotificationTopic {

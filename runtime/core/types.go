@@ -763,14 +763,17 @@ type RoomListResponse struct {
 }
 
 type BusinessNotificationTopic struct {
-	Kind                           string `json:"kind"`
-	Topic                          string `json:"topic"`
-	Transport                      string `json:"transport"`
-	ClientEventRequestOperation    string `json:"client_event_request_operation"`
-	ServerPush                     bool   `json:"server_push"`
-	ServiceCallback                bool   `json:"service_callback"`
-	HighFrequencyBattleTickAllowed bool   `json:"high_frequency_battle_tick_allowed"`
-	ClientResultSubmitAllowed      bool   `json:"client_result_submit_allowed"`
+	Kind                           string   `json:"kind"`
+	Topic                          string   `json:"topic"`
+	Transport                      string   `json:"transport"`
+	ClientEventRequestOperation    string   `json:"client_event_request_operation"`
+	ClientRequestFields            []string `json:"client_request_fields"`
+	ForbiddenClientRequestFields   []string `json:"forbidden_client_request_fields"`
+	ServerAuthoritativeProjection  bool     `json:"server_authoritative_projection"`
+	ServerPush                     bool     `json:"server_push"`
+	ServiceCallback                bool     `json:"service_callback"`
+	HighFrequencyBattleTickAllowed bool     `json:"high_frequency_battle_tick_allowed"`
+	ClientResultSubmitAllowed      bool     `json:"client_result_submit_allowed"`
 }
 
 type BusinessContractSnapshot struct {
