@@ -307,6 +307,27 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	}
 }
 
+func TestHTTPBusinessEventRejectsPublishedServerProjectionFields(t *testing.T) {
+	allowedLookupFields := map[string]bool{}
+	for _, contract := range core.ContractBusinessEventRequestContracts() {
+		for _, field := range contract.ClientRequestFields {
+			allowedLookupFields[field] = true
+		}
+		for _, field := range contract.ServerProjectionFields {
+			if allowedLookupFields[field] {
+				continue
+			}
+			body := map[string]any{
+				"kind": contract.Kind,
+				field:  "client-authored",
+			}
+			if got := firstUnexpectedBusinessEventRequestField(body); got != field {
+				t.Fatalf("business event lookup should reject server projection field %q from %q, got %q", field, contract.Kind, got)
+			}
+		}
+	}
+}
+
 func TestHTTPRoomCodeFlow(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := httptest.NewServer(New(service))

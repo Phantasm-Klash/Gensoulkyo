@@ -1255,6 +1255,37 @@ func TestNakamaBusinessEventRejectsNonLookupFields(t *testing.T) {
 	}
 }
 
+func TestNakamaBusinessEventRejectsPublishedServerProjectionFields(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	allowedLookupFields := map[string]bool{}
+	seq := int64(10)
+	for _, contract := range core.ContractBusinessEventRequestContracts() {
+		for _, field := range contract.ClientRequestFields {
+			allowedLookupFields[field] = true
+		}
+		for _, field := range contract.ServerProjectionFields {
+			if allowedLookupFields[field] {
+				continue
+			}
+			response := handler.HandleWSSMessage(WSSMessage{
+				Name:      contract.ClientWSSOperation,
+				SessionID: "nakama-projection-session",
+				UserID:    "nakama-projection-user",
+				Payload: envelopePayload(seq, fmt.Sprintf("nonce-projection-%d", seq), strings.ReplaceAll(contract.ClientWSSOperation, ".", "_"), map[string]any{
+					"kind": contract.Kind,
+					field:  "client-authored",
+				}),
+			})
+			seq++
+			fieldRejected := response.Status == 400 && response.ErrorCode == CodeInvalidRequest
+			forbiddenRejected := response.Status == 403 && response.ErrorCode == "forbidden_field"
+			if response.OK || (!fieldRejected && !forbiddenRejected) || !strings.Contains(response.Message, field) {
+				t.Fatalf("business event lookup should reject server projection field %q from %q, got %+v", field, contract.Kind, response)
+			}
+		}
+	}
+}
+
 func TestNakamaBusinessEventSettlementAliasRejectsNonLookupFields(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	response := handler.HandleRPC(RPCRequest{
