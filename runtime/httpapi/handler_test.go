@@ -997,6 +997,12 @@ func TestHTTPDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testing.T) {
 	if !lobbyAuditStatus["configured"].(bool) || int(lobbyAuditStatus["room_records"].(float64)) != 3 {
 		t.Fatalf("lobby audit endpoint status invalid: %+v", lobbyAuditEndpoint)
 	}
+	allowedActions := anyStrings(lobbyAuditStatus["allowed_actions"].([]any))
+	for _, action := range []string{"created", "joined", "matched", "ready", "heartbeat", "message"} {
+		if !stringSliceContains(allowedActions, action) {
+			t.Fatalf("lobby audit endpoint must publish allowed action %q: %+v", action, allowedActions)
+		}
+	}
 }
 
 func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {

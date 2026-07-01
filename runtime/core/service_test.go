@@ -1394,6 +1394,11 @@ func TestLobbyLifecycleAuditRepositoryReceivesRoomRulesAndMessageRecords(t *test
 	if !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 7 || status.RulesReadRecords != 1 || status.MessageRecords != 3 || status.RejectedRecords != 0 {
 		t.Fatalf("lobby audit status invalid: %+v", status)
 	}
+	for _, action := range []string{"created", "joined", "matched", "left", "listed", "snapshot_read", "rules_read", "ready", "disconnected", "reconnected", "heartbeat", "message"} {
+		if !stringSliceContains(status.AllowedActions, action) {
+			t.Fatalf("lobby audit status must publish allowed action %q: %+v", action, status.AllowedActions)
+		}
+	}
 	if status.LastSuccessOperation != "left" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("lobby audit status should expose a non-secret last-success fingerprint: %+v", status)
 	}

@@ -645,6 +645,7 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	assertProjectionFields(t, contractsByOperation["lobby.audit.status"].ServerProjectionFields, []string{
 		"ok",
 		"configured",
+		"allowed_actions",
 		"room_records",
 		"room_read_records",
 		"rules_read_records",

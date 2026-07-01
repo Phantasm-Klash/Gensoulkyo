@@ -471,6 +471,7 @@ func (s *Service) LobbyLifecycleAuditStatus() LobbyLifecycleAuditStatus {
 	status := s.lobbyAuditStatus
 	status.Configured = s.lobbyAuditRepo != nil
 	status.OK = status.Configured && status.LastError == ""
+	status.AllowedActions = append([]string{}, lobbyLifecycleAuditActions()...)
 	status.ServerAuthoritative = true
 	return status
 }
@@ -5536,6 +5537,28 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint st
 	}
 }
 
+func lobbyLifecycleAuditActions() []string {
+	return []string{
+		"created",
+		"joined",
+		"matched",
+		"left",
+		"cancelled",
+		"listed",
+		"snapshot_read",
+		"rules_read",
+		"ticket_read",
+		"settlement_read",
+		"create_retry",
+		"join_retry",
+		"ready",
+		"disconnected",
+		"reconnected",
+		"heartbeat",
+		"message",
+	}
+}
+
 func (s *Service) recordBattleResultAuditLocked(match *matchState, allocation *BattleServerAllocation, signed SignedBattleResult, verifiedAt time.Time) {
 	if s.battleAuditRepo == nil || match == nil {
 		return
@@ -6906,6 +6929,7 @@ func clientOperationProjectionFields(operation string) []string {
 		return append(common,
 			"ok",
 			"configured",
+			"allowed_actions",
 			"room_records",
 			"room_read_records",
 			"rules_read_records",
