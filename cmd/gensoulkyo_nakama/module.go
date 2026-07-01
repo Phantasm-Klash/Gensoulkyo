@@ -43,6 +43,7 @@ var rpcIDs = []string{
 	"match.ready",
 	"match.disconnect",
 	"match.reconnect",
+	"match.rematch",
 	"activity.claim",
 	"battle.servers.register",
 	"battle.servers.heartbeat",

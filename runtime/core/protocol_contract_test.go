@@ -351,6 +351,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	if !stringSliceContains(clientOps, "business.event.settlement") || !stringSliceContains(clientRPCOps, "business.event.settlement") || !stringSliceContains(clientWSSOps, "business.event.settlement") {
 		t.Fatalf("client RPC/WSS operation contracts should expose settlement event alias: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
 	}
+	if !stringSliceContains(clientOps, "match.rematch") || !stringSliceContains(clientRPCOps, "match.rematch") || !stringSliceContains(clientWSSOps, "match.rematch") {
+		t.Fatalf("client RPC/WSS operation contracts should expose post-settlement rematch intent: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
+	}
 	if !stringSliceContains(clientRPCOps, "activity.claim") || stringSliceContains(clientWSSOps, "activity.claim") {
 		t.Fatalf("client RPC/WSS operation contracts should reflect handler transport support: rpc=%+v wss=%+v", clientRPCOps, clientWSSOps)
 	}
