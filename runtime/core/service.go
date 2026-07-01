@@ -1154,6 +1154,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		ClientOperations:               contract.ClientOperations,
 		ClientRPCOperations:            contract.ClientRPCOperations,
 		ClientWSSOperations:            contract.ClientWSSOperations,
+		ClientOperationContracts:       contract.ClientOperationContracts,
 		DisallowedClientOperations:     contract.DisallowedClientOperations,
 		ServiceOnlyOperations:          contract.ServiceOnlyOperations,
 		ServiceCallbacks:               contract.ServiceCallbacks,
@@ -2476,6 +2477,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		AllowedClientOperations:        businessEventClientOperations(),
 		AllowedClientRPCOperations:     businessEventClientRPCOperations(),
 		AllowedClientWSSOperations:     businessEventClientWSSOperations(),
+		ClientOperationContracts:       clientOperationContracts(),
 		DisallowedClientOperations:     ContractDisallowedClientOperations(),
 		ServiceOnlyOperations:          ServiceCallbackOperations(),
 		ServiceCallbacks:               ServiceCallbackOperations(),
@@ -6315,6 +6317,7 @@ func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 		ClientOperations:               ContractClientOperations(),
 		ClientRPCOperations:            ContractClientRPCOperations(),
 		ClientWSSOperations:            ContractClientWSSOperations(),
+		ClientOperationContracts:       clientOperationContracts(),
 		DisallowedClientOperations:     ContractDisallowedClientOperations(),
 		ServiceOnlyOperations:          ServiceCallbackOperations(),
 		ServiceCallbacks:               ServiceCallbackOperations(),
@@ -6490,6 +6493,52 @@ func contractClientWSSOperations() []string {
 
 func ContractClientWSSOperations() []string {
 	return contractClientWSSOperations()
+}
+
+func clientOperationContracts() []ClientOperationContract {
+	rpcOperations := map[string]bool{}
+	for _, operation := range ContractClientRPCOperations() {
+		rpcOperations[operation] = true
+	}
+	wssOperations := map[string]bool{}
+	for _, operation := range ContractClientWSSOperations() {
+		wssOperations[operation] = true
+	}
+	contracts := make([]ClientOperationContract, 0, len(ContractClientOperations()))
+	for _, operation := range ContractClientOperations() {
+		transports := []string{}
+		if rpcOperations[operation] {
+			transports = append(transports, "nakama_rpc")
+		}
+		if wssOperations[operation] {
+			transports = append(transports, "nakama_wss")
+		}
+		contracts = append(contracts, ClientOperationContract{
+			Operation:                      operation,
+			Transports:                     transports,
+			Authority:                      clientOperationAuthority(operation),
+			BusinessEnvelopeRequired:       operation != "auth.anonymous",
+			ServiceCallback:                false,
+			ServerAuthoritativeProjection:  true,
+			HighFrequencyBattleTickAllowed: false,
+			ClientResultSubmitAllowed:      false,
+			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
+		})
+	}
+	return contracts
+}
+
+func ContractClientOperationContracts() []ClientOperationContract {
+	return clientOperationContracts()
+}
+
+func clientOperationAuthority(operation string) string {
+	switch operation {
+	case "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
+		return clientRequestAuthorityLookupOnly
+	default:
+		return "intent_only"
+	}
 }
 
 func disallowedClientOperations() []string {

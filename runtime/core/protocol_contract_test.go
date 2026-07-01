@@ -217,6 +217,7 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	clientOps := ContractClientOperations()
 	clientRPCOps := ContractClientRPCOperations()
 	clientWSSOps := ContractClientWSSOperations()
+	clientOperationContracts := ContractClientOperationContracts()
 	disallowedClientOps := ContractDisallowedClientOperations()
 	serviceCallbacks := ServiceCallbackOperations()
 	if len(clientOps) == 0 || len(clientRPCOps) == 0 || len(clientWSSOps) == 0 || len(disallowedClientOps) == 0 || len(serviceCallbacks) == 0 {
@@ -383,6 +384,53 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	}
 	if !stringSliceContains(clientOps, "business.contract") || !stringSliceContains(clientRPCOps, "business.contract") || !stringSliceContains(clientWSSOps, "business.contract") {
 		t.Fatalf("client RPC/WSS operation contracts should expose authenticated business contract snapshot: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
+	}
+	if len(clientOperationContracts) != len(clientOps) {
+		t.Fatalf("structured client operation contracts must mirror client operation list: contracts=%+v client=%+v", clientOperationContracts, clientOps)
+	}
+	seenClientOperationContracts := map[string]bool{}
+	for _, contract := range clientOperationContracts {
+		if !stringSliceContains(clientOps, contract.Operation) {
+			t.Fatalf("structured client operation contract contains unknown operation: %+v client=%+v", contract, clientOps)
+		}
+		if seenClientOperationContracts[contract.Operation] {
+			t.Fatalf("structured client operation contract duplicated operation %q: %+v", contract.Operation, clientOperationContracts)
+		}
+		seenClientOperationContracts[contract.Operation] = true
+		if contract.ServiceCallback || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
+			t.Fatalf("structured client operation contract must not grant service/tick/result authority: %+v", contract)
+		}
+		if !contract.BusinessEnvelopeRequired || !contract.ServerAuthoritativeProjection || len(contract.ForbiddenClientRequestFields) == 0 {
+			t.Fatalf("structured client operation contract missing business guard fields: %+v", contract)
+		}
+		if stringSliceContains(disallowedClientOps, contract.Operation) || IsServiceCallbackOperation(contract.Operation) {
+			t.Fatalf("structured client operation contract must not expose disallowed/service operation: %+v", contract)
+		}
+		if contract.Authority != clientRequestAuthorityLookupOnly && contract.Authority != "intent_only" {
+			t.Fatalf("structured client operation contract has unknown authority: %+v", contract)
+		}
+		if stringSliceContains(clientRPCOps, contract.Operation) && !stringSliceContains(contract.Transports, "nakama_rpc") {
+			t.Fatalf("structured client operation contract missing RPC transport: %+v rpc=%+v", contract, clientRPCOps)
+		}
+		if !stringSliceContains(clientRPCOps, contract.Operation) && stringSliceContains(contract.Transports, "nakama_rpc") {
+			t.Fatalf("structured client operation contract exposes unsupported RPC transport: %+v rpc=%+v", contract, clientRPCOps)
+		}
+		if stringSliceContains(clientWSSOps, contract.Operation) && !stringSliceContains(contract.Transports, "nakama_wss") {
+			t.Fatalf("structured client operation contract missing WSS transport: %+v wss=%+v", contract, clientWSSOps)
+		}
+		if !stringSliceContains(clientWSSOps, contract.Operation) && stringSliceContains(contract.Transports, "nakama_wss") {
+			t.Fatalf("structured client operation contract exposes unsupported WSS transport: %+v wss=%+v", contract, clientWSSOps)
+		}
+		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
+			if !stringSliceContains(contract.ForbiddenClientRequestFields, forbiddenField) {
+				t.Fatalf("structured client operation contract missing forbidden request field %q: %+v", forbiddenField, contract)
+			}
+		}
+	}
+	for _, operation := range clientOps {
+		if !seenClientOperationContracts[operation] {
+			t.Fatalf("structured client operation contracts missing operation %q: %+v", operation, clientOperationContracts)
+		}
 	}
 	if !stringSliceContains(clientOps, "business.event.settlement") || !stringSliceContains(clientRPCOps, "business.event.settlement") || !stringSliceContains(clientWSSOps, "business.event.settlement") {
 		t.Fatalf("client RPC/WSS operation contracts should expose settlement event alias: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)
