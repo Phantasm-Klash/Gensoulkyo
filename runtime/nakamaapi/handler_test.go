@@ -1517,7 +1517,7 @@ func TestNakamaClientDispatchRejectsHighFrequencyAndSettlementAuthorityOperation
 	handler := New(core.NewService(core.Config{}))
 	sessionID := "nakama-disallowed-client-session"
 	userID := "nakama-disallowed-client-user"
-	for index, name := range []string{
+	nonServiceClientDisallowed := []string{
 		"match.input",
 		"match.snapshot",
 		"match.events",
@@ -1525,14 +1525,15 @@ func TestNakamaClientDispatchRejectsHighFrequencyAndSettlementAuthorityOperation
 		"battle.input",
 		"battle.snapshot",
 		"battle.events",
-	} {
+	}
+	for index, name := range nonServiceClientDisallowed {
 		rpc := handler.HandleRPC(RPCRequest{
 			ID:        name,
 			SessionID: sessionID,
 			UserID:    userID,
 			Payload:   envelopePayload(int64(index*2+1), "nonce-disallowed-rpc-"+name, strings.ReplaceAll(name, ".", "_"), map[string]any{"match_id": "client-match"}),
 		})
-		if rpc.OK || rpc.Status != 404 || rpc.ErrorCode != "not_found" {
+		if rpc.OK || rpc.Status != 403 || rpc.ErrorCode != CodeClientOperationDisallowed {
 			t.Fatalf("Nakama RPC %s must not expose high-frequency/result authority path, got %+v", name, rpc)
 		}
 		wss := handler.HandleWSSMessage(WSSMessage{
@@ -1541,9 +1542,28 @@ func TestNakamaClientDispatchRejectsHighFrequencyAndSettlementAuthorityOperation
 			UserID:    userID,
 			Payload:   envelopePayload(int64(index*2+2), "nonce-disallowed-wss-"+name, strings.ReplaceAll(name, ".", "_"), map[string]any{"match_id": "client-match"}),
 		})
-		if wss.OK || wss.Status != 404 || wss.ErrorCode != "not_found" {
+		if wss.OK || wss.Status != 403 || wss.ErrorCode != CodeClientOperationDisallowed {
 			t.Fatalf("Nakama WSS %s must not expose high-frequency/result authority path, got %+v", name, wss)
 		}
+	}
+	snapshot := handler.EnvelopeSnapshot()
+	expectedRejected := int64(len(nonServiceClientDisallowed) * 2)
+	if snapshot.Accepted != 0 || snapshot.Rejected != expectedRejected || snapshot.SessionCount != 0 {
+		t.Fatalf("client-disallowed operation rejections should not consume replay state: %+v", snapshot)
+	}
+	for _, audit := range snapshot.Audits {
+		if audit.Accepted || audit.UserID != userID || audit.SessionIDHint == sessionID || audit.Reason != security.ReasonVersion {
+			t.Fatalf("client-disallowed operation audit should be synthetic and sanitized: %+v", audit)
+		}
+	}
+	bootstrap := handler.HandleRPC(RPCRequest{
+		ID:        "bootstrap",
+		SessionID: sessionID,
+		UserID:    userID,
+		Payload:   envelopePayload(1, "nonce-disallowed-rpc-match.input", "bootstrap", map[string]any{}),
+	})
+	if !bootstrap.OK || bootstrap.Status != 200 {
+		t.Fatalf("client-disallowed operation rejection must not consume original envelope seq/nonce, got %+v", bootstrap)
 	}
 	for index, name := range []string{"battle.result.submit", "battle.ticket.consume", "battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline"} {
 		rpc := handler.HandleRPC(RPCRequest{
