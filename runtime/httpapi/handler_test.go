@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -464,6 +465,10 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	if !ok || !anySliceContainsString(values, core.ServiceCallbackContext()[serviceCallbackContextKey]) || !anySliceContainsString(values, "1") || !anySliceContainsString(values, "yes") {
 		t.Fatalf("service callback status missing accepted values: %+v", statusBody)
 	}
+	contractValues, ok := statusBody["service_callback_accepted_values"].([]any)
+	if !ok || !reflect.DeepEqual(values, contractValues) {
+		t.Fatalf("service callback status should expose business-contract accepted-value alias: %+v", statusBody)
+	}
 	for _, accepted := range core.ServiceCallbackAcceptedValues() {
 		if !anySliceContainsString(values, accepted) {
 			t.Fatalf("service callback status drifted from core accepted values: accepted=%+v status=%+v", core.ServiceCallbackAcceptedValues(), statusBody)
@@ -471,6 +476,9 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	}
 	if statusBody["player_session_context_allowed"] != false || statusBody["business_envelope_allowed"] != false {
 		t.Fatalf("service callback status must keep callbacks out of player/envelope paths: %+v", statusBody)
+	}
+	if statusBody["service_callback_player_session_allowed"] != false || statusBody["service_callback_business_envelope_allowed"] != false {
+		t.Fatalf("service callback status must expose business-contract callback booleans: %+v", statusBody)
 	}
 }
 
