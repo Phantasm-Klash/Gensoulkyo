@@ -6358,6 +6358,13 @@ func validateBusinessEventPayload(kind string, event *BusinessEvent) error {
 
 func contractClientOperations() []string {
 	return []string{
+		"bootstrap",
+		"inventory.get",
+		"cards.upgrade",
+		"decks.list",
+		"decks.save",
+		"chests.list",
+		"chests.open",
 		"presence.heartbeat",
 		"matchmaking.join",
 		"matchmaking.ticket",

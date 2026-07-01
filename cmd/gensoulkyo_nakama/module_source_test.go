@@ -146,6 +146,27 @@ func TestNakamaBindingRegistersEveryCoreServiceCallback(t *testing.T) {
 	}
 }
 
+func TestNakamaBindingRegistersEveryCoreClientRPCOperation(t *testing.T) {
+	source, err := os.ReadFile("module.go")
+	if err != nil {
+		t.Fatalf("read module source: %v", err)
+	}
+	registered := map[string]int{}
+	for _, id := range extractRPCIDs(t, string(source)) {
+		registered[id]++
+	}
+	for _, operation := range core.ContractClientRPCOperations() {
+		if registered[operation] != 1 {
+			t.Fatalf("Nakama RPC registry must include client RPC operation %q exactly once: registered=%+v rpc_contract=%+v", operation, registered, core.ContractClientRPCOperations())
+		}
+	}
+	for _, operation := range core.ContractClientWSSOperations() {
+		if !sliceContains(core.ContractClientRPCOperations(), operation) && registered[operation] != 0 {
+			t.Fatalf("Nakama RPC registry exposed WSS-only operation %q: registered=%+v rpc_contract=%+v", operation, registered, core.ContractClientRPCOperations())
+		}
+	}
+}
+
 func TestNakamaBindingDoesNotRegisterDisallowedClientOperations(t *testing.T) {
 	source, err := os.ReadFile("module.go")
 	if err != nil {

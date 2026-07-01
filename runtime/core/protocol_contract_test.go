@@ -365,6 +365,26 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	if !stringSliceContains(clientRPCOps, "activity.claim") || stringSliceContains(clientWSSOps, "activity.claim") {
 		t.Fatalf("client RPC/WSS operation contracts should reflect handler transport support: rpc=%+v wss=%+v", clientRPCOps, clientWSSOps)
 	}
+	for _, rpcOnly := range []string{
+		"bootstrap",
+		"inventory.get",
+		"cards.upgrade",
+		"decks.list",
+		"decks.save",
+		"chests.list",
+		"chests.open",
+		"activity.claim",
+	} {
+		if !stringSliceContains(clientOps, rpcOnly) || !stringSliceContains(clientRPCOps, rpcOnly) {
+			t.Fatalf("client operation contract should expose RPC-only business operation %q: client=%+v rpc=%+v", rpcOnly, clientOps, clientRPCOps)
+		}
+		if stringSliceContains(clientWSSOps, rpcOnly) {
+			t.Fatalf("RPC-only business operation %q must not be advertised as WSS: wss=%+v", rpcOnly, clientWSSOps)
+		}
+		if IsServiceCallbackOperation(rpcOnly) || stringSliceContains(serviceCallbacks, rpcOnly) {
+			t.Fatalf("RPC-only business operation %q must not require service callback origin: service=%+v", rpcOnly, serviceCallbacks)
+		}
+	}
 	for _, diagnostic := range []string{"business.envelope.audit.status", "battle.audit.status", "lobby.audit.status"} {
 		if !stringSliceContains(clientOps, diagnostic) || !stringSliceContains(clientRPCOps, diagnostic) || !stringSliceContains(clientWSSOps, diagnostic) {
 			t.Fatalf("client RPC/WSS operation contracts should expose authenticated audit diagnostics %q: client=%+v rpc=%+v wss=%+v", diagnostic, clientOps, clientRPCOps, clientWSSOps)
