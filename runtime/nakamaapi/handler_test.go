@@ -730,6 +730,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !stringSliceContains(contractPayload.ServiceCallbacks, "battle.result.submit") || contractPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer {
 		t.Fatalf("business contract should document service callback requirements without granting client authority: %+v", contractPayload)
 	}
+	if !reflect.DeepEqual(contractPayload.ServiceOnlyOperations, contractPayload.ServiceCallbacks) || !stringSliceContains(contractPayload.ServiceOnlyOperations, "battle.ticket.consume") || !stringSliceContains(contractPayload.ServiceOnlyOperations, "battle.result.submit") {
+		t.Fatalf("business contract should publish explicit service-only operations without granting client authority: %+v", contractPayload)
+	}
 	if contractPayload.ServiceCallbackPlayerAllowed || contractPayload.ServiceCallbackEnvelopeAllowed {
 		t.Fatalf("business contract should publish service callbacks as non-player, non-envelope callbacks: %+v", contractPayload)
 	}

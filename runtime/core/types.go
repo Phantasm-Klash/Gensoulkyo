@@ -802,6 +802,7 @@ type BusinessContractSnapshot struct {
 	ClientRPCOperations            []string                       `json:"client_rpc_operations"`
 	ClientWSSOperations            []string                       `json:"client_wss_operations"`
 	DisallowedClientOperations     []string                       `json:"disallowed_client_operations"`
+	ServiceOnlyOperations          []string                       `json:"service_only_operations"`
 	ServiceCallbacks               []string                       `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string              `json:"service_callback_context"`
 	ServiceCallbackAcceptedValues  []string                       `json:"service_callback_accepted_values"`
@@ -836,6 +837,7 @@ type RoomRulesSnapshot struct {
 	ClientRPCOperations            []string                       `json:"client_rpc_operations"`
 	ClientWSSOperations            []string                       `json:"client_wss_operations"`
 	DisallowedClientOperations     []string                       `json:"disallowed_client_operations"`
+	ServiceOnlyOperations          []string                       `json:"service_only_operations"`
 	ServiceCallbacks               []string                       `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string              `json:"service_callback_context"`
 	ServiceCallbackAcceptedValues  []string                       `json:"service_callback_accepted_values"`
@@ -952,6 +954,7 @@ type BusinessEvent struct {
 	AllowedClientRPCOperations     []string                       `json:"allowed_client_rpc_operations"`
 	AllowedClientWSSOperations     []string                       `json:"allowed_client_wss_operations"`
 	DisallowedClientOperations     []string                       `json:"disallowed_client_operations"`
+	ServiceOnlyOperations          []string                       `json:"service_only_operations"`
 	ServiceCallbacks               []string                       `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string              `json:"service_callback_context"`
 	ServiceCallbackAcceptedValues  []string                       `json:"service_callback_accepted_values"`

@@ -2707,6 +2707,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rules.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should publish service-only battle callbacks: %+v", rules)
 	}
+	if !reflect.DeepEqual(rules.ServiceOnlyOperations, rules.ServiceCallbacks) || !stringSliceContains(rules.ServiceOnlyOperations, "battle.ticket.consume") || !stringSliceContains(rules.ServiceOnlyOperations, "battle.result.submit") {
+		t.Fatalf("room rules should publish explicit service-only operations matching callbacks: %+v", rules)
+	}
 	if rules.ServiceCallbackContext[ServiceCallbackRuntimeModeKey] != ServiceCallbackRuntimeModeRPC || rules.ServiceCallbackContext[ServiceCallbackOriginKey] != ServiceCallbackOriginBattleServer || rules.ServiceCallbackContext[ServiceCallbackFlagKey] != ServiceCallbackRequiredValue {
 		t.Fatalf("room rules should publish trusted service callback context requirements: %+v", rules.ServiceCallbackContext)
 	}
@@ -2732,8 +2735,8 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !reflect.DeepEqual(contract.ClientOperations, rules.ClientOperations) || !reflect.DeepEqual(contract.ClientRPCOperations, rules.ClientRPCOperations) || !reflect.DeepEqual(contract.ClientWSSOperations, rules.ClientWSSOperations) {
 		t.Fatalf("business contract and room rules client operations drifted: contract=%+v/%+v/%+v rules=%+v/%+v/%+v", contract.ClientOperations, contract.ClientRPCOperations, contract.ClientWSSOperations, rules.ClientOperations, rules.ClientRPCOperations, rules.ClientWSSOperations)
 	}
-	if !reflect.DeepEqual(contract.DisallowedClientOperations, rules.DisallowedClientOperations) || !reflect.DeepEqual(contract.ServiceCallbacks, rules.ServiceCallbacks) || !reflect.DeepEqual(contract.ServiceCallbackContext, rules.ServiceCallbackContext) {
-		t.Fatalf("business contract and room rules callback/security contract drifted: contract=%+v callbacks=%+v context=%+v rules=%+v callbacks=%+v context=%+v", contract.DisallowedClientOperations, contract.ServiceCallbacks, contract.ServiceCallbackContext, rules.DisallowedClientOperations, rules.ServiceCallbacks, rules.ServiceCallbackContext)
+	if !reflect.DeepEqual(contract.DisallowedClientOperations, rules.DisallowedClientOperations) || !reflect.DeepEqual(contract.ServiceOnlyOperations, rules.ServiceOnlyOperations) || !reflect.DeepEqual(contract.ServiceCallbacks, rules.ServiceCallbacks) || !reflect.DeepEqual(contract.ServiceCallbackContext, rules.ServiceCallbackContext) {
+		t.Fatalf("business contract and room rules callback/security contract drifted: contract=%+v service_only=%+v callbacks=%+v context=%+v rules=%+v service_only=%+v callbacks=%+v context=%+v", contract.DisallowedClientOperations, contract.ServiceOnlyOperations, contract.ServiceCallbacks, contract.ServiceCallbackContext, rules.DisallowedClientOperations, rules.ServiceOnlyOperations, rules.ServiceCallbacks, rules.ServiceCallbackContext)
 	}
 	if !reflect.DeepEqual(contract.ServiceCallbackAcceptedValues, ServiceCallbackAcceptedValues()) || !reflect.DeepEqual(contract.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues) {
 		t.Fatalf("business contract and room rules accepted service callback values drifted: contract=%+v rules=%+v expected=%+v", contract.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues, ServiceCallbackAcceptedValues())
@@ -2765,6 +2768,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.DisallowedClientOperations, rules.DisallowedClientOperations) {
 		t.Fatalf("room rules and business event disallowed operation contract drifted: rules=%+v event=%+v", rules.DisallowedClientOperations, event.DisallowedClientOperations)
+	}
+	if !reflect.DeepEqual(event.ServiceOnlyOperations, rules.ServiceOnlyOperations) {
+		t.Fatalf("room rules and business event service-only operation contract drifted: rules=%+v event=%+v", rules.ServiceOnlyOperations, event.ServiceOnlyOperations)
 	}
 	if !reflect.DeepEqual(event.ServiceCallbackContext, rules.ServiceCallbackContext) {
 		t.Fatalf("room rules and business event service callback context drifted: rules=%+v event=%+v", rules.ServiceCallbackContext, event.ServiceCallbackContext)

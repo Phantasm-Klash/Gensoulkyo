@@ -334,6 +334,14 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult {
 		t.Fatalf("business contract must publish service-signed settlement authority, got %+v", contract)
 	}
+	if !reflect.DeepEqual(contract.ServiceOnlyOperations, serviceCallbacks) {
+		t.Fatalf("business contract service-only operation list drifted from callbacks: service_only=%+v callbacks=%+v", contract.ServiceOnlyOperations, serviceCallbacks)
+	}
+	for _, serviceOnly := range contract.ServiceOnlyOperations {
+		if !stringSliceContains(disallowedClientOps, serviceOnly) || stringSliceContains(clientOps, serviceOnly) || stringSliceContains(clientRPCOps, serviceOnly) || stringSliceContains(clientWSSOps, serviceOnly) {
+			t.Fatalf("service-only operation %q must be disallowed for clients and absent from client RPC/WSS contracts: contract=%+v", serviceOnly, contract)
+		}
+	}
 	if contract.ServiceCallbackPlayerAllowed || contract.ServiceCallbackEnvelopeAllowed {
 		t.Fatalf("business contract must publish service callbacks as non-player, non-envelope callbacks: %+v", contract)
 	}
