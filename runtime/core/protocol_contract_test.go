@@ -458,6 +458,21 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 					t.Fatalf("business.event contract missing lookup request field %q: %+v", requestField, contract)
 				}
 			}
+			for _, projectionField := range []string{"queue.queue_status", "room.room_status", "ready", "activity", "battle_allocation", "battle_ticket"} {
+				if !stringSliceContains(contract.ServerProjectionFields, projectionField) {
+					t.Fatalf("business.event contract missing shared notification projection field %q: %+v", projectionField, contract)
+				}
+			}
+			if stringSliceContains(contract.ServerProjectionFields, "settlement") {
+				t.Fatalf("business.event contract must keep settlement projection on its explicit alias: %+v", contract)
+			}
+		case "business.event.settlement":
+			if !stringSliceContains(contract.ServerProjectionFields, "settlement") || !stringSliceContains(contract.ServerProjectionFields, "server_time") {
+				t.Fatalf("business.event.settlement contract missing settlement projection fields: %+v", contract)
+			}
+			if stringSliceContains(contract.ServerProjectionFields, "battle_ticket") || stringSliceContains(contract.ServerProjectionFields, "queue.queue_status") {
+				t.Fatalf("business.event.settlement contract must not publish non-settlement event projections: %+v", contract)
+			}
 		case "battle.ticket":
 			if !stringSliceContains(contract.ClientRequestFields, "match_id") || !stringSliceContains(contract.ServerProjectionFields, "ticket.ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "signature_hex") {
 				t.Fatalf("battle.ticket contract missing signed ticket request/projection fields: %+v", contract)

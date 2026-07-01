@@ -6313,6 +6313,38 @@ func businessNotificationServerProjectionFields(kind string) []string {
 	}
 }
 
+func businessEventOperationProjectionFields(settlementOnly bool) []string {
+	kinds := businessNotificationKinds()
+	fields := []string{}
+	for _, kind := range kinds {
+		if settlementOnly != (kind == "settlement") {
+			continue
+		}
+		fields = appendUniqueStrings(fields, businessNotificationServerProjectionFields(kind)...)
+	}
+	return fields
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]bool, len(values)+len(additions))
+	out := make([]string, 0, len(values)+len(additions))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	for _, value := range additions {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
 func ContractBusinessNotificationTopics() []BusinessNotificationTopic {
 	return businessNotificationTopics()
 }
@@ -6647,9 +6679,9 @@ func clientOperationProjectionFields(operation string) []string {
 	case "rooms.message", "rooms.chat", "rooms.announcement":
 		return append(common, "message_id", "room_code", "mode_id", "kind", "user_id", "display_name", "text", "metadata", "created_at", "duplicate")
 	case "business.event":
-		return businessNotificationServerProjectionFields("presence")
+		return appendUniqueStrings(common, businessEventOperationProjectionFields(false)...)
 	case "business.event.settlement":
-		return businessNotificationServerProjectionFields("settlement")
+		return appendUniqueStrings(common, businessEventOperationProjectionFields(true)...)
 	case "business.contract":
 		return append(common, "version", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
 	case "match.ready":
