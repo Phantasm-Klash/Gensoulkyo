@@ -1052,6 +1052,38 @@ func TestNakamaBusinessEventSettlementAliasRejectsConflictingKind(t *testing.T) 
 	}
 }
 
+func TestNakamaBusinessEventRejectsNonLookupFields(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	response := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event",
+		SessionID: "nakama-business-extra-session",
+		UserID:    "nakama-business-extra-user",
+		Payload: envelopePayload(1, "nonce-business-extra-field", "business_event", map[string]any{
+			"kind":        "activity",
+			"client_note": "not part of lookup contract",
+		}),
+	})
+	if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "client_note") {
+		t.Fatalf("business event lookup should reject non-lookup fields before core dispatch, got %+v", response)
+	}
+}
+
+func TestNakamaBusinessEventSettlementAliasRejectsNonLookupFields(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	response := handler.HandleRPC(RPCRequest{
+		ID:        "business.event.settlement",
+		SessionID: "nakama-settlement-extra-session",
+		UserID:    "nakama-settlement-extra-user",
+		Payload: envelopePayload(1, "nonce-settlement-extra-field", "business_event_settlement", map[string]any{
+			"match_id":    "match-extra-field",
+			"client_note": "not part of lookup contract",
+		}),
+	})
+	if response.OK || response.Status != 400 || response.ErrorCode != CodeInvalidRequest || !strings.Contains(response.Message, "client_note") {
+		t.Fatalf("settlement lookup should reject non-lookup fields before core dispatch, got %+v", response)
+	}
+}
+
 func TestNakamaRPCRejectsServiceOriginBattleResultSubmitWithPlayerContext(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	response := handler.HandleRPC(RPCRequest{
