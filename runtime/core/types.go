@@ -768,6 +768,7 @@ type BusinessNotificationTopic struct {
 	Transport                      string   `json:"transport"`
 	ClientEventRequestOperation    string   `json:"client_event_request_operation"`
 	ClientEventRequestKind         string   `json:"client_event_request_kind"`
+	ClientRequestAuthority         string   `json:"client_request_authority"`
 	ClientRequestFields            []string `json:"client_request_fields"`
 	ForbiddenClientRequestFields   []string `json:"forbidden_client_request_fields"`
 	ServerAuthoritativeProjection  bool     `json:"server_authoritative_projection"`
@@ -782,6 +783,7 @@ type BusinessEventRequestContract struct {
 	ClientEventRequestOperation    string   `json:"client_event_request_operation"`
 	ClientRPCOperation             string   `json:"client_rpc_operation"`
 	ClientWSSOperation             string   `json:"client_wss_operation"`
+	ClientRequestAuthority         string   `json:"client_request_authority"`
 	ClientRequestFields            []string `json:"client_request_fields"`
 	ForbiddenClientRequestFields   []string `json:"forbidden_client_request_fields"`
 	BusinessEnvelopeRequired       bool     `json:"business_envelope_required"`

@@ -59,6 +59,7 @@ const (
 )
 
 const settlementAuthorityServiceSignedBattleResult = "service_signed_battle_result_callback"
+const clientRequestAuthorityLookupOnly = "lookup_only"
 
 var forbiddenClientFields = map[string]struct{}{
 	"score":                  {},
@@ -6087,6 +6088,7 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 			Transport:                      "nakama_wss",
 			ClientEventRequestOperation:    businessNotificationRequestOperation(kind),
 			ClientEventRequestKind:         kind,
+			ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
 			ClientRequestFields:            businessNotificationClientRequestFields(kind),
 			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
 			ServerAuthoritativeProjection:  true,
@@ -6132,6 +6134,7 @@ func businessEventRequestContracts() []BusinessEventRequestContract {
 			ClientEventRequestOperation:    operation,
 			ClientRPCOperation:             operation,
 			ClientWSSOperation:             operation,
+			ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
 			ClientRequestFields:            businessNotificationClientRequestFields(kind),
 			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
 			BusinessEnvelopeRequired:       true,

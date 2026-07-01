@@ -2481,6 +2481,9 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 		if topic.ClientEventRequestKind != topic.Kind {
 			t.Fatalf("business notification topic must publish its fixed read request kind: %+v", topic)
 		}
+		if topic.ClientRequestAuthority != "lookup_only" {
+			t.Fatalf("business notification topic must expose lookup-only client request authority: %+v", topic)
+		}
 		if topic.Kind != "settlement" && topic.ClientEventRequestOperation == "business.event.settlement" {
 			t.Fatalf("settlement alias must not be reused for non-settlement notification topics: %+v", topic)
 		}
@@ -2514,6 +2517,9 @@ func assertBusinessEventRequestContracts(t *testing.T, contracts []core.Business
 		}
 		if !contract.BusinessEnvelopeRequired || !contract.ServerAuthoritativeProjection || contract.ServiceCallback || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
 			t.Fatalf("business event request contract must stay low-frequency read intent: %+v", contract)
+		}
+		if contract.ClientRequestAuthority != "lookup_only" {
+			t.Fatalf("business event request contract must expose lookup-only client request authority: %+v", contract)
 		}
 		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
 			if !stringSliceContains(contract.ClientRequestFields, requestField) {
