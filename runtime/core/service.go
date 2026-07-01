@@ -6202,7 +6202,27 @@ func businessNotificationServerProjectionFields(kind string) []string {
 	case "queue", "matchmaking":
 		return append(common, "queue_status", "required_players", "current_players", "queue")
 	case "room":
-		return append(common, "room_status", "required_players", "current_players", "room")
+		return append(common,
+			"room_status",
+			"required_players",
+			"current_players",
+			"room",
+			"room.room_code",
+			"room.room_status",
+			"room.mode_id",
+			"room.host_user_id",
+			"room.required_players",
+			"room.current_players",
+			"room.match_id",
+			"room.stage_id",
+			"room.ruleset_version",
+			"room.mode_ruleset_version",
+			"room.mode_config_hash",
+			"room.participants",
+			"room.participants.deck_snapshot_hash",
+			"room.participants.loadout",
+			"room.messages",
+		)
 	case "match.ready":
 		return append(common, "match_status", "ready_count", "required_players", "ready")
 	case "activity":
