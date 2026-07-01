@@ -2612,6 +2612,9 @@ func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
 	if presenceTopic == nil || presence.Delivery != presenceTopic.Delivery || presence.State != presenceTopic.State || presence.ClientEventRequestOperation != presenceTopic.ClientEventRequestOperation || presence.ClientRequestAuthority != presenceTopic.ClientRequestAuthority {
 		t.Fatalf("presence event should project its notification delivery contract: event=%+v topic=%+v", presence, presenceTopic)
 	}
+	if !reflect.DeepEqual(presence.ClientRequestFields, presenceTopic.ClientRequestFields) || !reflect.DeepEqual(presence.LookupKeyFields, presenceTopic.LookupKeyFields) || !reflect.DeepEqual(presence.ForbiddenClientRequestFields, presenceTopic.ForbiddenClientRequestFields) {
+		t.Fatalf("presence event should expose direct lookup request fields from its topic: event=%+v topic=%+v", presence, presenceTopic)
+	}
 	activity, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "activity"})
 	if err != nil {
 		t.Fatalf("activity business event: %v", err)
@@ -2659,6 +2662,9 @@ func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
 	}
 	if queueEvent.Delivery != queueTopic.Delivery || queueEvent.State != queueTopic.State || queueEvent.ClientEventRequestOperation != queueTopic.ClientEventRequestOperation || queueEvent.ClientRequestAuthority != queueTopic.ClientRequestAuthority {
 		t.Fatalf("queue event should project its notification delivery contract: event=%+v topic=%+v", queueEvent, queueTopic)
+	}
+	if !reflect.DeepEqual(queueEvent.ClientRequestFields, queueTopic.ClientRequestFields) || !reflect.DeepEqual(queueEvent.LookupKeyFields, queueTopic.LookupKeyFields) || !reflect.DeepEqual(queueEvent.ForbiddenClientRequestFields, queueTopic.ForbiddenClientRequestFields) {
+		t.Fatalf("queue event should expose direct lookup request fields from its topic: event=%+v topic=%+v", queueEvent, queueTopic)
 	}
 	queueRequestContract := businessEventRequestContractByKind(queueEvent.BusinessEventRequestContracts, "queue")
 	if queueRequestContract == nil || !reflect.DeepEqual(queueRequestContract.ServerProjectionFields, queueTopic.ServerProjectionFields) || queueRequestContract.ClientResultSubmitAllowed || queueRequestContract.HighFrequencyBattleTickAllowed {
@@ -2867,6 +2873,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if roomTopic == nil || event.Delivery != roomTopic.Delivery || event.State != roomTopic.State || event.ClientEventRequestOperation != roomTopic.ClientEventRequestOperation || event.ClientRequestAuthority != roomTopic.ClientRequestAuthority {
 		t.Fatalf("room business event should project its notification delivery contract: event=%+v topic=%+v", event, roomTopic)
+	}
+	if !reflect.DeepEqual(event.ClientRequestFields, roomTopic.ClientRequestFields) || !reflect.DeepEqual(event.LookupKeyFields, roomTopic.LookupKeyFields) || !reflect.DeepEqual(event.ForbiddenClientRequestFields, roomTopic.ForbiddenClientRequestFields) {
+		t.Fatalf("room business event should expose direct lookup request fields from its topic: event=%+v topic=%+v", event, roomTopic)
 	}
 	if !event.BusinessEnvelopeRequired || !reflect.DeepEqual(event.ForbiddenFields, rules.ForbiddenFields) {
 		t.Fatalf("room business event should expose the same security contract as room rules: rules=%+v event=%+v", rules.ForbiddenFields, event.ForbiddenFields)
