@@ -204,6 +204,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(request.SessionID, roomCode) })
 	case "rooms.message", "rooms.chat", "rooms.announcement":
+		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
+			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
+		}
 		req, response := lobbyMessageRequest(body, rpcID)
 		if !response.OK {
 			return response
@@ -343,6 +346,9 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(message.SessionID, roomCode) })
 	case "rooms.message", "rooms.chat", "rooms.announcement":
+		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
+			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
+		}
 		req, response := lobbyMessageRequest(body, name)
 		if !response.OK {
 			return response

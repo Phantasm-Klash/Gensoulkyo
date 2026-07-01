@@ -479,6 +479,22 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		t.Fatalf("expected forbidden metadata rejection, got %+v", badAuthorityChat)
 	}
 
+	badTopLevelAuthorityChat := handler.HandleWSSMessage(WSSMessage{
+		Name:      "rooms.message",
+		SessionID: guest.SessionToken,
+		UserID:    guest.UserID,
+		Payload: envelopePayload(8, "nonce-room-chat-top-authority", "rooms_message", map[string]any{
+			"room_code":   createPayload.RoomCode,
+			"message_id":  "guest-chat-top-bad",
+			"kind":        "chat",
+			"text":        "bad",
+			"result_hash": "client-authored",
+		}),
+	})
+	if badTopLevelAuthorityChat.OK || badTopLevelAuthorityChat.Status != 403 || badTopLevelAuthorityChat.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden top-level authority rejection, got %+v", badTopLevelAuthorityChat)
+	}
+
 	announcement := handler.HandleRPC(RPCRequest{
 		ID:        "rooms.announcement",
 		SessionID: host.SessionToken,
@@ -498,7 +514,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		Name:      "rooms.leave",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(8, "nonce-room-leave", "rooms_leave", map[string]any{
+		Payload: envelopePayload(9, "nonce-room-leave", "rooms_leave", map[string]any{
 			"room_code": createPayload.RoomCode,
 		}),
 	})
@@ -514,7 +530,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 		ID:        "rooms.create",
 		SessionID: guest.SessionToken,
 		UserID:    guest.UserID,
-		Payload: envelopePayload(9, "nonce-room-forbidden", "rooms_create", map[string]any{
+		Payload: envelopePayload(10, "nonce-room-forbidden", "rooms_create", map[string]any{
 			"mode_id":        "world_boss",
 			"active_deck_id": "bad_lobby_deck",
 			"deck_snapshot":  deckPayload("bad_lobby_deck"),
