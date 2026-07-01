@@ -6526,13 +6526,20 @@ func serviceCallbackBusinessEnvelopeAllowed() bool {
 }
 
 func IsServiceCallbackOperation(operation string) bool {
-	operation = strings.ToLower(strings.TrimSpace(operation))
+	operation = normalizeBusinessOperationName(operation)
 	for _, callback := range serviceCallbackOperations() {
-		if operation == callback {
+		if operation == normalizeBusinessOperationName(callback) {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizeBusinessOperationName(operation string) string {
+	operation = strings.ToLower(strings.TrimSpace(operation))
+	operation = strings.ReplaceAll(operation, "/", ".")
+	operation = strings.ReplaceAll(operation, ":", ".")
+	return strings.Trim(operation, ".")
 }
 
 func sortedForbiddenClientFields() []string {

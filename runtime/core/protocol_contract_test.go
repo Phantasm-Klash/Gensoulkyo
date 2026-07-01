@@ -244,6 +244,29 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("service callback contract missing %q: %+v", expected, serviceCallbacks)
 		}
 	}
+	for _, alias := range []string{
+		" battle.result.submit ",
+		"BATTLE.RESULT.SUBMIT",
+		"battle/result/submit",
+		"battle:result:submit",
+		".battle.result.submit.",
+		"battle/servers/register",
+		"battle:ticket:consume",
+	} {
+		if !IsServiceCallbackOperation(alias) {
+			t.Fatalf("service callback helper must normalize transport alias %q: %+v", alias, serviceCallbacks)
+		}
+	}
+	for _, notCallback := range []string{
+		"battle.result",
+		"battle.ticket",
+		"battle.servers",
+		"business.event.settlement",
+	} {
+		if IsServiceCallbackOperation(notCallback) {
+			t.Fatalf("service callback helper must not overmatch client operation %q", notCallback)
+		}
+	}
 	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
 		for _, clientOp := range ops {
 			if IsServiceCallbackOperation(clientOp) {
