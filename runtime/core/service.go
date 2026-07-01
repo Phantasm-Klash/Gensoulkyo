@@ -6290,7 +6290,7 @@ func businessNotificationServerProjectionFields(kind string) []string {
 	case "presence":
 		return append(common, "queue_status", "room_status", "match_status")
 	case "queue", "matchmaking":
-		return append(common,
+		fields := append(common,
 			"queue_status",
 			"required_players",
 			"current_players",
@@ -6307,6 +6307,8 @@ func businessNotificationServerProjectionFields(kind string) []string {
 			"queue.battle_allocation",
 			"queue.battle_ticket",
 		)
+		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("queue.battle_allocation")...)
+		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("queue.battle_ticket")...)
 	case "room":
 		return append(common,
 			"room_status",
@@ -6342,18 +6344,89 @@ func businessNotificationServerProjectionFields(kind string) []string {
 			"room.server_authoritative",
 		)
 	case "match.ready":
-		return append(common, "match_status", "ready_count", "required_players", "ready")
+		return appendUniqueStrings(append(common, "match_status", "ready_count", "required_players", "ready", "ready.battle_ticket"), signedBattleTicketProjectionFields("ready.battle_ticket")...)
 	case "activity":
 		return append(common, "activity")
 	case "battle.allocation":
-		return append(common, "battle_allocation")
+		return appendUniqueStrings(common, battleAllocationProjectionFields("battle_allocation")...)
 	case "battle.ticket":
-		return append(common, "battle_ticket")
+		return appendUniqueStrings(common, signedBattleTicketProjectionFields("battle_ticket")...)
 	case "settlement":
 		return append(common, "settlement")
 	default:
 		return common
 	}
+}
+
+func battleAllocationProjectionFields(prefix string) []string {
+	prefix = strings.TrimSpace(prefix)
+	return []string{
+		prefixedProjectionField(prefix, ""),
+		prefixedProjectionField(prefix, "ok"),
+		prefixedProjectionField(prefix, "version"),
+		prefixedProjectionField(prefix, "version.protocol_version"),
+		prefixedProjectionField(prefix, "version.business_api_version"),
+		prefixedProjectionField(prefix, "version.battle_api_version"),
+		prefixedProjectionField(prefix, "version.ruleset_version"),
+		prefixedProjectionField(prefix, "match_id"),
+		prefixedProjectionField(prefix, "mode_id"),
+		prefixedProjectionField(prefix, "battle_server_id"),
+		prefixedProjectionField(prefix, "endpoint"),
+		prefixedProjectionField(prefix, "players"),
+		prefixedProjectionField(prefix, "players.user_id"),
+		prefixedProjectionField(prefix, "players.player_id"),
+		prefixedProjectionField(prefix, "players.display_name"),
+		prefixedProjectionField(prefix, "players.deck_snapshot_hash"),
+		prefixedProjectionField(prefix, "players.loadout"),
+		prefixedProjectionField(prefix, "server_seed_hex"),
+		prefixedProjectionField(prefix, "mode_config_hash"),
+		prefixedProjectionField(prefix, "allocated_at"),
+		prefixedProjectionField(prefix, "server_authoritative"),
+	}
+}
+
+func signedBattleTicketProjectionFields(prefix string) []string {
+	prefix = strings.TrimSpace(prefix)
+	return []string{
+		prefixedProjectionField(prefix, ""),
+		prefixedProjectionField(prefix, "ticket"),
+		prefixedProjectionField(prefix, "ticket.version"),
+		prefixedProjectionField(prefix, "ticket.version.protocol_version"),
+		prefixedProjectionField(prefix, "ticket.version.business_api_version"),
+		prefixedProjectionField(prefix, "ticket.version.battle_api_version"),
+		prefixedProjectionField(prefix, "ticket.version.ruleset_version"),
+		prefixedProjectionField(prefix, "ticket.ticket_id"),
+		prefixedProjectionField(prefix, "ticket.match_id"),
+		prefixedProjectionField(prefix, "ticket.user_id"),
+		prefixedProjectionField(prefix, "ticket.player_id"),
+		prefixedProjectionField(prefix, "ticket.mode_id"),
+		prefixedProjectionField(prefix, "ticket.battle_server_id"),
+		prefixedProjectionField(prefix, "ticket.endpoint"),
+		prefixedProjectionField(prefix, "ticket.deck_snapshot_hash"),
+		prefixedProjectionField(prefix, "ticket.mode_config_hash"),
+		prefixedProjectionField(prefix, "ticket.ruleset_version"),
+		prefixedProjectionField(prefix, "ticket.ticket_nonce_hex"),
+		prefixedProjectionField(prefix, "ticket.issued_at"),
+		prefixedProjectionField(prefix, "ticket.expires_at"),
+		prefixedProjectionField(prefix, "ticket.issued_at_ms"),
+		prefixedProjectionField(prefix, "ticket.expires_at_ms"),
+		prefixedProjectionField(prefix, "signature_alg"),
+		prefixedProjectionField(prefix, "key_id"),
+		prefixedProjectionField(prefix, "signature_hex"),
+		prefixedProjectionField(prefix, "public_key_hex"),
+		prefixedProjectionField(prefix, "server_time"),
+		prefixedProjectionField(prefix, "server_authoritative"),
+	}
+}
+
+func prefixedProjectionField(prefix string, field string) string {
+	if prefix == "" {
+		return field
+	}
+	if field == "" {
+		return prefix
+	}
+	return prefix + "." + field
 }
 
 func businessEventOperationProjectionFields(settlementOnly bool) []string {
@@ -6774,9 +6847,13 @@ func clientOperationProjectionFields(operation string) []string {
 	case "chests.open":
 		return append(common, "user_id", "pool_id", "count", "wallet", "owned_chests", "inventory", "pity_counters", "results", "audit", "server_time")
 	case "presence.heartbeat":
-		return append(common, "user_id", "presence_status", "session_status", "ticket_id", "queue_status", "room_code", "room_status", "match_id", "match_status", "battle_allocation", "battle_ticket", "server_time")
+		fields := append(common, "user_id", "presence_status", "session_status", "ticket_id", "queue_status", "room_code", "room_status", "match_id", "match_status", "battle_allocation", "battle_ticket", "server_time")
+		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)
+		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("battle_ticket")...)
 	case "matchmaking.join", "matchmaking.ticket", "matchmaking.cancel", "rooms.create", "rooms.join", "rooms.leave":
-		return append(common, "queue_status", "ticket_id", "match_id", "mode_id", "loadout", "room_code", "room_status", "required_players", "current_players", "match_start", "battle_allocation", "battle_ticket")
+		fields := append(common, "queue_status", "ticket_id", "match_id", "mode_id", "loadout", "room_code", "room_status", "required_players", "current_players", "match_start", "battle_allocation", "battle_ticket")
+		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)
+		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("battle_ticket")...)
 	case "rooms.list":
 		return append(common, "rooms", "rooms.room_code", "rooms.room_status", "rooms.mode_id", "rooms.participants", "rooms.participants.deck_snapshot_hash", "rooms.participants.loadout", "server_time")
 	case "rooms.get":
@@ -6792,9 +6869,9 @@ func clientOperationProjectionFields(operation string) []string {
 	case "business.contract":
 		return append(common, "version", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "disallowed_client_operation_contracts", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
 	case "match.ready":
-		return append(common, "match_id", "ready_status", "ready_count", "required_players", "match_start", "battle_ticket")
+		return appendUniqueStrings(append(common, "match_id", "ready_status", "ready_count", "required_players", "match_start", "battle_ticket"), signedBattleTicketProjectionFields("battle_ticket")...)
 	case "match.disconnect", "match.reconnect":
-		return append(common, "match_id", "user_id", "reconnect_status", "connected", "seconds_left", "match_start", "snapshot", "battle_ticket", "server_time")
+		return appendUniqueStrings(append(common, "match_id", "user_id", "reconnect_status", "connected", "seconds_left", "match_start", "snapshot", "battle_ticket", "server_time"), signedBattleTicketProjectionFields("battle_ticket")...)
 	case "match.rematch":
 		return append(common, "match_id", "new_match_id", "rematch_status", "accepted_count", "required_players", "mode_id", "stage_id", "loadout", "match_start", "server_time")
 	case "activity.claim":
@@ -6808,9 +6885,9 @@ func clientOperationProjectionFields(operation string) []string {
 	case "lobby.audit.status":
 		return append(common, "configured", "room_records", "room_read_records", "rules_read_records", "ready_records", "connection_records", "message_records", "last_success_operation", "last_error_operation")
 	case "battle.allocation":
-		return append(common, "version", "match_id", "mode_id", "battle_server_id", "endpoint", "players", "players.deck_snapshot_hash", "mode_config_hash", "allocated_at")
+		return appendUniqueStrings(common, battleAllocationProjectionFields("")...)
 	case "battle.ticket":
-		return append(common, "ticket", "ticket.ticket_id", "ticket.match_id", "ticket.user_id", "ticket.player_id", "ticket.battle_server_id", "ticket.endpoint", "ticket.deck_snapshot_hash", "ticket.mode_config_hash", "ticket.expires_at", "signature_alg", "key_id", "signature_hex", "server_time")
+		return appendUniqueStrings(common, signedBattleTicketProjectionFields("")...)
 	case "replay.get":
 		return append(common, "replay_id", "match_id", "user_id", "mode_id", "ruleset_version", "mode_ruleset_version", "state_hash", "input_count", "event_count", "settlement")
 	default:
