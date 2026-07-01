@@ -616,6 +616,50 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("client RPC/WSS operation contracts should expose authenticated audit diagnostics %q: client=%+v rpc=%+v wss=%+v", diagnostic, clientOps, clientRPCOps, clientWSSOps)
 		}
 	}
+	contractsByOperation := map[string]ClientOperationContract{}
+	for _, contract := range clientOperationContracts {
+		contractsByOperation[contract.Operation] = contract
+	}
+	assertProjectionFields(t, contractsByOperation["battle.audit.status"].ServerProjectionFields, []string{
+		"ok",
+		"configured",
+		"server_lifecycle_records",
+		"allocation_records",
+		"ticket_records",
+		"ticket_expired_records",
+		"ticket_consumed_records",
+		"ticket_rejected_records",
+		"result_records",
+		"result_duplicate_records",
+		"result_rejected_records",
+		"replay_records",
+		"rejected_records",
+		"last_success_operation",
+		"last_success_fingerprint",
+		"last_success_at",
+		"last_error_operation",
+		"last_error",
+		"last_error_at",
+		"server_authoritative",
+	}, "battle.audit.status operation")
+	assertProjectionFields(t, contractsByOperation["lobby.audit.status"].ServerProjectionFields, []string{
+		"ok",
+		"configured",
+		"room_records",
+		"room_read_records",
+		"rules_read_records",
+		"ready_records",
+		"connection_records",
+		"message_records",
+		"rejected_records",
+		"last_success_operation",
+		"last_success_fingerprint",
+		"last_success_at",
+		"last_error_operation",
+		"last_error",
+		"last_error_at",
+		"server_authoritative",
+	}, "lobby.audit.status operation")
 	for _, serviceOnly := range []string{"battle.servers.register", "battle.servers.heartbeat", "battle.servers.offline"} {
 		if stringSliceContains(clientOps, serviceOnly) || stringSliceContains(clientRPCOps, serviceOnly) || stringSliceContains(clientWSSOps, serviceOnly) {
 			t.Fatalf("client operation contract must not expose service-only battle server callback %q: client=%+v rpc=%+v wss=%+v", serviceOnly, clientOps, clientRPCOps, clientWSSOps)

@@ -6881,9 +6881,45 @@ func clientOperationProjectionFields(operation string) []string {
 	case "business.envelope.audit.status":
 		return append(common, "accepted", "rejected", "audits")
 	case "battle.audit.status":
-		return append(common, "configured", "server_lifecycle_records", "allocation_records", "ticket_records", "result_records", "replay_records", "last_success_operation", "last_error_operation")
+		return append(common,
+			"ok",
+			"configured",
+			"server_lifecycle_records",
+			"allocation_records",
+			"ticket_records",
+			"ticket_expired_records",
+			"ticket_consumed_records",
+			"ticket_rejected_records",
+			"result_records",
+			"result_duplicate_records",
+			"result_rejected_records",
+			"replay_records",
+			"rejected_records",
+			"last_success_operation",
+			"last_success_fingerprint",
+			"last_success_at",
+			"last_error_operation",
+			"last_error",
+			"last_error_at",
+		)
 	case "lobby.audit.status":
-		return append(common, "configured", "room_records", "room_read_records", "rules_read_records", "ready_records", "connection_records", "message_records", "last_success_operation", "last_error_operation")
+		return append(common,
+			"ok",
+			"configured",
+			"room_records",
+			"room_read_records",
+			"rules_read_records",
+			"ready_records",
+			"connection_records",
+			"message_records",
+			"rejected_records",
+			"last_success_operation",
+			"last_success_fingerprint",
+			"last_success_at",
+			"last_error_operation",
+			"last_error",
+			"last_error_at",
+		)
 	case "battle.allocation":
 		return appendUniqueStrings(common, battleAllocationProjectionFields("")...)
 	case "battle.ticket":
