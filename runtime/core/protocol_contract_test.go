@@ -260,7 +260,18 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			if !contract.ServiceOnly || !contract.ServiceCallbackRequired || contract.ClientResultSubmit || contract.HighFrequencyBattleTick {
 				t.Fatalf("battle ticket consume must remain a service-only ticket callback: %+v", contract)
 			}
-		case "match.input", "battle.input", "battle.snapshot", "battle.events", "battle.mode_action", "battle.cast_card", "battle.card_slot":
+		case "match.input",
+			"match.snapshot",
+			"match.events",
+			"match.settle",
+			"battle.input",
+			"battle.snapshot",
+			"battle.events",
+			"battle.ready",
+			"battle.reconnect",
+			"battle.mode_action",
+			"battle.cast_card",
+			"battle.card_slot":
 			if !contract.HighFrequencyBattleTick || contract.ServiceOnly || contract.ClientResultSubmit {
 				t.Fatalf("battle transport operation must remain outside Nakama/Go client authority: %+v", contract)
 			}
