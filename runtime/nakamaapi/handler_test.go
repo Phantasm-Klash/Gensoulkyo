@@ -639,6 +639,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if matchmakingTopic == nil || eventPayload.Delivery != matchmakingTopic.Delivery || eventPayload.State != matchmakingTopic.State || eventPayload.ClientEventRequestOperation != matchmakingTopic.ClientEventRequestOperation || eventPayload.ClientRequestAuthority != matchmakingTopic.ClientRequestAuthority {
 		t.Fatalf("business event should project its notification delivery contract: event=%+v topic=%+v", eventPayload, matchmakingTopic)
 	}
+	if !reflect.DeepEqual(eventPayload.ClientRequestFields, matchmakingTopic.ClientRequestFields) || !reflect.DeepEqual(eventPayload.LookupKeyFields, matchmakingTopic.LookupKeyFields) || !reflect.DeepEqual(eventPayload.ForbiddenClientRequestFields, matchmakingTopic.ForbiddenClientRequestFields) {
+		t.Fatalf("business event should expose direct lookup request fields from its topic: event=%+v topic=%+v", eventPayload, matchmakingTopic)
+	}
 	if eventPayload.Version.ProtocolVersion != core.ProtocolVersion || eventPayload.Version.RulesetVersion != core.RulesetVersion || eventPayload.Version.BusinessAPIVersion != core.BusinessAPIVersion || eventPayload.Version.BattleAPIVersion != core.BattleAPIVersion {
 		t.Fatalf("business event should include shared protocol version stamp: %+v", eventPayload.Version)
 	}
@@ -696,6 +699,9 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	ticketTopic := businessNotificationTopicByKind(aliasPayload.BusinessNotificationTopics, "battle.ticket")
 	if ticketTopic == nil || aliasPayload.Delivery != ticketTopic.Delivery || aliasPayload.State != "signed_battle_ticket" || aliasPayload.State != ticketTopic.State || aliasPayload.ClientEventRequestOperation != "business.event" || aliasPayload.ClientRequestAuthority != "lookup_only" {
 		t.Fatalf("battle ticket event should expose WSS lookup delivery state: event=%+v topic=%+v", aliasPayload, ticketTopic)
+	}
+	if !reflect.DeepEqual(aliasPayload.ClientRequestFields, ticketTopic.ClientRequestFields) || !reflect.DeepEqual(aliasPayload.LookupKeyFields, ticketTopic.LookupKeyFields) || !reflect.DeepEqual(aliasPayload.ForbiddenClientRequestFields, ticketTopic.ForbiddenClientRequestFields) {
+		t.Fatalf("battle ticket event should expose direct lookup request fields from its topic: event=%+v topic=%+v", aliasPayload, ticketTopic)
 	}
 	duplicateAliasEvent := handler.HandleWSSMessage(WSSMessage{
 		Name:      "business.event",

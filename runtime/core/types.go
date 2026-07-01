@@ -991,6 +991,9 @@ type BusinessEvent struct {
 	State                              string                              `json:"state"`
 	ClientEventRequestOperation        string                              `json:"client_event_request_operation"`
 	ClientRequestAuthority             string                              `json:"client_request_authority"`
+	ClientRequestFields                []string                            `json:"client_request_fields"`
+	LookupKeyFields                    []string                            `json:"lookup_key_fields"`
+	ForbiddenClientRequestFields       []string                            `json:"forbidden_client_request_fields"`
 	UserID                             string                              `json:"user_id"`
 	ModeID                             string                              `json:"mode_id,omitempty"`
 	RoomCode                           string                              `json:"room_code,omitempty"`
