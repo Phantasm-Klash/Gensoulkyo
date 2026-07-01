@@ -426,6 +426,51 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 				t.Fatalf("structured client operation contract missing forbidden request field %q: %+v", forbiddenField, contract)
 			}
 		}
+		if len(contract.ServerProjectionFields) == 0 {
+			t.Fatalf("structured client operation contract must expose server projection fields: %+v", contract)
+		}
+		if stringSliceContains(contract.ClientRequestFields, "battle_allocation") || stringSliceContains(contract.ClientRequestFields, "battle_ticket") || stringSliceContains(contract.ClientRequestFields, "settlement") || stringSliceContains(contract.ClientRequestFields, "activity") {
+			t.Fatalf("structured client operation contract must not let clients submit server projection fields: %+v", contract)
+		}
+		switch contract.Operation {
+		case "matchmaking.join", "rooms.create", "rooms.join":
+			for _, requestField := range []string{"mode_id", "active_deck_id", "deck_snapshot", "client_version"} {
+				if !stringSliceContains(contract.ClientRequestFields, requestField) {
+					t.Fatalf("%s contract missing matchmaking request field %q: %+v", contract.Operation, requestField, contract)
+				}
+			}
+			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") || !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
+				t.Fatalf("%s contract missing server-owned allocation/ticket projection fields: %+v", contract.Operation, contract)
+			}
+		case "rooms.rules":
+			if !stringSliceContains(contract.ClientRequestFields, "room_code") || !stringSliceContains(contract.ServerProjectionFields, "client_operation_contracts") || !stringSliceContains(contract.ServerProjectionFields, "business_notification_topics") {
+				t.Fatalf("rooms.rules contract missing client contract projection fields: %+v", contract)
+			}
+		case "rooms.message", "rooms.chat", "rooms.announcement":
+			for _, requestField := range []string{"room_code", "message_id", "kind", "text", "metadata"} {
+				if !stringSliceContains(contract.ClientRequestFields, requestField) {
+					t.Fatalf("%s contract missing lobby message request field %q: %+v", contract.Operation, requestField, contract)
+				}
+			}
+		case "business.event":
+			for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
+				if !stringSliceContains(contract.ClientRequestFields, requestField) {
+					t.Fatalf("business.event contract missing lookup request field %q: %+v", requestField, contract)
+				}
+			}
+		case "battle.ticket":
+			if !stringSliceContains(contract.ClientRequestFields, "match_id") || !stringSliceContains(contract.ServerProjectionFields, "ticket.ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "signature_hex") {
+				t.Fatalf("battle.ticket contract missing signed ticket request/projection fields: %+v", contract)
+			}
+		case "battle.allocation":
+			if !stringSliceContains(contract.ClientRequestFields, "match_id") || !stringSliceContains(contract.ServerProjectionFields, "players.deck_snapshot_hash") || !stringSliceContains(contract.ServerProjectionFields, "mode_config_hash") {
+				t.Fatalf("battle.allocation contract missing allocation request/projection fields: %+v", contract)
+			}
+		case "business.contract":
+			if len(contract.ClientRequestFields) != 0 || !stringSliceContains(contract.ServerProjectionFields, "client_operation_contracts") {
+				t.Fatalf("business.contract should be bodyless contract lookup with structured projection: %+v", contract)
+			}
+		}
 	}
 	for _, operation := range clientOps {
 		if !seenClientOperationContracts[operation] {
