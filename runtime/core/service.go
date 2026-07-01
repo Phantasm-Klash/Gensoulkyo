@@ -6159,6 +6159,8 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 			Kind:                           kind,
 			Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
 			Transport:                      "nakama_wss",
+			Delivery:                       "server_push_with_lookup_fallback",
+			State:                          businessNotificationState(kind),
 			ClientEventRequestOperation:    businessNotificationRequestOperation(kind),
 			ClientEventRequestKind:         kind,
 			ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
@@ -6173,6 +6175,29 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 		})
 	}
 	return topics
+}
+
+func businessNotificationState(kind string) string {
+	switch kind {
+	case "presence":
+		return "presence_status"
+	case "queue", "matchmaking":
+		return "queue_status"
+	case "room":
+		return "room_status"
+	case "match.ready":
+		return "ready_status"
+	case "activity":
+		return "activity_snapshot"
+	case "battle.allocation":
+		return "battle_allocation_descriptor"
+	case "battle.ticket":
+		return "signed_battle_ticket"
+	case "settlement":
+		return "verified_settlement_receipt"
+	default:
+		return "business_projection"
+	}
 }
 
 func businessNotificationRequestOperation(kind string) string {

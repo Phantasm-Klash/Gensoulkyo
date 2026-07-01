@@ -768,6 +768,8 @@ type BusinessNotificationTopic struct {
 	Kind                           string   `json:"kind"`
 	Topic                          string   `json:"topic"`
 	Transport                      string   `json:"transport"`
+	Delivery                       string   `json:"delivery"`
+	State                          string   `json:"state"`
 	ClientEventRequestOperation    string   `json:"client_event_request_operation"`
 	ClientEventRequestKind         string   `json:"client_event_request_kind"`
 	ClientRequestAuthority         string   `json:"client_request_authority"`

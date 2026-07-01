@@ -623,6 +623,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if topic.Kind == "" || topic.Topic != "nakama_wss.business."+strings.ReplaceAll(topic.Kind, ".", "_") || topic.Transport != "nakama_wss" {
 			t.Fatalf("business notification topic shape invalid: %+v", topic)
 		}
+		if topic.Delivery != "server_push_with_lookup_fallback" || topic.State == "" {
+			t.Fatalf("business notification topic must expose WSS delivery and state contract: %+v", topic)
+		}
 		expectedRequestOp := "business.event"
 		if topic.Kind == "settlement" {
 			expectedRequestOp = "business.event.settlement"
