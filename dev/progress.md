@@ -19,6 +19,8 @@ Status date: 2026-06-28
 - Synced the Runtime stack status with the merged Nakama service-origin callback gate: service callbacks require allowlisted RPC names, no player session/user context, Nakama `rpc` mode, and canonical `runtime.RUNTIME_CTX_VARS` origin/flag values from `core.ServiceCallbackContext()`.
 - Marked the legacy root checkout `agent/gensoulkyo-lobby/20260629-0900` dirty callback-gate edits as superseded by merged PR #59's stricter implementation; no legacy worktree changes were migrated.
 - Preserved the authority split: this is documentation/status alignment only, with client RPC/WSS result submission and high-frequency battle ticks still forbidden on the Go/Nakama business path.
+- Tightened the build-tagged Nakama callback gate regression so every accepted callback flag value comes from `core.ServiceCallbackAcceptedValues()`, keeping the SDK binding aligned with the shared business contract.
+- Verified `docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build`, `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
 
 ## 2026-06-29 gensoulkyo-lobby update
 

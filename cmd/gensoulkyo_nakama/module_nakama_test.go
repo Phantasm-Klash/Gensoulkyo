@@ -7,16 +7,18 @@ import (
 	"testing"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+
+	"gensoulkyo/runtime/core"
 )
 
 func TestServiceOriginRPCContextGate(t *testing.T) {
 	base := context.WithValue(context.Background(), runtime.RUNTIME_CTX_MODE, "rpc")
-	trustedVars := map[string]string{
-		serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
-		serviceCallbackVarKey: "true",
-	}
 	if isServiceOriginRPC(base, "battle.result.submit") {
 		t.Fatalf("service-origin RPC must require trusted battle callback vars")
+	}
+	trustedVars := map[string]string{
+		serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
+		serviceCallbackVarKey: core.ServiceCallbackAcceptedValues()[0],
 	}
 	withVars := context.WithValue(base, runtime.RUNTIME_CTX_VARS, trustedVars)
 	if !isServiceOriginRPC(withVars, "battle.result.submit") {
@@ -24,17 +26,19 @@ func TestServiceOriginRPCContextGate(t *testing.T) {
 	}
 	withAnyVars := context.WithValue(base, runtime.RUNTIME_CTX_VARS, map[string]any{
 		serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
-		serviceCallbackVarKey: "yes",
+		serviceCallbackVarKey: core.ServiceCallbackAcceptedValues()[0],
 	})
 	if !isServiceOriginRPC(withAnyVars, "battle.ticket.consume") {
 		t.Fatalf("trusted battle callback vars from map[string]any should allow service-origin RPC")
 	}
-	withNumericCallback := context.WithValue(base, runtime.RUNTIME_CTX_VARS, map[string]string{
-		serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
-		serviceCallbackVarKey: "1",
-	})
-	if !isServiceOriginRPC(withNumericCallback, "battle.servers.heartbeat") {
-		t.Fatalf("numeric battle callback var should allow service-origin RPC")
+	for _, accepted := range core.ServiceCallbackAcceptedValues() {
+		withAcceptedCallback := context.WithValue(base, runtime.RUNTIME_CTX_VARS, map[string]string{
+			serviceOriginVarKey:   serviceCallbackContextValue(serviceOriginVarKey),
+			serviceCallbackVarKey: accepted,
+		})
+		if !isServiceOriginRPC(withAcceptedCallback, "battle.servers.heartbeat") {
+			t.Fatalf("accepted battle callback var %q should allow service-origin RPC", accepted)
+		}
 	}
 	for name, vars := range map[string]map[string]string{
 		"wrong origin":     {serviceOriginVarKey: "player", serviceCallbackVarKey: "true"},
