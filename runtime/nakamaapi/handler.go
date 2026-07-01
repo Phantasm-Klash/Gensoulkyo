@@ -671,6 +671,11 @@ func businessEventRequest(body map[string]any, name string) (core.BusinessEventR
 	if field := firstUnexpectedBusinessEventRequestField(body); field != "" {
 		return core.BusinessEventRequest{}, errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("business event lookup request cannot include %s", field))
 	}
+	var duplicateField string
+	body, duplicateField = normalizeBusinessEventRequestBody(body)
+	if duplicateField != "" {
+		return core.BusinessEventRequest{}, errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("business event lookup request has duplicate %s aliases", duplicateField))
+	}
 	var req core.BusinessEventRequest
 	if err := decodeBody(body, &req); err != nil {
 		return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
@@ -694,4 +699,26 @@ func firstUnexpectedBusinessEventRequestField(body map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func normalizeBusinessEventRequestBody(body map[string]any) (map[string]any, string) {
+	normalized := map[string]any{}
+	for key, value := range body {
+		target := key
+		switch normalizeName(key) {
+		case "kind":
+			target = "kind"
+		case "ticket_id", "ticket.id", "ticketid":
+			target = "ticket_id"
+		case "room_code", "room.code", "roomcode":
+			target = "room_code"
+		case "match_id", "match.id", "matchid":
+			target = "match_id"
+		}
+		if _, exists := normalized[target]; exists {
+			return normalized, target
+		}
+		normalized[target] = value
+	}
+	return normalized, ""
 }
