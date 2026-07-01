@@ -2862,7 +2862,7 @@ func (s *Service) matchStartLocked(match *matchState) MatchStartEvent {
 		player := match.Players[userID]
 		players = append(players, PlayerIdentity{PlayerID: playerIDForUser(match.MatchID, userID), UserID: userID, DisplayName: player.DisplayName, Loadout: player.Loadout})
 	}
-	allocation := s.ensureBattleAllocationLocked(match)
+	allocation := copyBattleAllocation(s.ensureBattleAllocationLocked(match))
 	return MatchStartEvent{
 		Type:               "match_start",
 		MatchID:            match.MatchID,
@@ -2875,7 +2875,7 @@ func (s *Service) matchStartLocked(match *matchState) MatchStartEvent {
 		TickRate:           TickRate,
 		Players:            players,
 		ModeState:          copyAnyMap(match.ModeState),
-		BattleAllocation:   allocation,
+		BattleAllocation:   &allocation,
 	}
 }
 
