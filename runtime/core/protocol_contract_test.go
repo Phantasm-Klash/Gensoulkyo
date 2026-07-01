@@ -219,9 +219,57 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	clientWSSOps := ContractClientWSSOperations()
 	clientOperationContracts := ContractClientOperationContracts()
 	disallowedClientOps := ContractDisallowedClientOperations()
+	disallowedClientOperationContracts := ContractDisallowedClientOperationContracts()
 	serviceCallbacks := ServiceCallbackOperations()
 	if len(clientOps) == 0 || len(clientRPCOps) == 0 || len(clientWSSOps) == 0 || len(disallowedClientOps) == 0 || len(serviceCallbacks) == 0 {
 		t.Fatalf("business operation contracts must not be empty: client=%+v rpc=%+v wss=%+v disallowed=%+v service=%+v", clientOps, clientRPCOps, clientWSSOps, disallowedClientOps, serviceCallbacks)
+	}
+	if len(disallowedClientOperationContracts) != len(disallowedClientOps) {
+		t.Fatalf("structured disallowed operation contracts must mirror disallowed list: contracts=%+v disallowed=%+v", disallowedClientOperationContracts, disallowedClientOps)
+	}
+	seenDisallowedContracts := map[string]bool{}
+	for _, contract := range disallowedClientOperationContracts {
+		if !stringSliceContains(disallowedClientOps, contract.Operation) {
+			t.Fatalf("structured disallowed operation contract contains unknown operation: %+v disallowed=%+v", contract, disallowedClientOps)
+		}
+		if seenDisallowedContracts[contract.Operation] {
+			t.Fatalf("structured disallowed operation contract duplicated operation %q: %+v", contract.Operation, disallowedClientOperationContracts)
+		}
+		seenDisallowedContracts[contract.Operation] = true
+		if contract.ClientRPCAllowed || contract.ClientWSSAllowed || !contract.ServerAuthoritative {
+			t.Fatalf("disallowed operation contract must not grant client transport authority: %+v", contract)
+		}
+		if contract.PlayerSessionAllowed || contract.BusinessEnvelopeAllowed {
+			t.Fatalf("disallowed operation contract must fail closed for player session/envelope use: %+v", contract)
+		}
+		if strings.TrimSpace(contract.Reason) == "" {
+			t.Fatalf("disallowed operation contract must publish a reason: %+v", contract)
+		}
+		if stringSliceContains(clientOps, contract.Operation) || stringSliceContains(clientRPCOps, contract.Operation) || stringSliceContains(clientWSSOps, contract.Operation) {
+			t.Fatalf("structured disallowed operation %q must not be exposed as client operation: %+v", contract.Operation, contract)
+		}
+		if contract.ServiceOnly != IsServiceCallbackOperation(contract.Operation) || contract.ServiceCallbackRequired != IsServiceCallbackOperation(contract.Operation) {
+			t.Fatalf("disallowed operation service callback flags drifted: %+v callbacks=%+v", contract, serviceCallbacks)
+		}
+		switch contract.Operation {
+		case "battle.result.submit":
+			if !contract.ServiceOnly || !contract.ServiceCallbackRequired || !contract.ClientResultSubmit || contract.HighFrequencyBattleTick {
+				t.Fatalf("battle result submit must remain a service-only signed result callback: %+v", contract)
+			}
+		case "battle.ticket.consume":
+			if !contract.ServiceOnly || !contract.ServiceCallbackRequired || contract.ClientResultSubmit || contract.HighFrequencyBattleTick {
+				t.Fatalf("battle ticket consume must remain a service-only ticket callback: %+v", contract)
+			}
+		case "match.input", "battle.input", "battle.snapshot", "battle.events", "battle.mode_action", "battle.cast_card", "battle.card_slot":
+			if !contract.HighFrequencyBattleTick || contract.ServiceOnly || contract.ClientResultSubmit {
+				t.Fatalf("battle transport operation must remain outside Nakama/Go client authority: %+v", contract)
+			}
+		}
+	}
+	for _, operation := range disallowedClientOps {
+		if !seenDisallowedContracts[operation] {
+			t.Fatalf("structured disallowed operation contracts missing operation %q: %+v", operation, disallowedClientOperationContracts)
+		}
 	}
 	for _, callback := range serviceCallbacks {
 		if !IsServiceCallbackOperation(callback) {
@@ -365,6 +413,12 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	}
 	if !reflect.DeepEqual(contract.ServiceOnlyOperations, serviceCallbacks) {
 		t.Fatalf("business contract service-only operation list drifted from callbacks: service_only=%+v callbacks=%+v", contract.ServiceOnlyOperations, serviceCallbacks)
+	}
+	if !reflect.DeepEqual(contract.DisallowedClientOperationContracts, disallowedClientOperationContracts) {
+		t.Fatalf("business contract structured disallowed operation contracts drifted: contract=%+v expected=%+v", contract.DisallowedClientOperationContracts, disallowedClientOperationContracts)
+	}
+	if !stringSliceContains(clientOperationProjectionFields("business.contract"), "disallowed_client_operation_contracts") || !stringSliceContains(clientOperationProjectionFields("rooms.rules"), "disallowed_client_operation_contracts") {
+		t.Fatalf("structured disallowed operation contracts should be explicitly projected by business.contract and rooms.rules")
 	}
 	for _, serviceOnly := range contract.ServiceOnlyOperations {
 		if !stringSliceContains(disallowedClientOps, serviceOnly) || stringSliceContains(clientOps, serviceOnly) || stringSliceContains(clientRPCOps, serviceOnly) || stringSliceContains(clientWSSOps, serviceOnly) {

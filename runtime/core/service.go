@@ -1142,39 +1142,40 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 	mode := ModeConfigs[room.ModeID]
 	contract := businessContractSnapshot(now)
 	rules := &RoomRulesSnapshot{
-		OK:                             true,
-		Version:                        contract.Version,
-		Room:                           snapshot,
-		Mode:                           mode,
-		TickRate:                       TickRate,
-		InputDelayTicks:                DefaultInputDelayTick,
-		BattleTicketTTL:                BattleTicketTTLSeconds,
-		BusinessTransports:             contract.BusinessTransports,
-		BattleTransports:               contract.BattleTransports,
-		ClientOperations:               contract.ClientOperations,
-		ClientRPCOperations:            contract.ClientRPCOperations,
-		ClientWSSOperations:            contract.ClientWSSOperations,
-		ClientOperationContracts:       contract.ClientOperationContracts,
-		DisallowedClientOperations:     contract.DisallowedClientOperations,
-		ServiceOnlyOperations:          contract.ServiceOnlyOperations,
-		ServiceCallbacks:               contract.ServiceCallbacks,
-		ServiceCallbackContext:         contract.ServiceCallbackContext,
-		ServiceCallbackAcceptedValues:  contract.ServiceCallbackAcceptedValues,
-		ServiceCallbackPlayerAllowed:   contract.ServiceCallbackPlayerAllowed,
-		ServiceCallbackEnvelopeAllowed: contract.ServiceCallbackEnvelopeAllowed,
-		SettlementAuthority:            contract.SettlementAuthority,
-		BusinessNotifications:          contract.BusinessNotifications,
-		BusinessEventRequestKinds:      contract.BusinessEventRequestKinds,
-		BusinessEventRequestContracts:  contract.BusinessEventRequestContracts,
-		BusinessNotificationTopics:     contract.BusinessNotificationTopics,
-		ClientAuthority:                contract.ClientAuthority,
-		ServerAuthority:                contract.ServerAuthority,
-		ForbiddenFields:                contract.ForbiddenFields,
-		BusinessEnvelope:               contract.BusinessEnvelopeRequired,
-		ClientResultSubmit:             contract.ClientResultSubmitAllowed,
-		HighFrequencyBattleTickAllowed: contract.HighFrequencyBattleTickAllowed,
-		ServerTime:                     contract.ServerTime,
-		ServerAuthoritative:            contract.ServerAuthoritative,
+		OK:                                 true,
+		Version:                            contract.Version,
+		Room:                               snapshot,
+		Mode:                               mode,
+		TickRate:                           TickRate,
+		InputDelayTicks:                    DefaultInputDelayTick,
+		BattleTicketTTL:                    BattleTicketTTLSeconds,
+		BusinessTransports:                 contract.BusinessTransports,
+		BattleTransports:                   contract.BattleTransports,
+		ClientOperations:                   contract.ClientOperations,
+		ClientRPCOperations:                contract.ClientRPCOperations,
+		ClientWSSOperations:                contract.ClientWSSOperations,
+		ClientOperationContracts:           contract.ClientOperationContracts,
+		DisallowedClientOperations:         contract.DisallowedClientOperations,
+		DisallowedClientOperationContracts: contract.DisallowedClientOperationContracts,
+		ServiceOnlyOperations:              contract.ServiceOnlyOperations,
+		ServiceCallbacks:                   contract.ServiceCallbacks,
+		ServiceCallbackContext:             contract.ServiceCallbackContext,
+		ServiceCallbackAcceptedValues:      contract.ServiceCallbackAcceptedValues,
+		ServiceCallbackPlayerAllowed:       contract.ServiceCallbackPlayerAllowed,
+		ServiceCallbackEnvelopeAllowed:     contract.ServiceCallbackEnvelopeAllowed,
+		SettlementAuthority:                contract.SettlementAuthority,
+		BusinessNotifications:              contract.BusinessNotifications,
+		BusinessEventRequestKinds:          contract.BusinessEventRequestKinds,
+		BusinessEventRequestContracts:      contract.BusinessEventRequestContracts,
+		BusinessNotificationTopics:         contract.BusinessNotificationTopics,
+		ClientAuthority:                    contract.ClientAuthority,
+		ServerAuthority:                    contract.ServerAuthority,
+		ForbiddenFields:                    contract.ForbiddenFields,
+		BusinessEnvelope:                   contract.BusinessEnvelopeRequired,
+		ClientResultSubmit:                 contract.ClientResultSubmitAllowed,
+		HighFrequencyBattleTickAllowed:     contract.HighFrequencyBattleTickAllowed,
+		ServerTime:                         contract.ServerTime,
+		ServerAuthoritative:                contract.ServerAuthoritative,
 	}
 	s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "rules_read", now)
 	return rules, nil
@@ -2469,37 +2470,38 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 func (s *Service) businessEventLocked(user *userState, kind string, req BusinessEventRequest) (*BusinessEvent, error) {
 	now := s.clock()
 	event := &BusinessEvent{
-		OK:                             true,
-		Version:                        currentVersionStamp(),
-		Kind:                           kind,
-		Topic:                          "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
-		Delivery:                       "server_push_with_lookup_fallback",
-		State:                          businessNotificationState(kind),
-		ClientEventRequestOperation:    businessNotificationRequestOperation(kind),
-		ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
-		UserID:                         user.UserID,
-		AllowedClientOperations:        businessEventClientOperations(),
-		AllowedClientRPCOperations:     businessEventClientRPCOperations(),
-		AllowedClientWSSOperations:     businessEventClientWSSOperations(),
-		ClientOperationContracts:       clientOperationContracts(),
-		DisallowedClientOperations:     ContractDisallowedClientOperations(),
-		ServiceOnlyOperations:          ServiceCallbackOperations(),
-		ServiceCallbacks:               ServiceCallbackOperations(),
-		ServiceCallbackContext:         ServiceCallbackContext(),
-		ServiceCallbackAcceptedValues:  ServiceCallbackAcceptedValues(),
-		ServiceCallbackPlayerAllowed:   serviceCallbackPlayerSessionAllowed(),
-		ServiceCallbackEnvelopeAllowed: serviceCallbackBusinessEnvelopeAllowed(),
-		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
-		BusinessNotifications:          businessNotificationKinds(),
-		BusinessEventRequestKinds:      businessEventRequestKinds(),
-		BusinessEventRequestContracts:  businessEventRequestContracts(),
-		BusinessNotificationTopics:     businessNotificationTopics(),
-		BusinessEnvelopeRequired:       true,
-		ForbiddenFields:                sortedForbiddenClientFields(),
-		HighFrequencyBattleTickAllowed: false,
-		ClientResultSubmitAllowed:      false,
-		ServerTime:                     now,
-		ServerAuthoritative:            true,
+		OK:                                 true,
+		Version:                            currentVersionStamp(),
+		Kind:                               kind,
+		Topic:                              "nakama_wss.business." + strings.ReplaceAll(kind, ".", "_"),
+		Delivery:                           "server_push_with_lookup_fallback",
+		State:                              businessNotificationState(kind),
+		ClientEventRequestOperation:        businessNotificationRequestOperation(kind),
+		ClientRequestAuthority:             clientRequestAuthorityLookupOnly,
+		UserID:                             user.UserID,
+		AllowedClientOperations:            businessEventClientOperations(),
+		AllowedClientRPCOperations:         businessEventClientRPCOperations(),
+		AllowedClientWSSOperations:         businessEventClientWSSOperations(),
+		ClientOperationContracts:           clientOperationContracts(),
+		DisallowedClientOperations:         ContractDisallowedClientOperations(),
+		DisallowedClientOperationContracts: disallowedClientOperationContracts(),
+		ServiceOnlyOperations:              ServiceCallbackOperations(),
+		ServiceCallbacks:                   ServiceCallbackOperations(),
+		ServiceCallbackContext:             ServiceCallbackContext(),
+		ServiceCallbackAcceptedValues:      ServiceCallbackAcceptedValues(),
+		ServiceCallbackPlayerAllowed:       serviceCallbackPlayerSessionAllowed(),
+		ServiceCallbackEnvelopeAllowed:     serviceCallbackBusinessEnvelopeAllowed(),
+		SettlementAuthority:                settlementAuthorityServiceSignedBattleResult,
+		BusinessNotifications:              businessNotificationKinds(),
+		BusinessEventRequestKinds:          businessEventRequestKinds(),
+		BusinessEventRequestContracts:      businessEventRequestContracts(),
+		BusinessNotificationTopics:         businessNotificationTopics(),
+		BusinessEnvelopeRequired:           true,
+		ForbiddenFields:                    sortedForbiddenClientFields(),
+		HighFrequencyBattleTickAllowed:     false,
+		ClientResultSubmitAllowed:          false,
+		ServerTime:                         now,
+		ServerAuthoritative:                true,
 	}
 	ticket := s.businessEventTicketLocked(user.UserID, req)
 	if strings.TrimSpace(req.TicketID) != "" && ticket == nil {
@@ -6388,26 +6390,27 @@ func ContractBusinessEventRequestContracts() []BusinessEventRequestContract {
 
 func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 	return &BusinessContractSnapshot{
-		OK:                             true,
-		Version:                        currentVersionStamp(),
-		BusinessTransports:             []string{"nakama_https_rpc", "nakama_wss"},
-		BattleTransports:               []string{"kcp_udp", "protobuf", "chacha20_poly1305"},
-		ClientOperations:               ContractClientOperations(),
-		ClientRPCOperations:            ContractClientRPCOperations(),
-		ClientWSSOperations:            ContractClientWSSOperations(),
-		ClientOperationContracts:       clientOperationContracts(),
-		DisallowedClientOperations:     ContractDisallowedClientOperations(),
-		ServiceOnlyOperations:          ServiceCallbackOperations(),
-		ServiceCallbacks:               ServiceCallbackOperations(),
-		ServiceCallbackContext:         ServiceCallbackContext(),
-		ServiceCallbackAcceptedValues:  ServiceCallbackAcceptedValues(),
-		ServiceCallbackPlayerAllowed:   serviceCallbackPlayerSessionAllowed(),
-		ServiceCallbackEnvelopeAllowed: serviceCallbackBusinessEnvelopeAllowed(),
-		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
-		BusinessNotifications:          businessNotificationKinds(),
-		BusinessEventRequestKinds:      businessEventRequestKinds(),
-		BusinessEventRequestContracts:  businessEventRequestContracts(),
-		BusinessNotificationTopics:     businessNotificationTopics(),
+		OK:                                 true,
+		Version:                            currentVersionStamp(),
+		BusinessTransports:                 []string{"nakama_https_rpc", "nakama_wss"},
+		BattleTransports:                   []string{"kcp_udp", "protobuf", "chacha20_poly1305"},
+		ClientOperations:                   ContractClientOperations(),
+		ClientRPCOperations:                ContractClientRPCOperations(),
+		ClientWSSOperations:                ContractClientWSSOperations(),
+		ClientOperationContracts:           clientOperationContracts(),
+		DisallowedClientOperations:         ContractDisallowedClientOperations(),
+		DisallowedClientOperationContracts: disallowedClientOperationContracts(),
+		ServiceOnlyOperations:              ServiceCallbackOperations(),
+		ServiceCallbacks:                   ServiceCallbackOperations(),
+		ServiceCallbackContext:             ServiceCallbackContext(),
+		ServiceCallbackAcceptedValues:      ServiceCallbackAcceptedValues(),
+		ServiceCallbackPlayerAllowed:       serviceCallbackPlayerSessionAllowed(),
+		ServiceCallbackEnvelopeAllowed:     serviceCallbackBusinessEnvelopeAllowed(),
+		SettlementAuthority:                settlementAuthorityServiceSignedBattleResult,
+		BusinessNotifications:              businessNotificationKinds(),
+		BusinessEventRequestKinds:          businessEventRequestKinds(),
+		BusinessEventRequestContracts:      businessEventRequestContracts(),
+		BusinessNotificationTopics:         businessNotificationTopics(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -6612,6 +6615,69 @@ func ContractClientOperationContracts() []ClientOperationContract {
 	return clientOperationContracts()
 }
 
+func disallowedClientOperationContracts() []DisallowedClientOperationContract {
+	contracts := make([]DisallowedClientOperationContract, 0, len(ContractDisallowedClientOperations()))
+	for _, operation := range ContractDisallowedClientOperations() {
+		serviceOnly := IsServiceCallbackOperation(operation)
+		contracts = append(contracts, DisallowedClientOperationContract{
+			Operation:               operation,
+			Reason:                  disallowedClientOperationReason(operation),
+			ServiceOnly:             serviceOnly,
+			ServiceCallbackRequired: serviceOnly,
+			PlayerSessionAllowed:    false,
+			BusinessEnvelopeAllowed: false,
+			ClientRPCAllowed:        false,
+			ClientWSSAllowed:        false,
+			HighFrequencyBattleTick: disallowedClientOperationUsesBattleTransport(operation),
+			ClientResultSubmit:      normalizeBusinessOperationName(operation) == "battle.result.submit",
+			ServerAuthoritative:     true,
+		})
+	}
+	return contracts
+}
+
+func ContractDisallowedClientOperationContracts() []DisallowedClientOperationContract {
+	return disallowedClientOperationContracts()
+}
+
+func disallowedClientOperationReason(operation string) string {
+	normalized := normalizeBusinessOperationName(operation)
+	if IsServiceCallbackOperation(normalized) {
+		switch normalized {
+		case "battle.result.submit":
+			return "service_signed_result_callback_only"
+		case "battle.ticket.consume":
+			return "battle_server_ticket_consume_callback_only"
+		default:
+			return "battle_server_service_callback_only"
+		}
+	}
+	if disallowedClientOperationUsesBattleTransport(normalized) {
+		return "battle_server_authoritative_transport_only"
+	}
+	return "server_authoritative_only"
+}
+
+func disallowedClientOperationUsesBattleTransport(operation string) bool {
+	switch normalizeBusinessOperationName(operation) {
+	case "match.input",
+		"match.snapshot",
+		"match.events",
+		"match.settle",
+		"battle.input",
+		"battle.snapshot",
+		"battle.events",
+		"battle.ready",
+		"battle.reconnect",
+		"battle.mode_action",
+		"battle.cast_card",
+		"battle.card_slot":
+		return true
+	default:
+		return false
+	}
+}
+
 func clientOperationRequestFields(operation string) []string {
 	switch operation {
 	case "bootstrap", "inventory.get", "decks.list", "chests.list", "battle.servers", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
@@ -6675,7 +6741,7 @@ func clientOperationProjectionFields(operation string) []string {
 	case "rooms.get":
 		return append(common, "room_code", "room_status", "mode_id", "host_user_id", "required_players", "current_players", "match_id", "stage_id", "mode_config_hash", "participants", "participants.deck_snapshot_hash", "participants.loadout", "messages", "server_time")
 	case "rooms.rules":
-		return append(common, "version", "room", "mode", "tick_rate", "input_delay_ticks", "battle_ticket_ttl_seconds", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
+		return append(common, "version", "room", "mode", "tick_rate", "input_delay_ticks", "battle_ticket_ttl_seconds", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "disallowed_client_operation_contracts", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
 	case "rooms.message", "rooms.chat", "rooms.announcement":
 		return append(common, "message_id", "room_code", "mode_id", "kind", "user_id", "display_name", "text", "metadata", "created_at", "duplicate")
 	case "business.event":
@@ -6683,7 +6749,7 @@ func clientOperationProjectionFields(operation string) []string {
 	case "business.event.settlement":
 		return appendUniqueStrings(common, businessEventOperationProjectionFields(true)...)
 	case "business.contract":
-		return append(common, "version", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
+		return append(common, "version", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "disallowed_client_operation_contracts", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
 	case "match.ready":
 		return append(common, "match_id", "ready_status", "ready_count", "required_players", "match_start", "battle_ticket")
 	case "match.disconnect", "match.reconnect":
