@@ -2536,6 +2536,18 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		if ticket == nil {
 			ticket = s.roomTicketForUserLocked(snapshot.RoomCode, user.UserID)
 		}
+		if match == nil && snapshot.MatchID != "" {
+			match = s.matches[snapshot.MatchID]
+			if match != nil {
+				player = match.Players[user.UserID]
+				if player == nil {
+					return nil, newError(codeUnauthorized, "user is not in match")
+				}
+				if ticket == nil {
+					ticket = s.tickets[s.ticketIDForMatchUserLocked(match.MatchID, user.UserID)]
+				}
+			}
+		}
 	}
 	if match != nil {
 		event.MatchID = match.MatchID

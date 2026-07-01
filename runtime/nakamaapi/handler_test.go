@@ -2002,11 +2002,29 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !stringSliceContains(settlementPayload.BusinessNotifications, "settlement") || stringSliceContains(settlementPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("settlement business event should retain low-frequency WSS notification contract: %+v", settlementPayload)
 	}
+	roomSettlementEvent := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event.settlement",
+		SessionID: host.SessionToken,
+		UserID:    host.UserID,
+		Payload: envelopePayload(17, "nonce-sql-host-room-settlement-event", "business_event_settlement", map[string]any{
+			"room_code": room.RoomCode,
+		}),
+	})
+	if !roomSettlementEvent.OK || roomSettlementEvent.Status != 200 {
+		t.Fatalf("room-code settlement business event failed: %+v", roomSettlementEvent)
+	}
+	roomSettlementPayload := roomSettlementEvent.Payload.(*core.BusinessEvent)
+	if roomSettlementPayload.Room == nil || roomSettlementPayload.Room.RoomCode != room.RoomCode || roomSettlementPayload.MatchID != match.MatchID || roomSettlementPayload.Settlement == nil || roomSettlementPayload.Settlement.ModeResult["battle_result_hash"] != "sha256:abcd1234" {
+		t.Fatalf("room-code settlement event should resolve matched room to verified settlement: %+v", roomSettlementPayload)
+	}
+	if roomSettlementPayload.ClientResultSubmitAllowed || roomSettlementPayload.HighFrequencyBattleTickAllowed || stringSliceContains(roomSettlementPayload.AllowedClientOperations, "battle.result.submit") {
+		t.Fatalf("room-code settlement event must not authorize client result or battle tick: %+v", roomSettlementPayload)
+	}
 	clientAuthoredSettlement := handler.HandleRPC(RPCRequest{
 		ID:        "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(17, "nonce-sql-host-settlement-client-authored", "business_event_settlement", map[string]any{
+		Payload: envelopePayload(18, "nonce-sql-host-settlement-client-authored", "business_event_settlement", map[string]any{
 			"match_id":    match.MatchID,
 			"result_hash": "client-authored",
 		}),
@@ -2018,7 +2036,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		Name:      "business.event.settlement",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload: envelopePayload(18, "nonce-sql-host-settlement-boss-hp", "business_event_settlement", map[string]any{
+		Payload: envelopePayload(19, "nonce-sql-host-settlement-boss-hp", "business_event_settlement", map[string]any{
 			"match_id": match.MatchID,
 			"settlement": map[string]any{
 				"mode_result": map[string]any{"boss_hp_after_global": 0},
@@ -2032,7 +2050,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		ID:        "battle.audit.status",
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
-		Payload:   envelopePayload(19, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(20, "nonce-sql-battle-status", "battle_audit_status", map[string]any{}),
 	})
 	if !battleStatus.OK {
 		t.Fatalf("battle audit status failed: %+v", battleStatus)
