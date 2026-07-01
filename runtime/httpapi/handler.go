@@ -777,9 +777,12 @@ func (h *Handler) serviceCallbackStatus(w http.ResponseWriter, r *http.Request) 
 				"service_origin":  headerServiceOrigin,
 				"battle_callback": headerBattleCallback,
 			},
-			"accepted_callback_values":       core.ServiceCallbackAcceptedValues(),
-			"player_session_context_allowed": false,
-			"business_envelope_allowed":      false,
+			"accepted_callback_values":                   core.ServiceCallbackAcceptedValues(),
+			"service_callback_accepted_values":           core.ServiceCallbackAcceptedValues(),
+			"player_session_context_allowed":             false,
+			"business_envelope_allowed":                  false,
+			"service_callback_player_session_allowed":    false,
+			"service_callback_business_envelope_allowed": false,
 		},
 	})
 }
