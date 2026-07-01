@@ -122,7 +122,8 @@ development contracts. They require `X-PhK-Service-Origin: battle_server` plus
 `X-PhK-Battle-Callback: true`/`1`/`yes`, reject player session context and
 business-envelope-shaped payloads, and do not consume the player HTTP business-envelope replay guard.
 `GET /v1/security/service-callback` exposes the same non-secret callback operation and
-context contract used by room rules, Nakama RPC gating, and the HTTP fallback header gate.
+context contract used by room rules, Nakama RPC gating, and the HTTP fallback header gate,
+including the allowed low-frequency `business_event_request_kinds` for WSS/status reads.
 Use Nakama service-origin RPC gating plus mTLS/private networking for production callbacks.
 
 ## Boundary
