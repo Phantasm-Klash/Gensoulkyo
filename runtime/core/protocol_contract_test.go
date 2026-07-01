@@ -460,6 +460,24 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("business event request contract must not let clients submit server projection fields: %+v", contract)
 		}
 		switch contract.Kind {
+		case "room":
+			for _, projectionField := range []string{
+				"room.room_status",
+				"room.required_players",
+				"room.current_players",
+				"room.match_id",
+				"room.participants.user_id",
+				"room.participants.ticket_id",
+				"room.participants.deck_snapshot_hash",
+				"room.participants.loadout",
+				"room.messages.message_id",
+				"room.messages.metadata",
+				"room.server_authoritative",
+			} {
+				if !stringSliceContains(contract.ServerProjectionFields, projectionField) {
+					t.Fatalf("room request contract missing lobby projection field %q: %+v", projectionField, contract)
+				}
+			}
 		case "battle.allocation":
 			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)
@@ -521,6 +539,24 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("business notification topic must not let clients submit server projection fields: %+v", topic)
 		}
 		switch topic.Kind {
+		case "room":
+			for _, projectionField := range []string{
+				"room.room_status",
+				"room.required_players",
+				"room.current_players",
+				"room.match_id",
+				"room.participants.user_id",
+				"room.participants.ticket_id",
+				"room.participants.deck_snapshot_hash",
+				"room.participants.loadout",
+				"room.messages.message_id",
+				"room.messages.metadata",
+				"room.server_authoritative",
+			} {
+				if !stringSliceContains(topic.ServerProjectionFields, projectionField) {
+					t.Fatalf("room notification missing lobby projection field %q: %+v", projectionField, topic)
+				}
+			}
 		case "battle.allocation":
 			if !stringSliceContains(topic.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation notification missing server projection field: %+v", topic)

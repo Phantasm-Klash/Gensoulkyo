@@ -2782,6 +2782,12 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 			t.Fatalf("business notification topic must not accept server projection fields from clients: %+v", topic)
 		}
 		switch topic.Kind {
+		case "room":
+			for _, projectionField := range []string{"room.room_status", "room.current_players", "room.required_players", "room.participants.ticket_id", "room.messages.message_id", "room.server_authoritative"} {
+				if !stringSliceContains(topic.ServerProjectionFields, projectionField) {
+					t.Fatalf("room topic missing lobby projection field %q: %+v", projectionField, topic)
+				}
+			}
 		case "battle.allocation":
 			if !stringSliceContains(topic.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation topic missing server projection field: %+v", topic)
@@ -2838,6 +2844,12 @@ func assertBusinessEventRequestContracts(t *testing.T, contracts []core.Business
 			t.Fatalf("business event request contract must not accept server projection fields from clients: %+v", contract)
 		}
 		switch contract.Kind {
+		case "room":
+			for _, projectionField := range []string{"room.room_status", "room.current_players", "room.required_players", "room.participants.ticket_id", "room.messages.message_id", "room.server_authoritative"} {
+				if !stringSliceContains(contract.ServerProjectionFields, projectionField) {
+					t.Fatalf("room request contract missing lobby projection field %q: %+v", projectionField, contract)
+				}
+			}
 		case "battle.allocation":
 			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)

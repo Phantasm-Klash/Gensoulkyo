@@ -2769,7 +2769,7 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 		t.Fatalf("business contract and room rules event request contracts drifted: contract=%+v rules=%+v expected=%+v", contract.BusinessEventRequestContracts, rules.BusinessEventRequestContracts, ContractBusinessEventRequestContracts())
 	}
 	roomTopic := businessNotificationTopicByKind(contract.BusinessNotificationTopics, "room")
-	if roomTopic == nil || !stringSliceContains(roomTopic.ServerProjectionFields, "room.participants.deck_snapshot_hash") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.participants.loadout") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.messages") || stringSliceContains(roomTopic.ServerProjectionFields, "battle_result_hash") {
+	if roomTopic == nil || !stringSliceContains(roomTopic.ServerProjectionFields, "room.participants.deck_snapshot_hash") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.participants.loadout") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.participants.ticket_id") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.messages.message_id") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.messages.metadata") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.server_authoritative") || stringSliceContains(roomTopic.ServerProjectionFields, "battle_result_hash") {
 		t.Fatalf("room notification topic should publish audited room snapshot fields only: %+v", roomTopic)
 	}
 	roomRequestContract := businessEventRequestContractByKind(contract.BusinessEventRequestContracts, "room")
