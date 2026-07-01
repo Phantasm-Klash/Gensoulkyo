@@ -861,6 +861,144 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	}
 }
 
+func TestNakamaRematchRPCAndWSSRequireVerifiedSettlement(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	hostSession := "nakama-rematch-host-session"
+	hostUser := "nakama-rematch-host-user"
+	guestSession := "nakama-rematch-guest-session"
+	guestUser := "nakama-rematch-guest-user"
+
+	created := handler.HandleRPC(RPCRequest{
+		ID:          "rooms.create",
+		SessionID:   hostSession,
+		UserID:      hostUser,
+		DisplayName: "Rematch Host",
+		Payload: envelopePayload(1, "nonce-rematch-room-create", "rooms_create", map[string]any{
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "rematch_host_deck",
+			"deck_snapshot":  deckPayload("rematch_host_deck"),
+			"mode_params":    map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
+		}),
+	})
+	if !created.OK || created.Status != 200 {
+		t.Fatalf("room create failed: %+v", created)
+	}
+	room := created.Payload.(*core.QueueResponse)
+	joined := handler.HandleWSSMessage(WSSMessage{
+		Name:        "rooms.join",
+		SessionID:   guestSession,
+		UserID:      guestUser,
+		DisplayName: "Rematch Guest",
+		Payload: envelopePayload(1, "nonce-rematch-room-join", "rooms_join", map[string]any{
+			"room_code":      room.RoomCode,
+			"mode_id":        "pvp_duel",
+			"active_deck_id": "rematch_guest_deck",
+			"deck_snapshot":  deckPayload("rematch_guest_deck"),
+		}),
+	})
+	if !joined.OK || joined.Status != 200 {
+		t.Fatalf("room join failed: %+v", joined)
+	}
+	match := joined.Payload.(*core.QueueResponse)
+	if match.MatchID == "" || match.BattleAllocation == nil {
+		t.Fatalf("expected matched room allocation: %+v", match)
+	}
+
+	early := handler.HandleWSSMessage(WSSMessage{
+		Name:      "match.rematch",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(2, "nonce-rematch-too-early", "match_rematch", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if early.OK || early.Status != 409 || early.ErrorCode != "match_state_invalid" {
+		t.Fatalf("rematch before verified settlement should be rejected: %+v", early)
+	}
+
+	playerIDs := []string{}
+	for _, player := range match.BattleAllocation.Players {
+		playerIDs = append(playerIDs, player.PlayerID)
+	}
+	resultSubmit := handler.HandleRPC(RPCRequest{
+		ID:      "battle.result.submit",
+		Service: true,
+		Payload: map[string]any{"signed_result": map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"version": map[string]any{
+					"protocol_version":     core.ProtocolVersion,
+					"business_api_version": core.BusinessAPIVersion,
+					"battle_api_version":   core.BattleAPIVersion,
+					"ruleset_version":      core.RulesetVersion,
+				},
+				"match_id":               match.MatchID,
+				"mode_id":                match.ModeID,
+				"result_hash":            "sha256:" + strings.Repeat("1", 64),
+				"replay_id":              "nakama-rematch-service-replay",
+				"player_ids":             playerIDs,
+				"reward_projection_json": `{"source":"battle_server"}`,
+				"mode_result_json":       `{"verified":true}`,
+				"settled_at_ms":          time.Now().UnixMilli(),
+			},
+			"signature_alg":        "ED25519",
+			"key_id":               match.BattleAllocation.BattleServerID,
+			"signature_hex":        strings.Repeat("e", 128),
+			"public_key_hex":       strings.Repeat("f", 64),
+			"server_authoritative": true,
+		}},
+	})
+	if !resultSubmit.OK || !resultSubmit.Payload.(*core.BattleResultSubmitResponse).Accepted {
+		t.Fatalf("service-origin result submit failed: %+v", resultSubmit)
+	}
+
+	hostRematch := handler.HandleRPC(RPCRequest{
+		ID:        "match.rematch",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(3, "nonce-rematch-host", "match_rematch", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !hostRematch.OK || hostRematch.Status != 200 {
+		t.Fatalf("host rematch failed: %+v", hostRematch)
+	}
+	waiting := hostRematch.Payload.(*core.RematchResponse)
+	if waiting.RematchStatus != "waiting" || waiting.AcceptedCount != 1 || waiting.NewMatchID != "" || !waiting.ServerAuthoritative {
+		t.Fatalf("host rematch should wait for second participant: %+v", waiting)
+	}
+
+	guestRematch := handler.HandleWSSMessage(WSSMessage{
+		Name:      "matches.rematch",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(2, "nonce-rematch-guest", "matches_rematch", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !guestRematch.OK || guestRematch.Status != 200 {
+		t.Fatalf("guest rematch failed: %+v", guestRematch)
+	}
+	found := guestRematch.Payload.(*core.RematchResponse)
+	if found.RematchStatus != "found" || found.AcceptedCount != 2 || found.NewMatchID == "" || found.NewMatchID == match.MatchID || found.StageID != "clockwork_bloom" || !found.ServerAuthoritative {
+		t.Fatalf("guest rematch should create a fresh match with locked loadout: %+v", found)
+	}
+
+	contract := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.contract",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload:   envelopePayload(3, "nonce-rematch-contract", "business_contract", map[string]any{}),
+	})
+	if !contract.OK || contract.Status != 200 {
+		t.Fatalf("business contract WSS read failed: %+v", contract)
+	}
+	contractPayload := contract.Payload.(*core.BusinessContractSnapshot)
+	if !stringSliceContains(contractPayload.ClientRPCOperations, "match.rematch") || !stringSliceContains(contractPayload.ClientWSSOperations, "match.rematch") || stringSliceContains(contractPayload.ClientWSSOperations, "match.settle") || stringSliceContains(contractPayload.ClientWSSOperations, "battle.result.submit") {
+		t.Fatalf("business contract should expose rematch intent without client settlement/result authority: %+v", contractPayload)
+	}
+}
+
 func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	hostSession := "nakama-replay-host-session"
