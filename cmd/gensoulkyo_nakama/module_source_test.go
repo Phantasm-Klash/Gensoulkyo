@@ -146,6 +146,25 @@ func TestNakamaBindingRegistersEveryCoreServiceCallback(t *testing.T) {
 	}
 }
 
+func TestNakamaBindingDoesNotRegisterDisallowedClientOperations(t *testing.T) {
+	source, err := os.ReadFile("module.go")
+	if err != nil {
+		t.Fatalf("read module source: %v", err)
+	}
+	registered := map[string]bool{}
+	for _, id := range extractRPCIDs(t, string(source)) {
+		registered[id] = true
+	}
+	for _, disallowed := range core.ContractDisallowedClientOperations() {
+		if core.IsServiceCallbackOperation(disallowed) {
+			continue
+		}
+		if registered[disallowed] {
+			t.Fatalf("Nakama RPC registry must not expose disallowed client operation %q: registered=%+v", disallowed, registered)
+		}
+	}
+}
+
 func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	source, err := os.ReadFile("module.go")
 	if err != nil {
