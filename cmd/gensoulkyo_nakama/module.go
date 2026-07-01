@@ -15,49 +15,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-var rpcIDs = []string{
-	"auth.anonymous",
-	"bootstrap",
-	"inventory.get",
-	"cards.upgrade",
-	"decks.list",
-	"decks.save",
-	"chests.list",
-	"chests.open",
-	"presence.heartbeat",
-	"business.event",
-	"business.event.settlement",
-	"business.contract",
-	"matchmaking.join",
-	"matchmaking.ticket",
-	"matchmaking.cancel",
-	"rooms.create",
-	"rooms.list",
-	"rooms.get",
-	"rooms.rules",
-	"rooms.join",
-	"rooms.leave",
-	"rooms.message",
-	"rooms.chat",
-	"rooms.announcement",
-	"match.ready",
-	"match.disconnect",
-	"match.reconnect",
-	"match.rematch",
-	"activity.claim",
-	"battle.servers.register",
-	"battle.servers.heartbeat",
-	"battle.servers.offline",
-	"battle.servers",
-	"business.envelope.audit.status",
-	"battle.audit.status",
-	"lobby.audit.status",
-	"battle.allocation",
-	"battle.ticket",
-	"battle.ticket.consume",
-	"replay.get",
-	"battle.result.submit",
-}
+var rpcIDs = runtimeRPCIDs()
 
 var serviceOriginRPCIDs = serviceOriginRPCIDSet()
 
@@ -141,6 +99,22 @@ func serviceOriginRPCIDSet() map[string]struct{} {
 		out[id] = struct{}{}
 	}
 	return out
+}
+
+func runtimeRPCIDs() []string {
+	ids := append([]string{}, core.ContractClientRPCOperations()...)
+	seen := map[string]struct{}{}
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	for _, id := range core.ServiceCallbackOperations() {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		ids = append(ids, id)
+		seen[id] = struct{}{}
+	}
+	return ids
 }
 
 func serviceCallbackContextValue(key string) string {

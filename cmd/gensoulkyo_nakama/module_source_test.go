@@ -5,7 +5,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -21,41 +20,18 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 	for _, expected := range []string{
 		"//go:build nakama",
 		"func InitModule(",
+		"var rpcIDs = runtimeRPCIDs()",
+		"func runtimeRPCIDs()",
 		"initializer.RegisterRpc",
 		"nakamaapi.New",
 		"nakamaapi.NewWithDatabase",
+		"core.ContractClientRPCOperations()",
+		"core.ServiceCallbackOperations()",
 		"runtime.RUNTIME_CTX_SESSION_ID",
 		"runtime.RUNTIME_CTX_USER_ID",
 		"runtime.RUNTIME_CTX_MODE",
 		"runtime.RUNTIME_CTX_VARS",
 		"PayloadError: payloadError(payload)",
-		"auth.anonymous",
-		"bootstrap",
-		"business.event",
-		"business.event.settlement",
-		"business.contract",
-		"matchmaking.join",
-		"rooms.list",
-		"rooms.rules",
-		"rooms.leave",
-		"rooms.message",
-		"rooms.chat",
-		"rooms.announcement",
-		"match.ready",
-		"match.disconnect",
-		"match.reconnect",
-		"match.rematch",
-		"battle.servers.register",
-		"battle.servers.heartbeat",
-		"battle.servers.offline",
-		"business.envelope.audit.status",
-		"battle.audit.status",
-		"lobby.audit.status",
-		"battle.allocation",
-		"battle.ticket",
-		"battle.ticket.consume",
-		"replay.get",
-		"battle.result.submit",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("Nakama binding source missing %q", expected)
@@ -63,64 +39,31 @@ func TestNakamaBindingSourceListsRuntimeEntrypoints(t *testing.T) {
 	}
 }
 
-func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
+func TestNakamaBindingRPCRegistryIsDerivedFromCoreContracts(t *testing.T) {
 	source, err := os.ReadFile("module.go")
 	if err != nil {
 		t.Fatalf("read module source: %v", err)
 	}
-	got := extractRPCIDs(t, string(source))
-	want := []string{
-		"auth.anonymous",
-		"bootstrap",
-		"inventory.get",
-		"cards.upgrade",
-		"decks.list",
-		"decks.save",
-		"chests.list",
-		"chests.open",
-		"presence.heartbeat",
-		"business.event",
-		"business.event.settlement",
-		"business.contract",
-		"matchmaking.join",
-		"matchmaking.ticket",
-		"matchmaking.cancel",
-		"rooms.create",
-		"rooms.list",
-		"rooms.get",
-		"rooms.rules",
-		"rooms.join",
-		"rooms.leave",
-		"rooms.message",
-		"rooms.chat",
-		"rooms.announcement",
-		"match.ready",
-		"match.disconnect",
-		"match.reconnect",
-		"match.rematch",
-		"activity.claim",
-		"battle.servers.register",
-		"battle.servers.heartbeat",
-		"battle.servers.offline",
-		"battle.servers",
-		"business.envelope.audit.status",
-		"battle.audit.status",
-		"lobby.audit.status",
-		"battle.allocation",
-		"battle.ticket",
-		"battle.ticket.consume",
-		"replay.get",
-		"battle.result.submit",
+	file, err := parser.ParseFile(token.NewFileSet(), "module.go", string(source), 0)
+	if err != nil {
+		t.Fatalf("parse module source: %v", err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected Nakama RPC registry:\n got: %#v\nwant: %#v", got, want)
+	registry := findFuncDecl(file, "runtimeRPCIDs")
+	if registry == nil {
+		t.Fatalf("runtimeRPCIDs registry helper not found")
 	}
-	seen := map[string]bool{}
-	for _, id := range got {
-		if seen[id] {
-			t.Fatalf("duplicate Nakama RPC registration for %q", id)
+	registryText := string(source[registry.Pos()-1 : registry.End()-1])
+	for _, expected := range []string{
+		"core.ContractClientRPCOperations()",
+		"core.ServiceCallbackOperations()",
+		"append([]string{}, core.ContractClientRPCOperations()...)",
+		"seen := map[string]struct{}{}",
+		"if _, ok := seen[id]; ok",
+		"continue",
+	} {
+		if !strings.Contains(registryText, expected) {
+			t.Fatalf("runtimeRPCIDs must derive from core contracts and de-duplicate service callbacks; missing %q in:\n%s", expected, registryText)
 		}
-		seen[id] = true
 	}
 }
 
@@ -129,20 +72,20 @@ func TestNakamaBindingRegistersEveryCoreServiceCallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read module source: %v", err)
 	}
-	rpcIDs := extractRPCIDs(t, string(source))
-	registered := map[string]int{}
-	for _, id := range rpcIDs {
-		registered[id]++
+	registryText := runtimeRegistryFunctionText(t, string(source))
+	expected := append([]string{}, core.ContractClientRPCOperations()...)
+	seen := map[string]int{}
+	for _, id := range expected {
+		seen[id]++
 	}
 	for _, callback := range core.ServiceCallbackOperations() {
-		if registered[callback] != 1 {
-			t.Fatalf("Nakama RPC registry must include service callback %q exactly once: registered=%+v callbacks=%+v", callback, registered, core.ServiceCallbackOperations())
+		if !strings.Contains(registryText, "core.ServiceCallbackOperations()") {
+			t.Fatalf("Nakama RPC registry must include service callback %q through core.ServiceCallbackOperations()", callback)
 		}
-	}
-	for _, id := range rpcIDs {
-		if core.IsServiceCallbackOperation(id) && !sliceContains(core.ServiceCallbackOperations(), id) {
-			t.Fatalf("Nakama RPC registry exposes unknown service callback %q: callbacks=%+v", id, core.ServiceCallbackOperations())
+		if seen[callback] > 0 {
+			t.Fatalf("client RPC contract must not duplicate service callback %q: rpc_contract=%+v callbacks=%+v", callback, core.ContractClientRPCOperations(), core.ServiceCallbackOperations())
 		}
+		seen[callback]++
 	}
 }
 
@@ -151,18 +94,22 @@ func TestNakamaBindingRegistersEveryCoreClientRPCOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read module source: %v", err)
 	}
-	registered := map[string]int{}
-	for _, id := range extractRPCIDs(t, string(source)) {
-		registered[id]++
+	registryText := runtimeRegistryFunctionText(t, string(source))
+	if !strings.Contains(registryText, "core.ContractClientRPCOperations()") {
+		t.Fatalf("Nakama RPC registry must include every core client RPC operation through core.ContractClientRPCOperations():\n%s", registryText)
 	}
+	registered := map[string]int{}
 	for _, operation := range core.ContractClientRPCOperations() {
-		if registered[operation] != 1 {
-			t.Fatalf("Nakama RPC registry must include client RPC operation %q exactly once: registered=%+v rpc_contract=%+v", operation, registered, core.ContractClientRPCOperations())
-		}
+		registered[operation]++
 	}
 	for _, operation := range core.ContractClientWSSOperations() {
-		if !sliceContains(core.ContractClientRPCOperations(), operation) && registered[operation] != 0 {
-			t.Fatalf("Nakama RPC registry exposed WSS-only operation %q: registered=%+v rpc_contract=%+v", operation, registered, core.ContractClientRPCOperations())
+		if !sliceContains(core.ContractClientRPCOperations(), operation) {
+			t.Fatalf("Nakama binding can only derive WSS operations that are also RPC operations; WSS-only operation %q would need explicit binding policy", operation)
+		}
+	}
+	for operation, count := range registered {
+		if count != 1 {
+			t.Fatalf("client RPC contract contains duplicate operation %q: %+v", operation, core.ContractClientRPCOperations())
 		}
 	}
 }
@@ -172,16 +119,16 @@ func TestNakamaBindingDoesNotRegisterDisallowedClientOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read module source: %v", err)
 	}
-	registered := map[string]bool{}
-	for _, id := range extractRPCIDs(t, string(source)) {
-		registered[id] = true
+	registryText := runtimeRegistryFunctionText(t, string(source))
+	if !strings.Contains(registryText, "core.ContractClientRPCOperations()") {
+		t.Fatalf("Nakama RPC registry must derive client operations from core contract:\n%s", registryText)
 	}
 	for _, disallowed := range core.ContractDisallowedClientOperations() {
 		if core.IsServiceCallbackOperation(disallowed) {
 			continue
 		}
-		if registered[disallowed] {
-			t.Fatalf("Nakama RPC registry must not expose disallowed client operation %q: registered=%+v", disallowed, registered)
+		if sliceContains(core.ContractClientRPCOperations(), disallowed) {
+			t.Fatalf("Nakama RPC registry must not expose disallowed client operation %q through core RPC contract: rpc_contract=%+v", disallowed, core.ContractClientRPCOperations())
 		}
 	}
 }
@@ -231,16 +178,9 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	if !strings.Contains(text, "runtimeCtxString(ctx, runtime.RUNTIME_CTX_USER_ID)") {
 		t.Fatalf("Nakama binding must pass user context through runtime/nakamaapi so service-origin result callbacks can reject player-scoped requests")
 	}
-	for _, serviceRPC := range []string{
-		"battle.result.submit",
-		"battle.ticket.consume",
-		"battle.servers.register",
-		"battle.servers.heartbeat",
-		"battle.servers.offline",
-	} {
-		if !strings.Contains(text, serviceRPC) {
-			t.Fatalf("Nakama binding must register service-origin RPC %q", serviceRPC)
-		}
+	registryText := runtimeRegistryFunctionText(t, text)
+	if !strings.Contains(registryText, "core.ServiceCallbackOperations()") {
+		t.Fatalf("Nakama binding must register service-origin RPCs from core.ServiceCallbackOperations():\n%s", registryText)
 	}
 }
 
@@ -398,39 +338,17 @@ func findFuncDecl(file *ast.File, name string) *ast.FuncDecl {
 	return nil
 }
 
-func extractRPCIDs(t *testing.T, source string) []string {
+func runtimeRegistryFunctionText(t *testing.T, source string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "module.go", source, 0)
 	if err != nil {
 		t.Fatalf("parse module source: %v", err)
 	}
-	for _, decl := range file.Decls {
-		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.VAR {
-			continue
-		}
-		for _, spec := range gen.Specs {
-			valueSpec, ok := spec.(*ast.ValueSpec)
-			if !ok || len(valueSpec.Names) == 0 || valueSpec.Names[0].Name != "rpcIDs" || len(valueSpec.Values) != 1 {
-				continue
-			}
-			literal, ok := valueSpec.Values[0].(*ast.CompositeLit)
-			if !ok {
-				t.Fatalf("rpcIDs must be declared as a composite literal")
-			}
-			out := make([]string, 0, len(literal.Elts))
-			for _, element := range literal.Elts {
-				basic, ok := element.(*ast.BasicLit)
-				if !ok || basic.Kind != token.STRING {
-					t.Fatalf("rpcIDs contains non-string element %#v", element)
-				}
-				out = append(out, strings.Trim(basic.Value, `"`))
-			}
-			return out
-		}
+	registry := findFuncDecl(file, "runtimeRPCIDs")
+	if registry == nil {
+		t.Fatalf("runtimeRPCIDs registry helper not found")
 	}
-	t.Fatalf("rpcIDs registry not found in module.go")
-	return nil
+	return string(source[registry.Pos()-1 : registry.End()-1])
 }
 
 func sliceContains(values []string, want string) bool {
