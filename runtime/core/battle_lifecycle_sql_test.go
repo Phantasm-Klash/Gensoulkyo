@@ -36,6 +36,16 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 			t.Fatalf("match allocation audit migration must allow battle server lifecycle status %s", status)
 		}
 	}
+	if !strings.Contains(upSQL, "status IN ('issued', 'consumed', 'expired', 'revoked', 'rejected')") {
+		t.Fatalf("battle ticket audit migration must allow rejected consume callback audits")
+	}
+	if !strings.Contains(upSQL, "reject_reason TEXT") {
+		t.Fatalf("battle ticket audit migration must persist rejected consume reason codes")
+	}
+	assertMigrationHasUniqueIndex(t, upSQL, "ux_battle_ticket_audit_lifecycle", "battle_ticket_audits", []string{"ticket_id"})
+	if !strings.Contains(upSQL, "ix_battle_ticket_audit_rejected") || !strings.Contains(upSQL, "WHERE status = 'rejected'") {
+		t.Fatalf("battle ticket audit migration must index rejected consume audits")
+	}
 	for _, action := range []string{"'listed'", "'snapshot_read'", "'ticket_read'", "'settlement_read'", "'create_retry'", "'join_retry'", "'ready'", "'disconnected'", "'reconnected'", "'heartbeat'"} {
 		if !strings.Contains(upSQL, action) {
 			t.Fatalf("lobby room audit migration must allow read action %s", action)
@@ -201,16 +211,16 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	if calls[0].args[0] != "match-a" || calls[0].args[2] != "battle-a" || calls[0].args[6] != BusinessAPIVersion || calls[0].args[7] != BattleAPIVersion || calls[0].args[12] != `{"match_id":"match-a"}` || calls[0].args[14] != true || calls[0].args[15] != now {
 		t.Fatalf("allocation args invalid: %+v", calls[0].args)
 	}
-	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 20 {
+	if !strings.Contains(calls[1].query, "INSERT INTO battle_ticket_audits") || len(calls[1].args) != 21 {
 		t.Fatalf("ticket insert invalid: %+v", calls[1])
 	}
-	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[11] != BusinessAPIVersion || calls[1].args[12] != BattleAPIVersion || calls[1].args[16] != "0123456789abcdef" || calls[1].args[18] != true || calls[1].args[19] != nil {
+	if calls[1].args[0] != "ticket-a" || calls[1].args[3] != "user-a" || calls[1].args[11] != BusinessAPIVersion || calls[1].args[12] != BattleAPIVersion || calls[1].args[16] != "0123456789abcdef" || calls[1].args[18] != "" || calls[1].args[19] != true || calls[1].args[20] != nil {
 		t.Fatalf("ticket args invalid: %+v", calls[1].args)
 	}
-	if !strings.Contains(calls[2].query, "INSERT INTO battle_ticket_audits") || len(calls[2].args) != 20 {
+	if !strings.Contains(calls[2].query, "INSERT INTO battle_ticket_audits") || len(calls[2].args) != 21 {
 		t.Fatalf("expired ticket upsert invalid: %+v", calls[2])
 	}
-	if calls[2].args[0] != "ticket-a" || calls[2].args[17] != "expired" || calls[2].args[19] != now.Add(2*time.Minute) {
+	if calls[2].args[0] != "ticket-a" || calls[2].args[17] != "expired" || calls[2].args[20] != now.Add(2*time.Minute) {
 		t.Fatalf("expired ticket args invalid: %+v", calls[2].args)
 	}
 	if !strings.Contains(calls[3].query, "INSERT INTO battle_result_audits") || len(calls[3].args) != 13 {

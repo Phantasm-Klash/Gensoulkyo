@@ -103,6 +103,7 @@ type BattleLifecycleAuditStatus struct {
 	TicketRecords          int       `json:"ticket_records"`
 	TicketExpiredRecords   int       `json:"ticket_expired_records"`
 	TicketConsumedRecords  int       `json:"ticket_consumed_records"`
+	TicketRejectedRecords  int       `json:"ticket_rejected_records"`
 	ResultRecords          int       `json:"result_records"`
 	ResultDuplicateRecords int       `json:"result_duplicate_records"`
 	ResultRejectedRecords  int       `json:"result_rejected_records"`
@@ -217,6 +218,7 @@ type BattleTicketAuditRecord struct {
 	Nonce               string    `json:"nonce"`
 	SignaturePrefix     string    `json:"signature_prefix"`
 	Status              string    `json:"status"`
+	RejectReason        string    `json:"reject_reason,omitempty"`
 	IssuedAt            time.Time `json:"issued_at"`
 	ExpiresAt           time.Time `json:"expires_at"`
 	ConsumedAt          time.Time `json:"consumed_at,omitempty"`

@@ -2046,28 +2046,43 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 	}
 	ticket := signed.Ticket
 	if err := validateBattleTicketConsumeVersion(req.Version, ticket); err != nil {
+		s.recordBattleTicketRejectedAuditLocked(signed, now, ErrorCode(err))
 		return nil, err
 	}
 	if ticket.MatchID != matchID {
-		return nil, newError(codeInvalidRequest, "battle ticket match mismatch")
+		err := newError(codeInvalidRequest, "battle ticket match mismatch")
+		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
+		return nil, err
 	}
 	if ticket.BattleServerID != battleServerID {
-		return nil, newError(codeBattleServer, "battle ticket server mismatch")
+		err := newError(codeBattleServer, "battle ticket server mismatch")
+		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
+		return nil, err
 	}
 	if ticket.ModeConfigHash != "" && strings.TrimSpace(req.ModeConfigHash) == "" {
-		return nil, newError(codeInvalidRequest, "battle ticket mode config hash is required")
+		err := newError(codeInvalidRequest, "battle ticket mode config hash is required")
+		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
+		return nil, err
 	}
 	if strings.TrimSpace(req.ModeConfigHash) != ticket.ModeConfigHash {
-		return nil, newError(codeInvalidRequest, "battle ticket mode config mismatch")
+		err := newError(codeInvalidRequest, "battle ticket mode config mismatch")
+		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
+		return nil, err
 	}
 	if ticket.TicketNonceHex != nonce {
-		return nil, newError(codeInvalidRequest, "battle ticket nonce mismatch")
+		err := newError(codeInvalidRequest, "battle ticket nonce mismatch")
+		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
+		return nil, err
 	}
 	if req.UserID != "" && strings.TrimSpace(req.UserID) != ticket.UserID {
-		return nil, newError(codeUnauthorized, "battle ticket user mismatch")
+		err := newError(codeUnauthorized, "battle ticket user mismatch")
+		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
+		return nil, err
 	}
 	if req.PlayerID != "" && strings.TrimSpace(req.PlayerID) != ticket.PlayerID {
-		return nil, newError(codeUnauthorized, "battle ticket player mismatch")
+		err := newError(codeUnauthorized, "battle ticket player mismatch")
+		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
+		return nil, err
 	}
 	if now.After(ticket.ExpiresAt) {
 		s.recordBattleTicketExpiredAuditLocked(signed, now)
@@ -2673,7 +2688,7 @@ func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapsho
 	participants := make([]RoomParticipantSnapshot, 0, len(room.TicketIDs))
 	for _, ticketID := range room.TicketIDs {
 		ticket := s.tickets[ticketID]
-		if ticket == nil || ticket.Status != "queued" {
+		if ticket == nil || !ticketBelongsToRoomSnapshot(ticket, room) {
 			continue
 		}
 		user := s.users[ticket.UserID]
@@ -2712,6 +2727,19 @@ func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapsho
 		ServerTime:          now,
 		ServerAuthoritative: true,
 	}
+}
+
+func ticketBelongsToRoomSnapshot(ticket *queueTicket, room *roomState) bool {
+	if ticket == nil || room == nil {
+		return false
+	}
+	if ticket.Status == "queued" {
+		return true
+	}
+	if room.MatchID != "" && ticket.MatchID == room.MatchID && ticket.Status == "found" {
+		return true
+	}
+	return false
 }
 
 func (s *Service) roomHasUserLocked(room *roomState, userID string) bool {
@@ -5261,6 +5289,41 @@ func (s *Service) recordBattleTicketConsumedAuditLocked(signed *SignedBattleTick
 	s.recordBattleAuditOutcomeLocked("battle_ticket_consumed", fingerprint, consumedAt, err)
 }
 
+func (s *Service) recordBattleTicketRejectedAuditLocked(signed *SignedBattleTicket, rejectedAt time.Time, reason string) {
+	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
+		return
+	}
+	ticket := signed.Ticket
+	if rejectedAt.IsZero() {
+		rejectedAt = s.clock()
+	}
+	err := s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Endpoint:            ticket.Endpoint,
+		KeyID:               signed.KeyID,
+		RulesetVersion:      ticket.RulesetVersion,
+		ProtocolVersion:     fmt.Sprintf("%d", ticket.Version.ProtocolVersion),
+		BusinessAPIVersion:  ticket.Version.BusinessAPIVersion,
+		BattleAPIVersion:    ticket.Version.BattleAPIVersion,
+		DeckSnapshotHash:    ticket.DeckSnapshotHash,
+		ModeConfigHash:      ticket.ModeConfigHash,
+		Nonce:               ticket.TicketNonceHex,
+		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
+		Status:              "rejected",
+		RejectReason:        firstNonEmptyCore(reason, codeInvalidRequest),
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ConsumedAt:          rejectedAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:ticket:rejected", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.ModeConfigHash, firstNonEmptyCore(reason, codeInvalidRequest))
+	s.recordBattleAuditOutcomeLocked("battle_ticket_rejected", fingerprint, rejectedAt, err)
+}
+
 func (s *Service) recordLobbyRoomAuditLocked(room *roomState, ticket *queueTicket, userID string, action string, createdAt time.Time) {
 	s.recordLobbyRoomAuditRecordLocked(s.lobbyRoomAuditRecordLocked(room, ticket, userID, action, createdAt))
 }
@@ -5562,6 +5625,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		s.battleAuditStatus.TicketExpiredRecords++
 	case "battle_ticket_consumed":
 		s.battleAuditStatus.TicketConsumedRecords++
+	case "battle_ticket_rejected":
+		s.battleAuditStatus.TicketRejectedRecords++
 	case "battle_result":
 		s.battleAuditStatus.ResultRecords++
 	case "battle_result_duplicate":

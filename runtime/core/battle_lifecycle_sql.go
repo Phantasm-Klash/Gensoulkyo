@@ -49,12 +49,14 @@ INSERT INTO battle_ticket_audits (
     nonce,
     signature_prefix,
     status,
+    reject_reason,
     server_authoritative,
     consumed_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
-) ON CONFLICT (ticket_id) DO UPDATE SET
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+) ON CONFLICT (ticket_id) WHERE status IN ('issued', 'consumed', 'expired', 'revoked') DO UPDATE SET
     status = EXCLUDED.status,
+    reject_reason = EXCLUDED.reject_reason,
     consumed_at = COALESCE(EXCLUDED.consumed_at, battle_ticket_audits.consumed_at),
     server_authoritative = EXCLUDED.server_authoritative
 WHERE battle_ticket_audits.status = 'issued' AND EXCLUDED.status IN ('consumed', 'expired', 'revoked')`
@@ -190,6 +192,7 @@ func (repo *SQLBattleLifecycleAuditRepository) RecordBattleTicketAudit(record Ba
 		record.Nonce,
 		record.SignaturePrefix,
 		firstNonEmptyCore(record.Status, "issued"),
+		record.RejectReason,
 		record.ServerAuthoritative,
 		nullableTime(record.ConsumedAt),
 	)

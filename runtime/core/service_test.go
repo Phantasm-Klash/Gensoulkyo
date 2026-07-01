@@ -1138,6 +1138,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
+		ModeConfigHash: replacement.Ticket.ModeConfigHash,
 		TicketNonceHex: "wrong-nonce",
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected nonce mismatch rejection, got %v", err)
@@ -1157,6 +1158,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
+		ModeConfigHash: replacement.Ticket.ModeConfigHash,
 		TicketNonceHex: replacement.Ticket.TicketNonceHex,
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected stale consume business api rejection, got %v", err)
@@ -1168,12 +1170,25 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
+		ModeConfigHash: replacement.Ticket.ModeConfigHash,
 		TicketNonceHex: replacement.Ticket.TicketNonceHex,
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected stale consume ruleset rejection, got %v", err)
 	}
+	rejected := 0
+	for _, record := range repo.tickets {
+		if record.TicketID == replacement.Ticket.TicketID && record.Status == "rejected" {
+			rejected++
+			if record.RejectReason == "" || record.ConsumedAt != now || !record.ServerAuthoritative {
+				t.Fatalf("rejected ticket audit invalid: %+v", record)
+			}
+		}
+	}
+	if rejected != 6 {
+		t.Fatalf("expected six rejected consume audits, got %d tickets=%+v", rejected, repo.tickets)
+	}
 	status := service.BattleLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket" {
+	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRejectedRecords != 6 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket_rejected" {
 		t.Fatalf("ticket consume status invalid: %+v", status)
 	}
 }
@@ -2993,6 +3008,64 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if _, err := service.Room(host.SessionToken, created.RoomCode); ErrorCode(err) != codeNotFound {
 		t.Fatalf("expected empty room cleanup, got %v", err)
+	}
+}
+
+func TestMatchedRoomSnapshotKeepsParticipantProjection(t *testing.T) {
+	service := NewService(Config{})
+	host := mustLogin(t, service, "Matched Room Host")
+	guest := mustLogin(t, service, "Matched Room Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "host_matched_room_deck",
+		DeckSnapshot: validDeck("host_matched_room_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "guest_matched_room_deck",
+		DeckSnapshot: validDeck("guest_matched_room_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.RoomStatus != "found" || joined.MatchID == "" || joined.BattleAllocation == nil || joined.BattleTicket == nil {
+		t.Fatalf("join should allocate matched room and guest ticket: %+v", joined)
+	}
+
+	snapshot, err := service.Room(host.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("matched room snapshot: %v", err)
+	}
+	if snapshot.RoomStatus != "found" || snapshot.MatchID != joined.MatchID || snapshot.CurrentPlayers != 2 || len(snapshot.Participants) != 2 {
+		t.Fatalf("matched room should keep participant projection: %+v", snapshot)
+	}
+	for _, participant := range snapshot.Participants {
+		if participant.TicketID == "" || participant.DeckSnapshotHash == "" || participant.Loadout.StageID != "lunar_maze" || !participant.Loadout.ServerAuthoritative {
+			t.Fatalf("matched participant should expose only server loadout/hash/ticket identity: %+v", participant)
+		}
+	}
+
+	rules, err := service.RoomRules(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("matched room rules: %v", err)
+	}
+	if rules.Room.CurrentPlayers != 2 || len(rules.Room.Participants) != 2 || rules.Room.MatchID != joined.MatchID {
+		t.Fatalf("matched room rules should preserve participant projection: %+v", rules.Room)
+	}
+	if rules.Room.Participants[0].DeckSnapshotHash == "" || !stringSliceContains(rules.ForbiddenFields, "damage") || rules.ClientResultSubmit {
+		t.Fatalf("matched room rules should keep authority fields valid: %+v", rules)
+	}
+	list, err := service.ListRooms(guest.SessionToken)
+	if err != nil {
+		t.Fatalf("list rooms after match: %v", err)
+	}
+	if len(list.Rooms) != 0 {
+		t.Fatalf("matched rooms should not remain in public waiting list: %+v", list.Rooms)
 	}
 }
 
