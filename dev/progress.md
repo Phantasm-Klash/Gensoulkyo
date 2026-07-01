@@ -261,3 +261,9 @@ Status date: 2026-06-28
 - Tightened the core operation-contract regression so `ServiceCallbackContext()` must expose exactly the required non-secret gate fields and no blank keys or values.
 - This keeps room rules/business-event callback metadata aligned with the build-tagged Nakama service-origin gate without broadening client RPC/WSS authority.
 - Verified `go test ./runtime/core -run TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList -count=1`, `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
+
+## 2026-06-30 nakama-server-agent HTTP service callback envelope-shape update
+
+- Aligned HTTP fallback service-origin callback payload guarding with the Nakama RPC guard so scalar business-envelope `version` fields are rejected before battle server lifecycle, ticket-consume, or result-submit dispatch.
+- Preserved structured protocol version stamps for legitimate service callbacks; this only hardens the development fallback boundary and does not create high-frequency tick or client settlement authority.
+- Verified `go test ./runtime/httpapi -run 'TestHTTPServiceCallbacksRejectBusinessEnvelopePayloadShape|TestHTTPBattleTicketConsumeAndResultSubmitFallback' -count=1`, `go test ./runtime/... ./cmd/gensoulkyo_nakama`, `docker-compose --profile test run --rm test`, and `python3 /root/gotouhou/docs/ops/protocol_audit_check.py`.
