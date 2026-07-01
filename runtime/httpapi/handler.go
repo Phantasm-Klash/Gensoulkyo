@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -372,6 +373,14 @@ func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, core.NewForbiddenClientFieldError(forbidden))
 		return
 	}
+	if field := firstUnexpectedBusinessEventRequestField(raw); field != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":         false,
+			"error_code": "invalid_request",
+			"message":    fmt.Sprintf("business event lookup request cannot include %s", field),
+		})
+		return
+	}
 	var req core.BusinessEventRequest
 	encoded, err := json.Marshal(raw)
 	if err != nil {
@@ -388,6 +397,22 @@ func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func firstUnexpectedBusinessEventRequestField(body map[string]any) string {
+	for key := range body {
+		switch normalizeBusinessEventFieldName(key) {
+		case "kind", "ticket_id", "ticket.id", "ticketid", "room_code", "room.code", "roomcode", "match_id", "match.id", "matchid":
+			continue
+		default:
+			return key
+		}
+	}
+	return ""
+}
+
+func normalizeBusinessEventFieldName(name string) string {
+	return strings.ToLower(strings.TrimSpace(strings.ReplaceAll(name, "-", "_")))
 }
 
 func (h *Handler) joinQueue(w http.ResponseWriter, r *http.Request) {

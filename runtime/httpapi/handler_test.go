@@ -221,6 +221,14 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if forbiddenSettlementEvent.Code != http.StatusForbidden || forbiddenSettlementEvent.ErrorCode != "forbidden_field" {
 		t.Fatalf("expected forbidden business event settlement authority, got %+v", forbiddenSettlementEvent)
 	}
+	extraSettlementEvent := postRaw(t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
+		"kind":        "settlement",
+		"match_id":    queueBob.MatchID,
+		"client_note": "not part of lookup contract",
+	})
+	if extraSettlementEvent.Code != http.StatusBadRequest || extraSettlementEvent.ErrorCode != "invalid_request" || !strings.Contains(extraSettlementEvent.Message, "client_note") {
+		t.Fatalf("expected non-lookup business event field rejection, got %+v", extraSettlementEvent)
+	}
 	replay := getJSON[core.ReplayRecord](t, server.URL+"/v1/replays/"+settlement.ReplayID, alice.SessionToken)
 	if !replay.OK || replay.ReplayID != settlement.ReplayID || replay.MatchID != queueBob.MatchID || !replay.ServerAuthoritative || replay.StateHash == "" {
 		t.Fatalf("replay invalid: %+v", replay)
