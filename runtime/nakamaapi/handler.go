@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	CodeInvalidRequest           = "invalid_request"
-	CodeBusinessEnvelopeRequired = "business_envelope_required"
-	CodeServiceOriginRequired    = "service_origin_required"
+	CodeInvalidRequest            = "invalid_request"
+	CodeBusinessEnvelopeRequired  = "business_envelope_required"
+	CodeServiceOriginRequired     = "service_origin_required"
+	CodeClientOperationDisallowed = "client_operation_disallowed"
 )
 
 type Handler struct {
@@ -109,6 +110,10 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("rpc %q service-origin callback must not include business envelope payload", request.ID))
 		}
 	} else {
+		if clientOperationDisallowed(rpcID) {
+			handler.auditRejectedClientOperation(request.SessionID, request.UserID, security.BusinessEnvelopeTransportNakamaRPC, endpointName("rpc", rpcID))
+			return errorResponse(http.StatusForbidden, CodeClientOperationDisallowed, fmt.Sprintf("rpc %q is not a client business operation", request.ID))
+		}
 		if response := handler.ensureExternalRPCSession(request); !response.OK {
 			return response
 		}
@@ -286,6 +291,10 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	if rpcRequiresServiceOrigin(name) {
 		handler.auditRejectedServiceOnlyWSS(message, name)
 		return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("wss message %q is service-origin RPC only", message.Name))
+	}
+	if clientOperationDisallowed(name) {
+		handler.auditRejectedClientOperation(message.SessionID, message.UserID, security.BusinessEnvelopeTransportNakamaWSS, endpointName("wss", name))
+		return errorResponse(http.StatusForbidden, CodeClientOperationDisallowed, fmt.Sprintf("wss message %q is not a client business operation", message.Name))
 	}
 	if response := handler.ensureExternalWSSSession(message); !response.OK {
 		return response
@@ -483,6 +492,16 @@ func (handler *Handler) auditRejectedServiceOnlyRPC(request RPCRequest, rpcID st
 	})
 }
 
+func (handler *Handler) auditRejectedClientOperation(sessionID string, userID string, transport string, endpoint string) {
+	_ = security.ValidateBusinessEnvelopeRequest(handler.envelopeGuard, security.BusinessEnvelopeRequest{
+		SessionID: "blocked-client-operation:" + endpoint,
+		Transport: transport,
+		Endpoint:  endpoint,
+		UserID:    strings.TrimSpace(userID),
+		Op:        endpoint,
+	})
+}
+
 func (handler *Handler) call(fn func() (any, error)) Response {
 	payload, err := fn()
 	if err != nil {
@@ -539,6 +558,16 @@ func rpcSkipsEnvelope(rpcID string) bool {
 
 func rpcRequiresServiceOrigin(rpcID string) bool {
 	return core.IsServiceCallbackOperation(rpcID)
+}
+
+func clientOperationDisallowed(name string) bool {
+	normalized := normalizeName(name)
+	for _, disallowed := range core.ContractDisallowedClientOperations() {
+		if normalizeName(disallowed) == normalized {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeName(name string) string {
