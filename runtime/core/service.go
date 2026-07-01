@@ -2688,7 +2688,7 @@ func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapsho
 	participants := make([]RoomParticipantSnapshot, 0, len(room.TicketIDs))
 	for _, ticketID := range room.TicketIDs {
 		ticket := s.tickets[ticketID]
-		if ticket == nil || ticket.Status != "queued" {
+		if ticket == nil || !ticketBelongsToRoomSnapshot(ticket, room) {
 			continue
 		}
 		user := s.users[ticket.UserID]
@@ -2727,6 +2727,19 @@ func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapsho
 		ServerTime:          now,
 		ServerAuthoritative: true,
 	}
+}
+
+func ticketBelongsToRoomSnapshot(ticket *queueTicket, room *roomState) bool {
+	if ticket == nil || room == nil {
+		return false
+	}
+	if ticket.Status == "queued" {
+		return true
+	}
+	if room.MatchID != "" && ticket.MatchID == room.MatchID && ticket.Status == "found" {
+		return true
+	}
+	return false
 }
 
 func (s *Service) roomHasUserLocked(room *roomState, userID string) bool {

@@ -3011,6 +3011,64 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 }
 
+func TestMatchedRoomSnapshotKeepsParticipantProjection(t *testing.T) {
+	service := NewService(Config{})
+	host := mustLogin(t, service, "Matched Room Host")
+	guest := mustLogin(t, service, "Matched Room Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "host_matched_room_deck",
+		DeckSnapshot: validDeck("host_matched_room_deck"),
+		ModeParams:   map[string]any{"stage_id": "lunar_maze"},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	joined, err := service.JoinRoom(guest.SessionToken, created.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "guest_matched_room_deck",
+		DeckSnapshot: validDeck("guest_matched_room_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join room: %v", err)
+	}
+	if joined.RoomStatus != "found" || joined.MatchID == "" || joined.BattleAllocation == nil || joined.BattleTicket == nil {
+		t.Fatalf("join should allocate matched room and guest ticket: %+v", joined)
+	}
+
+	snapshot, err := service.Room(host.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("matched room snapshot: %v", err)
+	}
+	if snapshot.RoomStatus != "found" || snapshot.MatchID != joined.MatchID || snapshot.CurrentPlayers != 2 || len(snapshot.Participants) != 2 {
+		t.Fatalf("matched room should keep participant projection: %+v", snapshot)
+	}
+	for _, participant := range snapshot.Participants {
+		if participant.TicketID == "" || participant.DeckSnapshotHash == "" || participant.Loadout.StageID != "lunar_maze" || !participant.Loadout.ServerAuthoritative {
+			t.Fatalf("matched participant should expose only server loadout/hash/ticket identity: %+v", participant)
+		}
+	}
+
+	rules, err := service.RoomRules(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("matched room rules: %v", err)
+	}
+	if rules.Room.CurrentPlayers != 2 || len(rules.Room.Participants) != 2 || rules.Room.MatchID != joined.MatchID {
+		t.Fatalf("matched room rules should preserve participant projection: %+v", rules.Room)
+	}
+	if rules.Room.Participants[0].DeckSnapshotHash == "" || !stringSliceContains(rules.ForbiddenFields, "damage") || rules.ClientResultSubmit {
+		t.Fatalf("matched room rules should keep authority fields valid: %+v", rules)
+	}
+	list, err := service.ListRooms(guest.SessionToken)
+	if err != nil {
+		t.Fatalf("list rooms after match: %v", err)
+	}
+	if len(list.Rooms) != 0 {
+		t.Fatalf("matched rooms should not remain in public waiting list: %+v", list.Rooms)
+	}
+}
+
 func TestServerSimulationRejectsClientAuthoredCombatAndAdvancesBullets(t *testing.T) {
 	service := NewService(Config{})
 	alice := mustLogin(t, service, "Alice Sim")
