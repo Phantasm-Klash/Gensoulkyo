@@ -1157,6 +1157,8 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		ServiceCallbacks:               contract.ServiceCallbacks,
 		ServiceCallbackContext:         contract.ServiceCallbackContext,
 		ServiceCallbackAcceptedValues:  contract.ServiceCallbackAcceptedValues,
+		ServiceCallbackPlayerAllowed:   contract.ServiceCallbackPlayerAllowed,
+		ServiceCallbackEnvelopeAllowed: contract.ServiceCallbackEnvelopeAllowed,
 		SettlementAuthority:            contract.SettlementAuthority,
 		BusinessNotifications:          contract.BusinessNotifications,
 		BusinessEventRequestKinds:      contract.BusinessEventRequestKinds,
@@ -2460,6 +2462,8 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		ServiceCallbacks:               ServiceCallbackOperations(),
 		ServiceCallbackContext:         ServiceCallbackContext(),
 		ServiceCallbackAcceptedValues:  ServiceCallbackAcceptedValues(),
+		ServiceCallbackPlayerAllowed:   serviceCallbackPlayerSessionAllowed(),
+		ServiceCallbackEnvelopeAllowed: serviceCallbackBusinessEnvelopeAllowed(),
 		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
 		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEventRequestKinds:      businessEventRequestKinds(),
@@ -6118,21 +6122,23 @@ func ContractBusinessEventRequestKinds() []string {
 
 func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 	return &BusinessContractSnapshot{
-		OK:                            true,
-		Version:                       currentVersionStamp(),
-		BusinessTransports:            []string{"nakama_https_rpc", "nakama_wss"},
-		BattleTransports:              []string{"kcp_udp", "protobuf", "chacha20_poly1305"},
-		ClientOperations:              ContractClientOperations(),
-		ClientRPCOperations:           ContractClientRPCOperations(),
-		ClientWSSOperations:           ContractClientWSSOperations(),
-		DisallowedClientOperations:    ContractDisallowedClientOperations(),
-		ServiceCallbacks:              ServiceCallbackOperations(),
-		ServiceCallbackContext:        ServiceCallbackContext(),
-		ServiceCallbackAcceptedValues: ServiceCallbackAcceptedValues(),
-		SettlementAuthority:           settlementAuthorityServiceSignedBattleResult,
-		BusinessNotifications:         businessNotificationKinds(),
-		BusinessEventRequestKinds:     businessEventRequestKinds(),
-		BusinessNotificationTopics:    businessNotificationTopics(),
+		OK:                             true,
+		Version:                        currentVersionStamp(),
+		BusinessTransports:             []string{"nakama_https_rpc", "nakama_wss"},
+		BattleTransports:               []string{"kcp_udp", "protobuf", "chacha20_poly1305"},
+		ClientOperations:               ContractClientOperations(),
+		ClientRPCOperations:            ContractClientRPCOperations(),
+		ClientWSSOperations:            ContractClientWSSOperations(),
+		DisallowedClientOperations:     ContractDisallowedClientOperations(),
+		ServiceCallbacks:               ServiceCallbackOperations(),
+		ServiceCallbackContext:         ServiceCallbackContext(),
+		ServiceCallbackAcceptedValues:  ServiceCallbackAcceptedValues(),
+		ServiceCallbackPlayerAllowed:   serviceCallbackPlayerSessionAllowed(),
+		ServiceCallbackEnvelopeAllowed: serviceCallbackBusinessEnvelopeAllowed(),
+		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
+		BusinessNotifications:          businessNotificationKinds(),
+		BusinessEventRequestKinds:      businessEventRequestKinds(),
+		BusinessNotificationTopics:     businessNotificationTopics(),
 		ClientAuthority: []string{
 			"input_packet",
 			"cast_card_request",
@@ -6340,6 +6346,14 @@ func ServiceCallbackAcceptedValues() []string {
 		"1",
 		"yes",
 	}
+}
+
+func serviceCallbackPlayerSessionAllowed() bool {
+	return ServiceCallbackContext()[ServiceCallbackPlayerSessionContextKey] != ServiceCallbackDisallowedValue
+}
+
+func serviceCallbackBusinessEnvelopeAllowed() bool {
+	return ServiceCallbackContext()[ServiceCallbackBusinessEnvelopeAllowedKey] != ServiceCallbackDisallowedValue
 }
 
 func IsServiceCallbackOperation(operation string) bool {
