@@ -2768,6 +2768,14 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !reflect.DeepEqual(contract.BusinessEventRequestContracts, rules.BusinessEventRequestContracts) || !reflect.DeepEqual(contract.BusinessEventRequestContracts, ContractBusinessEventRequestContracts()) {
 		t.Fatalf("business contract and room rules event request contracts drifted: contract=%+v rules=%+v expected=%+v", contract.BusinessEventRequestContracts, rules.BusinessEventRequestContracts, ContractBusinessEventRequestContracts())
 	}
+	roomTopic := businessNotificationTopicByKind(contract.BusinessNotificationTopics, "room")
+	if roomTopic == nil || !stringSliceContains(roomTopic.ServerProjectionFields, "room.participants.deck_snapshot_hash") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.participants.loadout") || !stringSliceContains(roomTopic.ServerProjectionFields, "room.messages") || stringSliceContains(roomTopic.ServerProjectionFields, "battle_result_hash") {
+		t.Fatalf("room notification topic should publish audited room snapshot fields only: %+v", roomTopic)
+	}
+	roomRequestContract := businessEventRequestContractByKind(contract.BusinessEventRequestContracts, "room")
+	if roomRequestContract == nil || !reflect.DeepEqual(roomRequestContract.ServerProjectionFields, roomTopic.ServerProjectionFields) || !roomRequestContract.BusinessEnvelopeRequired || roomRequestContract.ClientResultSubmitAllowed || roomRequestContract.HighFrequencyBattleTickAllowed {
+		t.Fatalf("room event request contract should mirror room topic security/projection fields: topic=%+v contract=%+v", roomTopic, roomRequestContract)
+	}
 	if !reflect.DeepEqual(contract.ForbiddenFields, rules.ForbiddenFields) || !reflect.DeepEqual(contract.ClientAuthority, rules.ClientAuthority) || !reflect.DeepEqual(contract.ServerAuthority, rules.ServerAuthority) {
 		t.Fatalf("business contract and room rules authority fields drifted: contract=%+v/%+v/%+v rules=%+v/%+v/%+v", contract.ForbiddenFields, contract.ClientAuthority, contract.ServerAuthority, rules.ForbiddenFields, rules.ClientAuthority, rules.ServerAuthority)
 	}
@@ -3679,6 +3687,24 @@ func hasEventType(events []MatchEvent, eventType string) bool {
 		}
 	}
 	return false
+}
+
+func businessNotificationTopicByKind(topics []BusinessNotificationTopic, kind string) *BusinessNotificationTopic {
+	for index := range topics {
+		if topics[index].Kind == kind {
+			return &topics[index]
+		}
+	}
+	return nil
+}
+
+func businessEventRequestContractByKind(contracts []BusinessEventRequestContract, kind string) *BusinessEventRequestContract {
+	for index := range contracts {
+		if contracts[index].Kind == kind {
+			return &contracts[index]
+		}
+	}
+	return nil
 }
 
 func intFromAny(value any) int {
