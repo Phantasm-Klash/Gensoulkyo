@@ -2196,6 +2196,39 @@ func TestMatchmakingLoadoutStageBucketAndValidation(t *testing.T) {
 	}); ErrorCode(err) != codeInvalidMode {
 		t.Fatalf("expected locked rating rejection, got %v", err)
 	}
+	if _, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "bob_pvp_rating_deck",
+		DeckSnapshot: validDeck("bob_pvp_rating_deck"),
+		ModeParams:   map[string]any{"stage_id": "starlit_lanes", "rating_code": defaultRatingCode},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected non-certification rating_code queue rejection, got %v", err)
+	}
+	if _, err := service.CreateRoom(bob.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "bob_pvp_room_rating_deck",
+		DeckSnapshot: validDeck("bob_pvp_room_rating_deck"),
+		ModeParams:   map[string]any{"stage_id": "starlit_lanes", "rating_code": defaultRatingCode},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected non-certification rating_code room create rejection, got %v", err)
+	}
+	room, err := service.CreateRoom(bob.SessionToken, CreateRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "bob_pvp_room_deck",
+		DeckSnapshot: validDeck("bob_pvp_room_deck"),
+		ModeParams:   map[string]any{"stage_id": "starlit_lanes"},
+	})
+	if err != nil {
+		t.Fatalf("create pvp room for rating_code join check: %v", err)
+	}
+	if _, err := service.JoinRoom(cara.SessionToken, room.RoomCode, JoinRoomRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "cara_pvp_room_rating_deck",
+		DeckSnapshot: validDeck("cara_pvp_room_rating_deck"),
+		ModeParams:   map[string]any{"stage_id": "starlit_lanes", "rating_code": defaultRatingCode},
+	}); ErrorCode(err) != codeInvalidMode {
+		t.Fatalf("expected non-certification rating_code room join rejection, got %v", err)
+	}
 }
 
 func TestCancelTicketRemovesQueueAndRoomWait(t *testing.T) {
