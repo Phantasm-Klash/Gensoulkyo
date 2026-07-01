@@ -122,6 +122,28 @@ func TestNakamaBindingRPCRegistryIsExact(t *testing.T) {
 	}
 }
 
+func TestNakamaBindingRegistersEveryCoreServiceCallback(t *testing.T) {
+	source, err := os.ReadFile("module.go")
+	if err != nil {
+		t.Fatalf("read module source: %v", err)
+	}
+	rpcIDs := extractRPCIDs(t, string(source))
+	registered := map[string]int{}
+	for _, id := range rpcIDs {
+		registered[id]++
+	}
+	for _, callback := range core.ServiceCallbackOperations() {
+		if registered[callback] != 1 {
+			t.Fatalf("Nakama RPC registry must include service callback %q exactly once: registered=%+v callbacks=%+v", callback, registered, core.ServiceCallbackOperations())
+		}
+	}
+	for _, id := range rpcIDs {
+		if core.IsServiceCallbackOperation(id) && !sliceContains(core.ServiceCallbackOperations(), id) {
+			t.Fatalf("Nakama RPC registry exposes unknown service callback %q: callbacks=%+v", id, core.ServiceCallbackOperations())
+		}
+	}
+}
+
 func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 	source, err := os.ReadFile("module.go")
 	if err != nil {
@@ -367,4 +389,13 @@ func extractRPCIDs(t *testing.T, source string) []string {
 	}
 	t.Fatalf("rpcIDs registry not found in module.go")
 	return nil
+}
+
+func sliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
