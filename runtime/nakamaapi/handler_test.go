@@ -1223,6 +1223,98 @@ func TestNakamaRPCRejectsClientOriginBattleResultSubmit(t *testing.T) {
 	}
 }
 
+func TestNakamaServiceCallbackAliasesRemainServiceOriginOnly(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	login := handler.HandleRPC(RPCRequest{
+		ID:      "auth.anonymous",
+		Payload: map[string]any{"device_id": "device-callback-alias-client", "display_name": "Callback Alias Client"},
+	})
+	if !login.OK {
+		t.Fatalf("login failed: %+v", login)
+	}
+	session := login.Payload.(*core.AuthSession)
+
+	aliases := []struct {
+		name       string
+		normalized string
+		op         string
+		body       map[string]any
+	}{
+		{
+			name:       " BATTLE/RESULT/SUBMIT ",
+			normalized: "battle.result.submit",
+			op:         "battle_result_submit",
+			body:       map[string]any{"signed_result": map[string]any{"match_id": "client-authored-alias"}},
+		},
+		{
+			name:       ".battle:ticket:consume.",
+			normalized: "battle.ticket.consume",
+			op:         "battle_ticket_consume",
+			body:       map[string]any{"battle_ticket": map[string]any{"match_id": "client-ticket-alias"}},
+		},
+		{
+			name:       "Battle/Servers/Register",
+			normalized: "battle.servers.register",
+			op:         "battle_servers_register",
+			body:       map[string]any{"battle_server_id": "client-server-alias", "endpoint": "127.0.0.1:7999"},
+		},
+	}
+	for index, alias := range aliases {
+		rpc := handler.HandleRPC(RPCRequest{
+			ID:        alias.name,
+			SessionID: session.SessionToken,
+			UserID:    session.UserID,
+			Payload:   envelopePayload(int64(index*2+1), "nonce-callback-alias-rpc-"+alias.normalized, alias.op, alias.body),
+		})
+		if rpc.OK || rpc.Status != 403 || rpc.ErrorCode != CodeServiceOriginRequired {
+			t.Fatalf("Nakama RPC alias %q must normalize to service-origin-only callback, got %+v", alias.name, rpc)
+		}
+		wss := handler.HandleWSSMessage(WSSMessage{
+			Name:      alias.name,
+			SessionID: session.SessionToken,
+			UserID:    session.UserID,
+			Payload:   envelopePayload(int64(index*2+2), "nonce-callback-alias-wss-"+alias.normalized, alias.op, alias.body),
+		})
+		if wss.OK || wss.Status != 403 || wss.ErrorCode != CodeServiceOriginRequired {
+			t.Fatalf("Nakama WSS alias %q must normalize to service-origin-only callback, got %+v", alias.name, wss)
+		}
+	}
+
+	snapshot := handler.EnvelopeSnapshot()
+	if snapshot.Accepted != 0 || snapshot.Rejected != int64(len(aliases)*2) || snapshot.SessionCount != 0 {
+		t.Fatalf("service callback alias rejections should not consume player replay state: %+v", snapshot)
+	}
+	wantEndpoints := map[string]bool{}
+	for _, alias := range aliases {
+		wantEndpoints["rpc."+alias.normalized] = false
+		wantEndpoints["wss."+alias.normalized] = false
+	}
+	for _, audit := range snapshot.Audits {
+		if audit.Accepted || audit.UserID != session.UserID || audit.SessionIDHint == session.SessionToken || audit.Reason != security.ReasonVersion {
+			t.Fatalf("service callback alias rejection audit should be synthetic and sanitized: %+v", audit)
+		}
+		if _, ok := wantEndpoints[audit.Endpoint]; !ok {
+			t.Fatalf("service callback alias rejection audit endpoint was not normalized: %+v", audit)
+		}
+		wantEndpoints[audit.Endpoint] = true
+	}
+	for endpoint, seen := range wantEndpoints {
+		if !seen {
+			t.Fatalf("missing service callback alias rejection audit endpoint %q: %+v", endpoint, snapshot.Audits)
+		}
+	}
+
+	bootstrap := handler.HandleRPC(RPCRequest{
+		ID:        "bootstrap",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(1, "nonce-callback-alias-rpc-battle.result.submit", "bootstrap", map[string]any{}),
+	})
+	if !bootstrap.OK || bootstrap.Status != 200 {
+		t.Fatalf("service callback alias rejection must not consume the original client seq/nonce, got %+v", bootstrap)
+	}
+}
+
 func TestNakamaBusinessEventSettlementAliasRejectsConflictingKind(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	response := handler.HandleWSSMessage(WSSMessage{
