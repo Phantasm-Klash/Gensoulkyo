@@ -672,6 +672,36 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	assertBusinessEventRequestContracts(t, eventPayload.BusinessEventRequestContracts, "matchmaking", "battle.allocation", "battle.ticket")
 	assertBusinessNotificationTopics(t, eventPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket")
 
+	aliasEvent := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(5, "nonce-external-guest-business-event-alias", "business_event", map[string]any{
+			"kind":      "battle.ticket",
+			"ticket.id": found.TicketID,
+		}),
+	})
+	if !aliasEvent.OK || aliasEvent.Status != 200 {
+		t.Fatalf("business event WSS alias read failed: %+v", aliasEvent)
+	}
+	aliasPayload := aliasEvent.Payload.(*core.BusinessEvent)
+	if aliasPayload.Kind != "battle.ticket" || aliasPayload.TicketID != found.TicketID || aliasPayload.BattleTicket == nil || aliasPayload.BattleTicket.Ticket.MatchID != found.MatchID || aliasPayload.ClientResultSubmitAllowed || aliasPayload.HighFrequencyBattleTickAllowed {
+		t.Fatalf("business event alias should stay lookup-only and return signed ticket projection: %+v", aliasPayload)
+	}
+	duplicateAliasEvent := handler.HandleWSSMessage(WSSMessage{
+		Name:      "business.event",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(6, "nonce-external-guest-business-event-duplicate-alias", "business_event", map[string]any{
+			"kind":      "battle.ticket",
+			"ticket_id": found.TicketID,
+			"ticket.id": found.TicketID,
+		}),
+	})
+	if duplicateAliasEvent.OK || duplicateAliasEvent.Status != 400 || duplicateAliasEvent.ErrorCode != CodeInvalidRequest || !strings.Contains(duplicateAliasEvent.Message, "duplicate ticket_id") {
+		t.Fatalf("expected duplicate business event alias rejection, got %+v", duplicateAliasEvent)
+	}
+
 	missingContractEnvelope := handler.HandleRPC(RPCRequest{
 		ID:        "business.contract",
 		SessionID: guestSession,
@@ -685,7 +715,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "business.contract",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload:   envelopePayload(5, "nonce-external-guest-business-contract", "business_contract", map[string]any{}),
+		Payload:   envelopePayload(7, "nonce-external-guest-business-contract", "business_contract", map[string]any{}),
 	})
 	if !contractEvent.OK || contractEvent.Status != 200 {
 		t.Fatalf("business contract WSS read failed: %+v", contractEvent)
@@ -716,7 +746,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "business.event",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(6, "nonce-external-guest-activity-event", "business_event", map[string]any{
+		Payload: envelopePayload(8, "nonce-external-guest-activity-event", "business_event", map[string]any{
 			"kind": "activity",
 		}),
 	})
@@ -746,7 +776,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "match.ready",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(7, "nonce-external-guest-ready", "match_ready", map[string]any{
+		Payload: envelopePayload(9, "nonce-external-guest-ready", "match_ready", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})
@@ -773,7 +803,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		Name:      "presence.heartbeat",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(8, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
+		Payload: envelopePayload(10, "nonce-external-guest-heartbeat", "presence_heartbeat", map[string]any{
 			"match_id": found.MatchID,
 		}),
 	})

@@ -219,6 +219,12 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if settlementAliasEvent.Kind != "settlement" || settlementAliasEvent.Topic != "nakama_wss.business.settlement" || settlementAliasEvent.Settlement == nil || settlementAliasEvent.Settlement.ReplayID != settlement.ReplayID || settlementAliasEvent.ClientResultSubmitAllowed || settlementAliasEvent.HighFrequencyBattleTickAllowed {
 		t.Fatalf("settlement business event alias invalid: %+v", settlementAliasEvent)
 	}
+	settlementDotAliasEvent := postJSON[core.BusinessEvent](t, server.URL+"/v1/business/events/settlement", alice.SessionToken, map[string]any{
+		"match.id": queueBob.MatchID,
+	})
+	if settlementDotAliasEvent.Kind != "settlement" || settlementDotAliasEvent.MatchID != queueBob.MatchID || settlementDotAliasEvent.Settlement == nil || settlementDotAliasEvent.Settlement.ReplayID != settlement.ReplayID || settlementDotAliasEvent.ClientResultSubmitAllowed || settlementDotAliasEvent.HighFrequencyBattleTickAllowed {
+		t.Fatalf("settlement business event dot alias invalid: %+v", settlementDotAliasEvent)
+	}
 	conflictingAliasEvent := postRaw(t, server.URL+"/v1/business/events/settlement", alice.SessionToken, map[string]any{
 		"kind":     "activity",
 		"match_id": queueBob.MatchID,
@@ -248,6 +254,13 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	})
 	if extraSettlementEvent.Code != http.StatusBadRequest || extraSettlementEvent.ErrorCode != "invalid_request" || !strings.Contains(extraSettlementEvent.Message, "client_note") {
 		t.Fatalf("expected non-lookup business event field rejection, got %+v", extraSettlementEvent)
+	}
+	duplicateAliasEvent := postRaw(t, server.URL+"/v1/business/events/settlement", alice.SessionToken, map[string]any{
+		"match_id": queueBob.MatchID,
+		"match.id": queueBob.MatchID,
+	})
+	if duplicateAliasEvent.Code != http.StatusBadRequest || duplicateAliasEvent.ErrorCode != "invalid_request" || !strings.Contains(duplicateAliasEvent.Message, "duplicate match_id") {
+		t.Fatalf("expected duplicate business event lookup alias rejection, got %+v", duplicateAliasEvent)
 	}
 	replay := getJSON[core.ReplayRecord](t, server.URL+"/v1/replays/"+settlement.ReplayID, alice.SessionToken)
 	if !replay.OK || replay.ReplayID != settlement.ReplayID || replay.MatchID != queueBob.MatchID || !replay.ServerAuthoritative || replay.StateHash == "" {

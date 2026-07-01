@@ -385,6 +385,16 @@ func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request, forcedKi
 		})
 		return
 	}
+	var duplicateField string
+	raw, duplicateField = normalizeBusinessEventRequestBody(raw)
+	if duplicateField != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":         false,
+			"error_code": "invalid_request",
+			"message":    fmt.Sprintf("business event lookup request has duplicate %s aliases", duplicateField),
+		})
+		return
+	}
 	var req core.BusinessEventRequest
 	encoded, err := json.Marshal(raw)
 	if err != nil {
@@ -424,6 +434,28 @@ func firstUnexpectedBusinessEventRequestField(body map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func normalizeBusinessEventRequestBody(body map[string]any) (map[string]any, string) {
+	normalized := map[string]any{}
+	for key, value := range body {
+		target := key
+		switch normalizeBusinessEventFieldName(key) {
+		case "kind":
+			target = "kind"
+		case "ticket_id", "ticket.id", "ticketid":
+			target = "ticket_id"
+		case "room_code", "room.code", "roomcode":
+			target = "room_code"
+		case "match_id", "match.id", "matchid":
+			target = "match_id"
+		}
+		if _, exists := normalized[target]; exists {
+			return normalized, target
+		}
+		normalized[target] = value
+	}
+	return normalized, ""
 }
 
 func normalizeBusinessEventFieldName(name string) string {
