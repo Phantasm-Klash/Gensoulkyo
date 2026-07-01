@@ -27,13 +27,15 @@ func TestCoreVersionConstantsFollowPhKProtocolManifest(t *testing.T) {
 
 func TestCoreDependsOnRequiredProtocolFields(t *testing.T) {
 	required := map[string][]string{
-		"BattleTicket":           {"match_id", "user_id", "player_id", "battle_server_id", "endpoint", "deck_snapshot_hash", "ruleset_version", "expires_at_ms", "business_session_id"},
-		"SignedBattleTicket":     {"ticket", "signature_alg", "key_id", "signature"},
-		"BattleResult":           {"version", "match_id", "mode_id", "result_hash", "replay_id", "player_ids", "settled_at_ms"},
-		"BattleModeAction":       {"version", "match_id", "player_id", "tick", "seq", "action_id", "action_type", "payload_json", "client_result_authoritative"},
-		"SignedBattleResult":     {"result", "signature_alg", "key_id", "signature"},
-		"BattleServerAllocation": {"match_id", "mode_id", "battle_server_id", "endpoint", "players", "server_seed", "mode_config_hash", "allocated_at_ms"},
-		"BusinessSecureEnvelope": {"version", "session_id", "seq", "timestamp_ms", "nonce", "op_code", "key_id", "auth_tag"},
+		"BattleTicket":              {"match_id", "user_id", "player_id", "battle_server_id", "endpoint", "deck_snapshot_hash", "ruleset_version", "expires_at_ms", "business_session_id"},
+		"SignedBattleTicket":        {"ticket", "signature_alg", "key_id", "signature"},
+		"BattleResult":              {"version", "match_id", "mode_id", "result_hash", "replay_id", "player_ids", "settled_at_ms"},
+		"BattleResultSubmitRequest": {"signed_result", "replay_summary"},
+		"ReplayInputStreamSummary":  {"version", "replay_id", "match_id", "owner_user_id", "input_count", "event_count", "input_stream_hash", "event_stream_hash", "final_state_hash", "final_tick"},
+		"BattleModeAction":          {"version", "match_id", "player_id", "tick", "seq", "action_id", "action_type", "payload_json", "client_result_authoritative"},
+		"SignedBattleResult":        {"result", "signature_alg", "key_id", "signature"},
+		"BattleServerAllocation":    {"match_id", "mode_id", "battle_server_id", "endpoint", "players", "server_seed", "mode_config_hash", "allocated_at_ms"},
+		"BusinessSecureEnvelope":    {"version", "session_id", "seq", "timestamp_ms", "nonce", "op_code", "key_id", "auth_tag"},
 	}
 	for messageName, fields := range required {
 		for _, field := range fields {
