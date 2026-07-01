@@ -213,6 +213,26 @@ func TestHTTPAuthMatchInputAndSettlement(t *testing.T) {
 	if settlementEvent.Version.ProtocolVersion != core.ProtocolVersion || settlementEvent.Version.RulesetVersion != core.RulesetVersion || settlementEvent.Version.BusinessAPIVersion != core.BusinessAPIVersion || settlementEvent.Version.BattleAPIVersion != core.BattleAPIVersion {
 		t.Fatalf("settlement business event missing version stamp: %+v", settlementEvent.Version)
 	}
+	settlementAliasEvent := postJSON[core.BusinessEvent](t, server.URL+"/v1/business/events/settlement", alice.SessionToken, map[string]any{
+		"match_id": queueBob.MatchID,
+	})
+	if settlementAliasEvent.Kind != "settlement" || settlementAliasEvent.Topic != "nakama_wss.business.settlement" || settlementAliasEvent.Settlement == nil || settlementAliasEvent.Settlement.ReplayID != settlement.ReplayID || settlementAliasEvent.ClientResultSubmitAllowed || settlementAliasEvent.HighFrequencyBattleTickAllowed {
+		t.Fatalf("settlement business event alias invalid: %+v", settlementAliasEvent)
+	}
+	conflictingAliasEvent := postRaw(t, server.URL+"/v1/business/events/settlement", alice.SessionToken, map[string]any{
+		"kind":     "activity",
+		"match_id": queueBob.MatchID,
+	})
+	if conflictingAliasEvent.Code != http.StatusBadRequest || conflictingAliasEvent.ErrorCode != "invalid_request" {
+		t.Fatalf("expected conflicting settlement alias kind rejection, got %+v", conflictingAliasEvent)
+	}
+	forbiddenAliasEvent := postRaw(t, server.URL+"/v1/business/events/settlement", alice.SessionToken, map[string]any{
+		"match_id":    queueBob.MatchID,
+		"result_hash": "client-authored",
+	})
+	if forbiddenAliasEvent.Code != http.StatusForbidden || forbiddenAliasEvent.ErrorCode != "forbidden_field" {
+		t.Fatalf("expected forbidden settlement alias authority rejection, got %+v", forbiddenAliasEvent)
+	}
 	forbiddenSettlementEvent := postRaw(t, server.URL+"/v1/business/events", alice.SessionToken, map[string]any{
 		"kind":        "settlement",
 		"match_id":    queueBob.MatchID,

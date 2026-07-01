@@ -125,7 +125,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "business" && segments[2] == "events" && r.Method == http.MethodPost {
-		h.businessEvent(w, r)
+		h.businessEvent(w, r, "")
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "business" && segments[2] == "events" && segments[3] == "settlement" && r.Method == http.MethodPost {
+		h.businessEvent(w, r, "settlement")
 		return
 	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "matchmaking" && segments[2] == "join" && r.Method == http.MethodPost {
@@ -364,7 +368,7 @@ func (h *Handler) heartbeat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request, forcedKind string) {
 	raw := map[string]any{}
 	if !decodeJSON(w, r, &raw) {
 		return
@@ -390,6 +394,17 @@ func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(encoded, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
 		return
+	}
+	if forcedKind != "" {
+		if kind := strings.TrimSpace(req.Kind); kind != "" && kind != forcedKind {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":         false,
+				"error_code": "invalid_request",
+				"message":    fmt.Sprintf("business event alias requires %s kind", forcedKind),
+			})
+			return
+		}
+		req.Kind = forcedKind
 	}
 	resp, err := h.service.BusinessEvent(sessionToken(r), req)
 	if err != nil {
