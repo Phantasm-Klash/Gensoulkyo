@@ -497,6 +497,9 @@ func TestHTTPBusinessContractRequiresEnvelopeAndPublishesClientAuthority(t *test
 	if stringSliceContains(contract.ClientOperations, "battle.result.submit") || stringSliceContains(contract.ClientWSSOperations, "battle.ticket.consume") || !stringSliceContains(contract.DisallowedClientOperations, "battle.result.submit") {
 		t.Fatalf("business contract HTTP route must keep service callbacks out of client authority: %+v", contract)
 	}
+	if !reflect.DeepEqual(contract.ServiceOnlyOperations, contract.ServiceCallbacks) || !stringSliceContains(contract.ServiceOnlyOperations, "battle.ticket.consume") || !stringSliceContains(contract.ServiceOnlyOperations, "battle.result.submit") {
+		t.Fatalf("business contract HTTP route should publish explicit service-only operations: %+v", contract)
+	}
 	if !stringSliceContains(contract.BusinessNotifications, "battle.ticket") || !stringSliceContains(contract.BusinessEventRequestKinds, "settlement") || stringSliceContains(contract.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business contract HTTP route should expose low-frequency business notification contract: %+v", contract)
 	}
