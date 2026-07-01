@@ -2714,6 +2714,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !reflect.DeepEqual(contract.BusinessNotifications, rules.BusinessNotifications) || !reflect.DeepEqual(contract.BusinessEventRequestKinds, rules.BusinessEventRequestKinds) || !reflect.DeepEqual(contract.BusinessNotificationTopics, rules.BusinessNotificationTopics) {
 		t.Fatalf("business contract and room rules notification contract drifted: contract=%+v request_kinds=%+v topics=%+v rules=%+v request_kinds=%+v topics=%+v", contract.BusinessNotifications, contract.BusinessEventRequestKinds, contract.BusinessNotificationTopics, rules.BusinessNotifications, rules.BusinessEventRequestKinds, rules.BusinessNotificationTopics)
 	}
+	if !reflect.DeepEqual(contract.BusinessEventRequestContracts, rules.BusinessEventRequestContracts) || !reflect.DeepEqual(contract.BusinessEventRequestContracts, ContractBusinessEventRequestContracts()) {
+		t.Fatalf("business contract and room rules event request contracts drifted: contract=%+v rules=%+v expected=%+v", contract.BusinessEventRequestContracts, rules.BusinessEventRequestContracts, ContractBusinessEventRequestContracts())
+	}
 	if !reflect.DeepEqual(contract.ForbiddenFields, rules.ForbiddenFields) || !reflect.DeepEqual(contract.ClientAuthority, rules.ClientAuthority) || !reflect.DeepEqual(contract.ServerAuthority, rules.ServerAuthority) {
 		t.Fatalf("business contract and room rules authority fields drifted: contract=%+v/%+v/%+v rules=%+v/%+v/%+v", contract.ForbiddenFields, contract.ClientAuthority, contract.ServerAuthority, rules.ForbiddenFields, rules.ClientAuthority, rules.ServerAuthority)
 	}
@@ -2750,6 +2753,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.BusinessEventRequestKinds, rules.BusinessEventRequestKinds) {
 		t.Fatalf("room rules and business event request kind contract drifted: rules=%+v event=%+v", rules.BusinessEventRequestKinds, event.BusinessEventRequestKinds)
+	}
+	if !reflect.DeepEqual(event.BusinessEventRequestContracts, rules.BusinessEventRequestContracts) {
+		t.Fatalf("room rules and business event request contract drifted: rules=%+v event=%+v", rules.BusinessEventRequestContracts, event.BusinessEventRequestContracts)
 	}
 	if !event.BusinessEnvelopeRequired || !reflect.DeepEqual(event.ForbiddenFields, rules.ForbiddenFields) {
 		t.Fatalf("room business event should expose the same security contract as room rules: rules=%+v event=%+v", rules.ForbiddenFields, event.ForbiddenFields)

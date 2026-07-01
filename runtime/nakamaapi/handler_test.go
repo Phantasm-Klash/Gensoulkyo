@@ -383,6 +383,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.BusinessNotifications, "activity") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.ticket") || !stringSliceContains(rulesPayload.BusinessNotifications, "settlement") || stringSliceContains(rulesPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("room rules should expose low-frequency business WSS notifications only: %+v", rulesPayload)
 	}
+	assertBusinessEventRequestContracts(t, rulesPayload.BusinessEventRequestContracts, "battle.allocation", "battle.ticket", "settlement")
 	assertBusinessNotificationTopics(t, rulesPayload.BusinessNotificationTopics, "battle.allocation", "battle.ticket", "settlement")
 
 	battleServersMissingEnvelope := handler.HandleWSSMessage(WSSMessage{
@@ -652,6 +653,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !reflect.DeepEqual(eventPayload.BusinessEventRequestKinds, core.ContractBusinessEventRequestKinds()) || stringSliceContains(eventPayload.BusinessEventRequestKinds, "battle.result.submit") {
 		t.Fatalf("business event should document allowed request kinds without service callbacks: %+v", eventPayload.BusinessEventRequestKinds)
 	}
+	assertBusinessEventRequestContracts(t, eventPayload.BusinessEventRequestContracts, "matchmaking", "battle.allocation", "battle.ticket")
 	assertBusinessNotificationTopics(t, eventPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket")
 
 	missingContractEnvelope := handler.HandleRPC(RPCRequest{
@@ -691,6 +693,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !reflect.DeepEqual(contractPayload.BusinessEventRequestKinds, core.ContractBusinessEventRequestKinds()) || stringSliceContains(contractPayload.BusinessEventRequestKinds, "battle.ticket.consume") {
 		t.Fatalf("business contract should document allowed event request kinds without service callbacks: %+v", contractPayload.BusinessEventRequestKinds)
 	}
+	assertBusinessEventRequestContracts(t, contractPayload.BusinessEventRequestContracts, "matchmaking", "battle.allocation", "battle.ticket", "settlement")
 	assertBusinessNotificationTopics(t, contractPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket", "settlement")
 
 	activityEvent := handler.HandleWSSMessage(WSSMessage{
@@ -2494,6 +2497,39 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 	for _, expected := range expectedKinds {
 		if !seen[expected] {
 			t.Fatalf("business notification topics missing %q: %+v", expected, topics)
+		}
+	}
+}
+
+func assertBusinessEventRequestContracts(t *testing.T, contracts []core.BusinessEventRequestContract, expectedKinds ...string) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, contract := range contracts {
+		expectedRequestOp := "business.event"
+		if contract.Kind == "settlement" {
+			expectedRequestOp = "business.event.settlement"
+		}
+		if contract.Kind == "" || contract.ClientEventRequestOperation != expectedRequestOp || contract.ClientRPCOperation != expectedRequestOp || contract.ClientWSSOperation != expectedRequestOp {
+			t.Fatalf("business event request contract operation invalid: %+v", contract)
+		}
+		if !contract.BusinessEnvelopeRequired || !contract.ServerAuthoritativeProjection || contract.ServiceCallback || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
+			t.Fatalf("business event request contract must stay low-frequency read intent: %+v", contract)
+		}
+		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
+			if !stringSliceContains(contract.ClientRequestFields, requestField) {
+				t.Fatalf("business event request contract missing lookup field %q: %+v", requestField, contract)
+			}
+		}
+		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
+			if !stringSliceContains(contract.ForbiddenClientRequestFields, forbiddenField) {
+				t.Fatalf("business event request contract missing forbidden request field %q: %+v", forbiddenField, contract)
+			}
+		}
+		seen[contract.Kind] = true
+	}
+	for _, expected := range expectedKinds {
+		if !seen[expected] {
+			t.Fatalf("business event request contracts missing %q: %+v", expected, contracts)
 		}
 	}
 }

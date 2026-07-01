@@ -375,6 +375,39 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	if stringSliceContains(requestKinds, "battle.result.submit") || stringSliceContains(requestKinds, "battle.ticket.consume") {
 		t.Fatalf("business event request kinds must not expose service callbacks: %+v", requestKinds)
 	}
+	requestContracts := ContractBusinessEventRequestContracts()
+	if len(requestContracts) != len(requestKinds) {
+		t.Fatalf("business event request contracts must mirror request kinds: contracts=%+v kinds=%+v", requestContracts, requestKinds)
+	}
+	seenRequestContracts := map[string]bool{}
+	for _, contract := range requestContracts {
+		expectedRequestOp := "business.event"
+		if contract.Kind == "settlement" {
+			expectedRequestOp = "business.event.settlement"
+		}
+		if !stringSliceContains(requestKinds, contract.Kind) || contract.ClientEventRequestOperation != expectedRequestOp || contract.ClientRPCOperation != expectedRequestOp || contract.ClientWSSOperation != expectedRequestOp {
+			t.Fatalf("business event request contract operation drifted: %+v request_kinds=%+v", contract, requestKinds)
+		}
+		if !contract.BusinessEnvelopeRequired || !contract.ServerAuthoritativeProjection || contract.ServiceCallback || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
+			t.Fatalf("business event request contract must stay low-frequency read intent: %+v", contract)
+		}
+		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
+			if !stringSliceContains(contract.ClientRequestFields, requestField) {
+				t.Fatalf("business event request contract missing lookup field %q: %+v", requestField, contract)
+			}
+		}
+		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
+			if !stringSliceContains(contract.ForbiddenClientRequestFields, forbiddenField) {
+				t.Fatalf("business event request contract missing forbidden field %q: %+v", forbiddenField, contract)
+			}
+		}
+		seenRequestContracts[contract.Kind] = true
+	}
+	for _, kind := range requestKinds {
+		if !seenRequestContracts[kind] {
+			t.Fatalf("business event request contract missing kind %q: %+v", kind, requestContracts)
+		}
+	}
 	seenKinds := map[string]bool{}
 	for _, topic := range topics {
 		if topic.Kind == "" || topic.Topic != "nakama_wss.business."+strings.ReplaceAll(topic.Kind, ".", "_") || topic.Transport != "nakama_wss" {

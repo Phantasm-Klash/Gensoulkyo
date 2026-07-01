@@ -1162,6 +1162,7 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 		SettlementAuthority:            contract.SettlementAuthority,
 		BusinessNotifications:          contract.BusinessNotifications,
 		BusinessEventRequestKinds:      contract.BusinessEventRequestKinds,
+		BusinessEventRequestContracts:  contract.BusinessEventRequestContracts,
 		BusinessNotificationTopics:     contract.BusinessNotificationTopics,
 		ClientAuthority:                contract.ClientAuthority,
 		ServerAuthority:                contract.ServerAuthority,
@@ -2467,6 +2468,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
 		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEventRequestKinds:      businessEventRequestKinds(),
+		BusinessEventRequestContracts:  businessEventRequestContracts(),
 		BusinessNotificationTopics:     businessNotificationTopics(),
 		BusinessEnvelopeRequired:       true,
 		ForbiddenFields:                sortedForbiddenClientFields(),
@@ -6120,6 +6122,32 @@ func ContractBusinessEventRequestKinds() []string {
 	return businessEventRequestKinds()
 }
 
+func businessEventRequestContracts() []BusinessEventRequestContract {
+	kinds := businessEventRequestKinds()
+	contracts := make([]BusinessEventRequestContract, 0, len(kinds))
+	for _, kind := range kinds {
+		operation := businessNotificationRequestOperation(kind)
+		contracts = append(contracts, BusinessEventRequestContract{
+			Kind:                           kind,
+			ClientEventRequestOperation:    operation,
+			ClientRPCOperation:             operation,
+			ClientWSSOperation:             operation,
+			ClientRequestFields:            businessNotificationClientRequestFields(kind),
+			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
+			BusinessEnvelopeRequired:       true,
+			ServerAuthoritativeProjection:  true,
+			ServiceCallback:                false,
+			HighFrequencyBattleTickAllowed: false,
+			ClientResultSubmitAllowed:      false,
+		})
+	}
+	return contracts
+}
+
+func ContractBusinessEventRequestContracts() []BusinessEventRequestContract {
+	return businessEventRequestContracts()
+}
+
 func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 	return &BusinessContractSnapshot{
 		OK:                             true,
@@ -6138,6 +6166,7 @@ func businessContractSnapshot(now time.Time) *BusinessContractSnapshot {
 		SettlementAuthority:            settlementAuthorityServiceSignedBattleResult,
 		BusinessNotifications:          businessNotificationKinds(),
 		BusinessEventRequestKinds:      businessEventRequestKinds(),
+		BusinessEventRequestContracts:  businessEventRequestContracts(),
 		BusinessNotificationTopics:     businessNotificationTopics(),
 		ClientAuthority: []string{
 			"input_packet",
