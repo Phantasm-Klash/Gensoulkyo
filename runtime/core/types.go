@@ -954,6 +954,10 @@ type BusinessEvent struct {
 	Version                        VersionStamp                   `json:"version"`
 	Kind                           string                         `json:"kind"`
 	Topic                          string                         `json:"topic"`
+	Delivery                       string                         `json:"delivery"`
+	State                          string                         `json:"state"`
+	ClientEventRequestOperation    string                         `json:"client_event_request_operation"`
+	ClientRequestAuthority         string                         `json:"client_request_authority"`
 	UserID                         string                         `json:"user_id"`
 	ModeID                         string                         `json:"mode_id,omitempty"`
 	RoomCode                       string                         `json:"room_code,omitempty"`

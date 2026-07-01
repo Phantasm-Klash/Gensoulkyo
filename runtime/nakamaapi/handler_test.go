@@ -635,6 +635,10 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if eventPayload.Topic != "nakama_wss.business.matchmaking" || eventPayload.MatchID != found.MatchID || eventPayload.QueueStatus != "found" || eventPayload.BattleAllocation == nil || eventPayload.BattleTicket == nil {
 		t.Fatalf("business event should include low-frequency matchmaking allocation/ticket state: %+v", eventPayload)
 	}
+	matchmakingTopic := businessNotificationTopicByKind(eventPayload.BusinessNotificationTopics, "matchmaking")
+	if matchmakingTopic == nil || eventPayload.Delivery != matchmakingTopic.Delivery || eventPayload.State != matchmakingTopic.State || eventPayload.ClientEventRequestOperation != matchmakingTopic.ClientEventRequestOperation || eventPayload.ClientRequestAuthority != matchmakingTopic.ClientRequestAuthority {
+		t.Fatalf("business event should project its notification delivery contract: event=%+v topic=%+v", eventPayload, matchmakingTopic)
+	}
 	if eventPayload.Version.ProtocolVersion != core.ProtocolVersion || eventPayload.Version.RulesetVersion != core.RulesetVersion || eventPayload.Version.BusinessAPIVersion != core.BusinessAPIVersion || eventPayload.Version.BattleAPIVersion != core.BattleAPIVersion {
 		t.Fatalf("business event should include shared protocol version stamp: %+v", eventPayload.Version)
 	}
@@ -688,6 +692,10 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	aliasPayload := aliasEvent.Payload.(*core.BusinessEvent)
 	if aliasPayload.Kind != "battle.ticket" || aliasPayload.TicketID != found.TicketID || aliasPayload.BattleTicket == nil || aliasPayload.BattleTicket.Ticket.MatchID != found.MatchID || aliasPayload.ClientResultSubmitAllowed || aliasPayload.HighFrequencyBattleTickAllowed {
 		t.Fatalf("business event alias should stay lookup-only and return signed ticket projection: %+v", aliasPayload)
+	}
+	ticketTopic := businessNotificationTopicByKind(aliasPayload.BusinessNotificationTopics, "battle.ticket")
+	if ticketTopic == nil || aliasPayload.Delivery != ticketTopic.Delivery || aliasPayload.State != "signed_battle_ticket" || aliasPayload.State != ticketTopic.State || aliasPayload.ClientEventRequestOperation != "business.event" || aliasPayload.ClientRequestAuthority != "lookup_only" {
+		t.Fatalf("battle ticket event should expose WSS lookup delivery state: event=%+v topic=%+v", aliasPayload, ticketTopic)
 	}
 	duplicateAliasEvent := handler.HandleWSSMessage(WSSMessage{
 		Name:      "business.event",
@@ -3062,6 +3070,15 @@ func businessEventRequestContractByKind(contracts []core.BusinessEventRequestCon
 	for index := range contracts {
 		if contracts[index].Kind == kind {
 			return &contracts[index]
+		}
+	}
+	return nil
+}
+
+func businessNotificationTopicByKind(topics []core.BusinessNotificationTopic, kind string) *core.BusinessNotificationTopic {
+	for index := range topics {
+		if topics[index].Kind == kind {
+			return &topics[index]
 		}
 	}
 	return nil

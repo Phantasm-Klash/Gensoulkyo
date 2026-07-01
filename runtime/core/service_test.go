@@ -2583,6 +2583,10 @@ func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
 	if !reflect.DeepEqual(presence.BusinessEventRequestKinds, ContractBusinessEventRequestKinds()) || !stringSliceContains(presence.BusinessEventRequestKinds, "settlement") || stringSliceContains(presence.BusinessEventRequestKinds, "battle.result.submit") {
 		t.Fatalf("business event should publish allowed request kinds without service callbacks: %+v", presence.BusinessEventRequestKinds)
 	}
+	presenceTopic := businessNotificationTopicByKind(presence.BusinessNotificationTopics, "presence")
+	if presenceTopic == nil || presence.Delivery != presenceTopic.Delivery || presence.State != presenceTopic.State || presence.ClientEventRequestOperation != presenceTopic.ClientEventRequestOperation || presence.ClientRequestAuthority != presenceTopic.ClientRequestAuthority {
+		t.Fatalf("presence event should project its notification delivery contract: event=%+v topic=%+v", presence, presenceTopic)
+	}
 	activity, err := service.BusinessEvent(user.SessionToken, BusinessEventRequest{Kind: "activity"})
 	if err != nil {
 		t.Fatalf("activity business event: %v", err)
@@ -2627,6 +2631,9 @@ func TestBusinessEventNotificationKindsDriveDispatcher(t *testing.T) {
 	queueTopic := businessNotificationTopicByKind(queueEvent.BusinessNotificationTopics, "queue")
 	if queueTopic == nil || queueTopic.Delivery != "server_push_with_lookup_fallback" || queueTopic.State != "queue_status" || !stringSliceContains(queueTopic.ServerProjectionFields, "queue.ticket_id") || !stringSliceContains(queueTopic.ServerProjectionFields, "queue.loadout") || !stringSliceContains(queueTopic.ServerProjectionFields, "queue.battle_allocation") || !stringSliceContains(queueTopic.ServerProjectionFields, "queue.battle_ticket") || stringSliceContains(queueTopic.ServerProjectionFields, "battle_result_hash") {
 		t.Fatalf("queue notification topic should publish server-owned queue and allocation projections only: %+v", queueTopic)
+	}
+	if queueEvent.Delivery != queueTopic.Delivery || queueEvent.State != queueTopic.State || queueEvent.ClientEventRequestOperation != queueTopic.ClientEventRequestOperation || queueEvent.ClientRequestAuthority != queueTopic.ClientRequestAuthority {
+		t.Fatalf("queue event should project its notification delivery contract: event=%+v topic=%+v", queueEvent, queueTopic)
 	}
 	queueRequestContract := businessEventRequestContractByKind(queueEvent.BusinessEventRequestContracts, "queue")
 	if queueRequestContract == nil || !reflect.DeepEqual(queueRequestContract.ServerProjectionFields, queueTopic.ServerProjectionFields) || queueRequestContract.ClientResultSubmitAllowed || queueRequestContract.HighFrequencyBattleTickAllowed {
@@ -2829,6 +2836,12 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.BusinessEventRequestContracts, rules.BusinessEventRequestContracts) {
 		t.Fatalf("room rules and business event request contract drifted: rules=%+v event=%+v", rules.BusinessEventRequestContracts, event.BusinessEventRequestContracts)
+	}
+	if !reflect.DeepEqual(event.BusinessNotificationTopics, rules.BusinessNotificationTopics) {
+		t.Fatalf("room rules and business event notification topics drifted: rules=%+v event=%+v", rules.BusinessNotificationTopics, event.BusinessNotificationTopics)
+	}
+	if roomTopic == nil || event.Delivery != roomTopic.Delivery || event.State != roomTopic.State || event.ClientEventRequestOperation != roomTopic.ClientEventRequestOperation || event.ClientRequestAuthority != roomTopic.ClientRequestAuthority {
+		t.Fatalf("room business event should project its notification delivery contract: event=%+v topic=%+v", event, roomTopic)
 	}
 	if !event.BusinessEnvelopeRequired || !reflect.DeepEqual(event.ForbiddenFields, rules.ForbiddenFields) {
 		t.Fatalf("room business event should expose the same security contract as room rules: rules=%+v event=%+v", rules.ForbiddenFields, event.ForbiddenFields)
