@@ -132,6 +132,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.businessEvent(w, r, "settlement")
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "business" && segments[2] == "contract" && r.Method == http.MethodGet {
+		h.businessContract(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "matchmaking" && segments[2] == "join" && r.Method == http.MethodPost {
 		h.joinQueue(w, r)
 		return
@@ -417,6 +421,15 @@ func (h *Handler) businessEvent(w http.ResponseWriter, r *http.Request, forcedKi
 		req.Kind = forcedKind
 	}
 	resp, err := h.service.BusinessEvent(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) businessContract(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.BusinessContract(sessionToken(r))
 	if err != nil {
 		writeError(w, err)
 		return

@@ -472,6 +472,44 @@ func TestHTTPBusinessEnvelopeFallbackGuard(t *testing.T) {
 	}
 }
 
+func TestHTTPBusinessContractRequiresEnvelopeAndPublishesClientAuthority(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	session := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "business-contract-http", "display_name": "HTTP Contract"})
+
+	legacy := getJSON[core.BusinessContractSnapshot](t, server.URL+"/v1/business/contract", session.SessionToken)
+	if !legacy.OK || !legacy.ServerAuthoritative || !legacy.BusinessEnvelopeRequired {
+		t.Fatalf("business contract HTTP fallback route should keep legacy read compatibility while publishing envelope requirement: %+v", legacy)
+	}
+
+	contract := getJSONWithHeaders[core.BusinessContractSnapshot](t, server.URL+"/v1/business/contract", session.SessionToken, businessEnvelopeHeaders(1, time.Now(), "business-contract-http-nonce", "business_contract"))
+	if !contract.OK || !contract.ServerAuthoritative || !contract.BusinessEnvelopeRequired || contract.ClientResultSubmitAllowed || contract.HighFrequencyBattleTickAllowed {
+		t.Fatalf("business contract HTTP route should publish low-frequency authority contract: %+v", contract)
+	}
+	if contract.Version.ProtocolVersion != core.ProtocolVersion || contract.Version.BusinessAPIVersion != core.BusinessAPIVersion || contract.Version.BattleAPIVersion != core.BattleAPIVersion || contract.Version.RulesetVersion != core.RulesetVersion {
+		t.Fatalf("business contract HTTP route should expose shared version stamp: %+v", contract.Version)
+	}
+	if !stringSliceContains(contract.ClientOperations, "business.contract") || !stringSliceContains(contract.ClientRPCOperations, "business.contract") || !stringSliceContains(contract.ClientWSSOperations, "business.contract") {
+		t.Fatalf("business contract HTTP route should mirror client RPC/WSS contract: %+v", contract)
+	}
+	if stringSliceContains(contract.ClientOperations, "battle.result.submit") || stringSliceContains(contract.ClientWSSOperations, "battle.ticket.consume") || !stringSliceContains(contract.DisallowedClientOperations, "battle.result.submit") {
+		t.Fatalf("business contract HTTP route must keep service callbacks out of client authority: %+v", contract)
+	}
+	if !stringSliceContains(contract.BusinessNotifications, "battle.ticket") || !stringSliceContains(contract.BusinessEventRequestKinds, "settlement") || stringSliceContains(contract.BusinessNotifications, "battle.result.submit") {
+		t.Fatalf("business contract HTTP route should expose low-frequency business notification contract: %+v", contract)
+	}
+	if contract.ServiceCallbackPlayerAllowed || contract.ServiceCallbackEnvelopeAllowed || contract.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer {
+		t.Fatalf("business contract HTTP route should publish service callback boundaries: %+v", contract)
+	}
+	status := getJSON[map[string]any](t, server.URL+"/v1/security/business-envelope", "")
+	statusBody, ok := status["status"].(map[string]any)
+	if !ok || int(statusBody["accepted"].(float64)) != 1 {
+		t.Fatalf("business contract HTTP route should share fallback envelope guard: %+v", status)
+	}
+}
+
 func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := httptest.NewServer(New(service))
