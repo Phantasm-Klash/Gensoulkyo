@@ -1138,6 +1138,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
+		ModeConfigHash: replacement.Ticket.ModeConfigHash,
 		TicketNonceHex: "wrong-nonce",
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected nonce mismatch rejection, got %v", err)
@@ -1157,6 +1158,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
+		ModeConfigHash: replacement.Ticket.ModeConfigHash,
 		TicketNonceHex: replacement.Ticket.TicketNonceHex,
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected stale consume business api rejection, got %v", err)
@@ -1168,12 +1170,25 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		TicketID:       replacement.Ticket.TicketID,
 		MatchID:        matchID,
 		BattleServerID: replacement.Ticket.BattleServerID,
+		ModeConfigHash: replacement.Ticket.ModeConfigHash,
 		TicketNonceHex: replacement.Ticket.TicketNonceHex,
 	}); ErrorCode(err) != codeInvalidRequest {
 		t.Fatalf("expected stale consume ruleset rejection, got %v", err)
 	}
+	rejected := 0
+	for _, record := range repo.tickets {
+		if record.TicketID == replacement.Ticket.TicketID && record.Status == "rejected" {
+			rejected++
+			if record.RejectReason == "" || record.ConsumedAt != now || !record.ServerAuthoritative {
+				t.Fatalf("rejected ticket audit invalid: %+v", record)
+			}
+		}
+	}
+	if rejected != 6 {
+		t.Fatalf("expected six rejected consume audits, got %d tickets=%+v", rejected, repo.tickets)
+	}
 	status := service.BattleLifecycleAuditStatus()
-	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket" {
+	if !status.OK || !status.Configured || status.TicketConsumedRecords != 1 || status.TicketRejectedRecords != 6 || status.TicketRecords < 2 || status.LastSuccessOperation != "battle_ticket_rejected" {
 		t.Fatalf("ticket consume status invalid: %+v", status)
 	}
 }

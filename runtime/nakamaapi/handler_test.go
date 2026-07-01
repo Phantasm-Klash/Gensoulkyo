@@ -2363,6 +2363,9 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !nakamaSQLHasConsumedBattleTicketAudit() {
 		t.Fatalf("expected consumed battle ticket audit row: calls=%+v", nakamaSQLCaptureCalls())
 	}
+	if !nakamaSQLHasRejectedBattleTicketAudit() {
+		t.Fatalf("expected rejected battle ticket audit row: calls=%+v", nakamaSQLCaptureCalls())
+	}
 }
 
 func TestNakamaEnvelopeAuditStatusReportsSQLSinkFailures(t *testing.T) {
@@ -2617,10 +2620,22 @@ func nakamaSQLHasDuplicateBattleResultAudit() bool {
 
 func nakamaSQLHasConsumedBattleTicketAudit() bool {
 	for _, call := range nakamaSQLCaptureCalls() {
-		if !strings.Contains(call.query, "INSERT INTO battle_ticket_audits") || len(call.args) < 20 {
+		if !strings.Contains(call.query, "INSERT INTO battle_ticket_audits") || len(call.args) < 21 {
 			continue
 		}
-		if strings.HasPrefix(fmt.Sprint(call.args[0]), "battle_ticket_") && call.args[11] == core.BusinessAPIVersion && call.args[12] == core.BattleAPIVersion && call.args[17] == "consumed" && call.args[18] == true && call.args[19] != nil {
+		if strings.HasPrefix(fmt.Sprint(call.args[0]), "battle_ticket_") && call.args[11] == core.BusinessAPIVersion && call.args[12] == core.BattleAPIVersion && call.args[17] == "consumed" && call.args[18] == "" && call.args[19] == true && call.args[20] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func nakamaSQLHasRejectedBattleTicketAudit() bool {
+	for _, call := range nakamaSQLCaptureCalls() {
+		if !strings.Contains(call.query, "INSERT INTO battle_ticket_audits") || len(call.args) < 21 {
+			continue
+		}
+		if strings.HasPrefix(fmt.Sprint(call.args[0]), "battle_ticket_") && call.args[17] == "rejected" && call.args[18] != "" && call.args[19] == true && call.args[20] != nil {
 			return true
 		}
 	}

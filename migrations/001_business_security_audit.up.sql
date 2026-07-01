@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS business_envelope_nonce_windows (
 );
 
 CREATE TABLE IF NOT EXISTS battle_ticket_audits (
-    ticket_id TEXT PRIMARY KEY,
+    audit_id BIGSERIAL PRIMARY KEY,
+    ticket_id TEXT NOT NULL,
     issued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,
     user_id TEXT NOT NULL,
@@ -85,13 +86,22 @@ CREATE TABLE IF NOT EXISTS battle_ticket_audits (
     mode_config_hash TEXT NOT NULL,
     nonce TEXT NOT NULL,
     signature_prefix TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('issued', 'consumed', 'expired', 'revoked')) DEFAULT 'issued',
+    status TEXT NOT NULL CHECK (status IN ('issued', 'consumed', 'expired', 'revoked', 'rejected')) DEFAULT 'issued',
+    reject_reason TEXT,
     server_authoritative BOOLEAN NOT NULL DEFAULT TRUE,
     consumed_at TIMESTAMPTZ,
     CONSTRAINT fk_battle_ticket_key
         FOREIGN KEY (key_id) REFERENCES business_envelope_keys(key_id)
         DEFERRABLE INITIALLY DEFERRED
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_battle_ticket_audit_lifecycle
+    ON battle_ticket_audits (ticket_id)
+    WHERE status IN ('issued', 'consumed', 'expired', 'revoked');
+
+CREATE INDEX IF NOT EXISTS ix_battle_ticket_audit_rejected
+    ON battle_ticket_audits (ticket_id, consumed_at DESC)
+    WHERE status = 'rejected';
 
 CREATE INDEX IF NOT EXISTS ix_battle_ticket_audit_match
     ON battle_ticket_audits (match_id, user_id);
