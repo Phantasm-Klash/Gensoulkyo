@@ -351,7 +351,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "battle.servers") || !stringSliceContains(rulesPayload.ClientOperations, "battle.ticket") || !stringSliceContains(rulesPayload.ClientOperations, "matchmaking.cancel") || stringSliceContains(rulesPayload.ClientOperations, "battle.result.submit") || stringSliceContains(rulesPayload.ClientOperations, "battle.servers.register") {
 		t.Fatalf("room rules should expose client RPC/WSS operations without result submit: %+v", rulesPayload)
 	}
-	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.result.submit"} {
+	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.ready", "battle.reconnect", "battle.mode_action", "battle.cast_card", "battle.card_slot", "battle.result.submit"} {
 		if !stringSliceContains(rulesPayload.DisallowedClientOperations, forbiddenOp) || stringSliceContains(rulesPayload.ClientOperations, forbiddenOp) || stringSliceContains(rulesPayload.ClientRPCOperations, forbiddenOp) || stringSliceContains(rulesPayload.ClientWSSOperations, forbiddenOp) {
 			t.Fatalf("room rules should explicitly disallow Nakama client op %q: %+v", forbiddenOp, rulesPayload)
 		}
@@ -640,7 +640,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if eventPayload.HighFrequencyBattleTickAllowed || eventPayload.ClientResultSubmitAllowed || stringSliceContains(eventPayload.AllowedClientOperations, "battle.result.submit") {
 		t.Fatalf("business event must not authorize high-frequency tick or client result submit: %+v", eventPayload)
 	}
-	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.result.submit"} {
+	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.ready", "battle.reconnect", "battle.mode_action", "battle.cast_card", "battle.card_slot", "battle.result.submit"} {
 		if !stringSliceContains(eventPayload.DisallowedClientOperations, forbiddenOp) || stringSliceContains(eventPayload.AllowedClientOperations, forbiddenOp) || stringSliceContains(eventPayload.AllowedClientRPCOperations, forbiddenOp) || stringSliceContains(eventPayload.AllowedClientWSSOperations, forbiddenOp) {
 			t.Fatalf("business event should explicitly disallow Nakama client op %q: %+v", forbiddenOp, eventPayload)
 		}

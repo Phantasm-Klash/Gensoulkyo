@@ -2716,7 +2716,7 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if !stringSliceContains(rules.ClientOperations, "battle.servers") || !stringSliceContains(rules.ClientOperations, "battle.ticket") || !stringSliceContains(rules.ClientOperations, "match.ready") || !stringSliceContains(rules.ClientOperations, "matchmaking.cancel") || !stringSliceContains(rules.ClientOperations, "rooms.chat") || !stringSliceContains(rules.ClientOperations, "rooms.announcement") || stringSliceContains(rules.ClientOperations, "battle.result.submit") || stringSliceContains(rules.ClientOperations, "battle.servers.register") {
 		t.Fatalf("room rules should keep client operations read/intent only: %+v", rules)
 	}
-	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.result.submit"} {
+	for _, forbiddenOp := range []string{"match.input", "match.snapshot", "match.events", "match.settle", "battle.input", "battle.snapshot", "battle.events", "battle.ready", "battle.reconnect", "battle.mode_action", "battle.cast_card", "battle.card_slot", "battle.result.submit"} {
 		if !stringSliceContains(rules.DisallowedClientOperations, forbiddenOp) || stringSliceContains(rules.ClientOperations, forbiddenOp) || stringSliceContains(rules.ClientRPCOperations, forbiddenOp) || stringSliceContains(rules.ClientWSSOperations, forbiddenOp) {
 			t.Fatalf("room rules should explicitly disallow high-frequency/result client op %q: %+v", forbiddenOp, rules)
 		}
