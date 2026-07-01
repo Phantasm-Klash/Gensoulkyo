@@ -399,6 +399,8 @@ func TestBattleAllocationAndSignedTicketUseRegisteredServer(t *testing.T) {
 	if len(readyBob.MatchStart.Players) != 2 || readyBob.MatchStart.Players[0].PlayerID == "" {
 		t.Fatalf("match start players should expose battle player ids: %+v", readyBob.MatchStart.Players)
 	}
+	readyBob.MatchStart.BattleAllocation.BattleServerID = "client-mutated"
+	readyBob.MatchStart.BattleAllocation.Players[0].DeckSnapshotHash = "client-mutated"
 
 	allocation, err := service.BattleAllocation(alice.SessionToken, queueBob.MatchID)
 	if err != nil {
@@ -406,6 +408,9 @@ func TestBattleAllocationAndSignedTicketUseRegisteredServer(t *testing.T) {
 	}
 	if allocation.MatchID != queueBob.MatchID || allocation.Endpoint != "127.0.0.1:7909" {
 		t.Fatalf("explicit allocation mismatch: %+v", allocation)
+	}
+	if allocation.BattleServerID != "aaa-battle-dev" || allocation.Players[0].DeckSnapshotHash == "client-mutated" {
+		t.Fatalf("match start allocation must be defensively copied from stored allocation: %+v", allocation)
 	}
 	ticketAlice, err := service.BattleTicket(alice.SessionToken, queueBob.MatchID)
 	if err != nil {
