@@ -493,6 +493,106 @@ func TestHTTPBusinessEnvelopeFallbackGuard(t *testing.T) {
 	}
 }
 
+func TestHTTPBusinessEnvelopeTwoPlayerRoomMatchFlowAllowsPerSessionSequence(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	alice := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "envelope-flow-a", "display_name": "Envelope Flow A"})
+	bob := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "envelope-flow-b", "display_name": "Envelope Flow B"})
+
+	aliceBootstrap := getJSONWithHeaders[core.BootstrapSnapshot](t, server.URL+"/v1/bootstrap", alice.SessionToken, businessEnvelopeHeaders(1, time.Now(), "envelope-flow-alice-bootstrap", "bootstrap"))
+	bobBootstrap := getJSONWithHeaders[core.BootstrapSnapshot](t, server.URL+"/v1/bootstrap", bob.SessionToken, businessEnvelopeHeaders(1, time.Now(), "envelope-flow-bob-bootstrap", "bootstrap"))
+	if aliceBootstrap.Ruleset != core.RulesetVersion || bobBootstrap.Ruleset != core.RulesetVersion {
+		t.Fatalf("secure bootstrap should expose active ruleset: alice=%+v bob=%+v", aliceBootstrap, bobBootstrap)
+	}
+
+	room := postJSONWithHeaders[core.QueueResponse](t, server.URL+"/v1/rooms/create", alice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "envelope_flow_alice_deck",
+		"deck_snapshot":  validDeck("envelope_flow_alice_deck"),
+		"mode_params":    map[string]any{"stage_id": "starlit_lanes", "character_id": "spell_power"},
+	}, businessEnvelopeHeaders(2, time.Now(), "envelope-flow-alice-room-create", "rooms_create"))
+	if room.RoomCode == "" || room.TicketID == "" {
+		t.Fatalf("secure room create failed: %+v", room)
+	}
+
+	joined := postJSONWithHeaders[core.QueueResponse](t, server.URL+"/v1/rooms/"+room.RoomCode+"/join", bob.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "envelope_flow_bob_deck",
+		"deck_snapshot":  validDeck("envelope_flow_bob_deck"),
+		"mode_params":    map[string]any{"stage_id": "starlit_lanes", "character_id": "precision"},
+	}, businessEnvelopeHeaders(2, time.Now(), "envelope-flow-bob-room-join", "rooms_join"))
+	if joined.MatchID == "" || joined.QueueStatus != "found" || joined.BattleAllocation == nil || joined.BattleTicket == nil {
+		t.Fatalf("secure room join should create a two-player match with battle allocation: %+v", joined)
+	}
+
+	aliceReady := postJSONWithHeaders[core.ReadyResponse](t, server.URL+"/v1/matches/"+joined.MatchID+"/ready", alice.SessionToken, map[string]any{}, businessEnvelopeHeaders(3, time.Now(), "envelope-flow-alice-ready", "match_ready"))
+	if aliceReady.ReadyStatus != "loading" || aliceReady.MatchStart != nil {
+		t.Fatalf("first secure ready should wait for second player: %+v", aliceReady)
+	}
+	bobReady := postJSONWithHeaders[core.ReadyResponse](t, server.URL+"/v1/matches/"+joined.MatchID+"/ready", bob.SessionToken, map[string]any{}, businessEnvelopeHeaders(3, time.Now(), "envelope-flow-bob-ready", "match_ready"))
+	if bobReady.ReadyStatus != "running" || bobReady.MatchStart == nil || bobReady.MatchStart.Type != "match_start" {
+		t.Fatalf("second secure ready should start match: %+v", bobReady)
+	}
+
+	input := postJSONWithHeaders[core.InputResponse](t, server.URL+"/v1/matches/"+joined.MatchID+"/input", alice.SessionToken, map[string]any{
+		"tick":      1,
+		"seq":       1,
+		"dir":       4,
+		"slow":      true,
+		"shoot":     true,
+		"bomb":      false,
+		"card_slot": -1,
+	}, businessEnvelopeHeaders(4, time.Now(), "envelope-flow-alice-input", "match_input"))
+	if !input.Accepted || input.Snapshot.MatchID != joined.MatchID || input.Snapshot.StateHash == "" {
+		t.Fatalf("secure input invalid: %+v", input)
+	}
+
+	snapshot := getJSONWithHeaders[core.Snapshot](t, server.URL+"/v1/matches/"+joined.MatchID+"/snapshot", alice.SessionToken, businessEnvelopeHeaders(5, time.Now(), "envelope-flow-alice-snapshot", "match_snapshot"))
+	if !snapshot.Full || snapshot.MatchID != joined.MatchID || snapshot.StateHash == "" {
+		t.Fatalf("secure snapshot invalid: %+v", snapshot)
+	}
+
+	settlement := postJSONWithHeaders[core.MatchEndEvent](t, server.URL+"/v1/matches/"+joined.MatchID+"/settle", alice.SessionToken, map[string]any{}, businessEnvelopeHeaders(6, time.Now(), "envelope-flow-alice-settle", "match_settle"))
+	if settlement.Type != "match_end" || settlement.Mode != "pvp_duel" || settlement.ReplayID == "" || !settlement.ServerAuthoritative {
+		t.Fatalf("secure settlement invalid: %+v", settlement)
+	}
+}
+
+func TestHTTPBusinessEnvelopeReadyRejectsReusedSessionSequence(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	alice := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "envelope-ready-replay-a", "display_name": "Envelope Ready Replay A"})
+	bob := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": "envelope-ready-replay-b", "display_name": "Envelope Ready Replay B"})
+
+	room := postJSONWithHeaders[core.QueueResponse](t, server.URL+"/v1/rooms/create", alice.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "envelope_replay_alice_deck",
+		"deck_snapshot":  validDeck("envelope_replay_alice_deck"),
+	}, businessEnvelopeHeaders(1, time.Now(), "envelope-ready-replay-room-create", "rooms_create"))
+	joined := postJSONWithHeaders[core.QueueResponse](t, server.URL+"/v1/rooms/"+room.RoomCode+"/join", bob.SessionToken, map[string]any{
+		"mode_id":        "pvp_duel",
+		"active_deck_id": "envelope_replay_bob_deck",
+		"deck_snapshot":  validDeck("envelope_replay_bob_deck"),
+	}, businessEnvelopeHeaders(1, time.Now(), "envelope-ready-replay-room-join", "rooms_join"))
+	if joined.MatchID == "" {
+		t.Fatalf("room join should create match: %+v", joined)
+	}
+
+	replayedReady := postRawWithHeaders(t, server.URL+"/v1/matches/"+joined.MatchID+"/ready", alice.SessionToken, map[string]any{}, businessEnvelopeHeaders(1, time.Now(), "envelope-ready-replay-new-nonce", "match_ready"))
+	if replayedReady.Code != http.StatusConflict || replayedReady.ErrorCode != security.CodeBusinessEnvelopeReplay || !strings.Contains(replayedReady.Message, "seq") {
+		t.Fatalf("expected reused ready seq to be rejected as replay, got %+v", replayedReady)
+	}
+
+	ready := postJSONWithHeaders[core.ReadyResponse](t, server.URL+"/v1/matches/"+joined.MatchID+"/ready", alice.SessionToken, map[string]any{}, businessEnvelopeHeaders(2, time.Now(), "envelope-ready-replay-valid-ready", "match_ready"))
+	if ready.ReadyStatus != "loading" {
+		t.Fatalf("fresh ready seq should be accepted after rejected replay: %+v", ready)
+	}
+}
+
 func TestHTTPBusinessContractRequiresEnvelopeAndPublishesClientAuthority(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := httptest.NewServer(New(service))
