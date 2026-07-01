@@ -3747,6 +3747,8 @@ func validateLoadout(modeID string, modeParams map[string]any, profile Certifica
 		if ratingCode != profile.RatingCode {
 			return PlayerLoadout{}, newError(codeInvalidMode, "rating %q is not unlocked", ratingCode)
 		}
+	} else if ratingParam := strings.TrimSpace(asString(modeParams["rating_code"])); ratingParam != "" && ratingParam != "<nil>" {
+		return PlayerLoadout{}, newError(codeInvalidMode, "rating_code is only valid for certification mode")
 	}
 	return PlayerLoadout{
 		StageID:             stageID,
