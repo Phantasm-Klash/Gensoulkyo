@@ -2729,6 +2729,26 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 		if !topic.ServerAuthoritativeProjection || !stringSliceContains(topic.ClientRequestFields, "match_id") || !stringSliceContains(topic.ClientRequestFields, "ticket_id") {
 			t.Fatalf("business notification topic must expose read-only client lookup fields: %+v", topic)
 		}
+		if !stringSliceContains(topic.ServerProjectionFields, "server_time") || !stringSliceContains(topic.ServerProjectionFields, "server_authoritative") {
+			t.Fatalf("business notification topic must expose common server projection fields: %+v", topic)
+		}
+		if stringSliceContains(topic.ClientRequestFields, "battle_allocation") || stringSliceContains(topic.ClientRequestFields, "battle_ticket") || stringSliceContains(topic.ClientRequestFields, "settlement") {
+			t.Fatalf("business notification topic must not accept server projection fields from clients: %+v", topic)
+		}
+		switch topic.Kind {
+		case "battle.allocation":
+			if !stringSliceContains(topic.ServerProjectionFields, "battle_allocation") {
+				t.Fatalf("battle allocation topic missing server projection field: %+v", topic)
+			}
+		case "battle.ticket":
+			if !stringSliceContains(topic.ServerProjectionFields, "battle_ticket") {
+				t.Fatalf("battle ticket topic missing server projection field: %+v", topic)
+			}
+		case "settlement":
+			if !stringSliceContains(topic.ServerProjectionFields, "settlement") {
+				t.Fatalf("settlement topic missing server projection field: %+v", topic)
+			}
+		}
 		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
 			if !stringSliceContains(topic.ForbiddenClientRequestFields, forbiddenField) {
 				t.Fatalf("business notification topic missing forbidden request field %q: %+v", forbiddenField, topic)
@@ -2763,6 +2783,26 @@ func assertBusinessEventRequestContracts(t *testing.T, contracts []core.Business
 		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
 			if !stringSliceContains(contract.ClientRequestFields, requestField) {
 				t.Fatalf("business event request contract missing lookup field %q: %+v", requestField, contract)
+			}
+		}
+		if !stringSliceContains(contract.ServerProjectionFields, "server_time") || !stringSliceContains(contract.ServerProjectionFields, "server_authoritative") {
+			t.Fatalf("business event request contract must expose common server projection fields: %+v", contract)
+		}
+		if stringSliceContains(contract.ClientRequestFields, "battle_allocation") || stringSliceContains(contract.ClientRequestFields, "battle_ticket") || stringSliceContains(contract.ClientRequestFields, "settlement") {
+			t.Fatalf("business event request contract must not accept server projection fields from clients: %+v", contract)
+		}
+		switch contract.Kind {
+		case "battle.allocation":
+			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
+				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)
+			}
+		case "battle.ticket":
+			if !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
+				t.Fatalf("battle ticket request contract missing server projection field: %+v", contract)
+			}
+		case "settlement":
+			if !stringSliceContains(contract.ServerProjectionFields, "settlement") {
+				t.Fatalf("settlement request contract missing server projection field: %+v", contract)
 			}
 		}
 		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
