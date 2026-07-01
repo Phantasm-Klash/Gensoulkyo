@@ -1308,7 +1308,8 @@ func (s *Service) LobbyMessage(sessionToken string, req LobbyMessageRequest) (*L
 		room.Messages = append([]LobbyMessage{}, room.Messages[len(room.Messages)-32:]...)
 	}
 	s.recordLobbyMessageAuditLocked(message)
-	return &message, nil
+	out := copyLobbyMessage(message)
+	return &out, nil
 }
 
 func (s *Service) QueueTicket(sessionToken string, ticketID string) (*QueueResponse, error) {
@@ -4605,17 +4606,42 @@ func sanitizedLobbyMetadata(raw map[string]any) map[string]any {
 		if _, forbidden := forbiddenClientFields[key]; forbidden {
 			continue
 		}
-		switch typed := value.(type) {
-		case string:
-			out[key] = strings.TrimSpace(typed)
-		case bool, int, int32, int64, float64:
-			out[key] = typed
+		if sanitized, ok := sanitizedLobbyMetadataValue(value); ok {
+			out[key] = sanitized
 		}
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func sanitizedLobbyMetadataValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed), true
+	case bool, int, int32, int64, float32, float64, json.Number:
+		return typed, true
+	case map[string]any:
+		sanitized := sanitizedLobbyMetadata(typed)
+		if len(sanitized) == 0 {
+			return nil, false
+		}
+		return sanitized, true
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			if sanitized, ok := sanitizedLobbyMetadataValue(item); ok {
+				out = append(out, sanitized)
+			}
+		}
+		if len(out) == 0 {
+			return nil, false
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func claimEligibility(user *userState, req ActivityClaimRequest) error {
@@ -6054,9 +6080,24 @@ func copyCertificationProfile(source CertificationProfile) CertificationProfile 
 func copyAnyMap(source map[string]any) map[string]any {
 	out := make(map[string]any, len(source))
 	for key, value := range source {
-		out[key] = value
+		out[key] = copyAnyValue(value)
 	}
 	return out
+}
+
+func copyAnyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return copyAnyMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = copyAnyValue(item)
+		}
+		return out
+	default:
+		return typed
+	}
 }
 
 func copyLobbyMessage(source LobbyMessage) LobbyMessage {
@@ -6970,7 +7011,9 @@ func anyMapFrom(value any) map[string]any {
 func anySliceFrom(value any) []any {
 	if source, ok := value.([]any); ok {
 		out := make([]any, len(source))
-		copy(out, source)
+		for index, item := range source {
+			out[index] = copyAnyValue(item)
+		}
 		return out
 	}
 	return []any{}
