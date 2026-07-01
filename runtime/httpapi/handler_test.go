@@ -521,7 +521,7 @@ func TestHTTPBusinessContractRequiresEnvelopeAndPublishesClientAuthority(t *test
 	if !reflect.DeepEqual(contract.ServiceOnlyOperations, contract.ServiceCallbacks) || !stringSliceContains(contract.ServiceOnlyOperations, "battle.ticket.consume") || !stringSliceContains(contract.ServiceOnlyOperations, "battle.result.submit") {
 		t.Fatalf("business contract HTTP route should publish explicit service-only operations: %+v", contract)
 	}
-	if !stringSliceContains(contract.BusinessNotifications, "battle.ticket") || !stringSliceContains(contract.BusinessEventRequestKinds, "settlement") || stringSliceContains(contract.BusinessNotifications, "battle.result.submit") {
+	if !stringSliceContains(contract.BusinessNotifications, "room") || !stringSliceContains(contract.BusinessNotifications, "battle.ticket") || !stringSliceContains(contract.BusinessEventRequestKinds, "settlement") || stringSliceContains(contract.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business contract HTTP route should expose low-frequency business notification contract: %+v", contract)
 	}
 	if contract.ServiceCallbackPlayerAllowed || contract.ServiceCallbackEnvelopeAllowed || contract.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer {
@@ -553,7 +553,7 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 		t.Fatalf("service callback status missing disallowed client operation contract: %+v", statusBody)
 	}
 	topics, ok := statusBody["business_notification_topics"].([]any)
-	if !ok || !anyBusinessNotificationTopicValid(topics, "battle.allocation") || !anyBusinessNotificationTopicValid(topics, "battle.ticket") || !anyBusinessNotificationTopicValid(topics, "settlement") || anyBusinessNotificationTopicValid(topics, "battle.result.submit") {
+	if !ok || !anyBusinessNotificationTopicValid(topics, "room") || !anyBusinessNotificationTopicValid(topics, "battle.allocation") || !anyBusinessNotificationTopicValid(topics, "battle.ticket") || !anyBusinessNotificationTopicValid(topics, "settlement") || anyBusinessNotificationTopicValid(topics, "battle.result.submit") {
 		t.Fatalf("service callback status missing low-frequency business notification topic contract: %+v", statusBody)
 	}
 	requestKinds, ok := statusBody["business_event_request_kinds"].([]any)

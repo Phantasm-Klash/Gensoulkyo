@@ -547,7 +547,7 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		}
 		seenKinds[topic.Kind] = true
 	}
-	for _, expected := range []string{"matchmaking", "battle.allocation", "battle.ticket", "settlement"} {
+	for _, expected := range []string{"room", "matchmaking", "battle.allocation", "battle.ticket", "settlement"} {
 		if !seenKinds[expected] {
 			t.Fatalf("business notification topic contract missing %q: %+v", expected, topics)
 		}
