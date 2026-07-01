@@ -380,11 +380,11 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.result.submit") || !stringSliceContains(rulesPayload.ServiceCallbacks, "battle.ticket.consume") {
 		t.Fatalf("room rules should expose service-origin callback operations: %+v", rulesPayload)
 	}
-	if !stringSliceContains(rulesPayload.BusinessNotifications, "activity") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.ticket") || !stringSliceContains(rulesPayload.BusinessNotifications, "settlement") || stringSliceContains(rulesPayload.BusinessNotifications, "battle.result.submit") {
+	if !stringSliceContains(rulesPayload.BusinessNotifications, "room") || !stringSliceContains(rulesPayload.BusinessNotifications, "activity") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(rulesPayload.BusinessNotifications, "battle.ticket") || !stringSliceContains(rulesPayload.BusinessNotifications, "settlement") || stringSliceContains(rulesPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("room rules should expose low-frequency business WSS notifications only: %+v", rulesPayload)
 	}
-	assertBusinessEventRequestContracts(t, rulesPayload.BusinessEventRequestContracts, "battle.allocation", "battle.ticket", "settlement")
-	assertBusinessNotificationTopics(t, rulesPayload.BusinessNotificationTopics, "battle.allocation", "battle.ticket", "settlement")
+	assertBusinessEventRequestContracts(t, rulesPayload.BusinessEventRequestContracts, "room", "battle.allocation", "battle.ticket", "settlement")
+	assertBusinessNotificationTopics(t, rulesPayload.BusinessNotificationTopics, "room", "battle.allocation", "battle.ticket", "settlement")
 
 	battleServersMissingEnvelope := handler.HandleWSSMessage(WSSMessage{
 		Name:      "battle.servers",
@@ -663,14 +663,14 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !stringSliceContains(eventPayload.AllowedClientRPCOperations, "activity.claim") || stringSliceContains(eventPayload.AllowedClientWSSOperations, "activity.claim") {
 		t.Fatalf("business event should keep RPC-only activity claim out of WSS contract: %+v", eventPayload)
 	}
-	if !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "activity") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {
+	if !stringSliceContains(eventPayload.BusinessNotifications, "room") || !stringSliceContains(eventPayload.BusinessNotifications, "matchmaking") || !stringSliceContains(eventPayload.BusinessNotifications, "activity") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.allocation") || !stringSliceContains(eventPayload.BusinessNotifications, "battle.ticket") || stringSliceContains(eventPayload.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("business event should document low-frequency notification kinds only: %+v", eventPayload)
 	}
 	if !reflect.DeepEqual(eventPayload.BusinessEventRequestKinds, core.ContractBusinessEventRequestKinds()) || stringSliceContains(eventPayload.BusinessEventRequestKinds, "battle.result.submit") {
 		t.Fatalf("business event should document allowed request kinds without service callbacks: %+v", eventPayload.BusinessEventRequestKinds)
 	}
-	assertBusinessEventRequestContracts(t, eventPayload.BusinessEventRequestContracts, "matchmaking", "battle.allocation", "battle.ticket")
-	assertBusinessNotificationTopics(t, eventPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket")
+	assertBusinessEventRequestContracts(t, eventPayload.BusinessEventRequestContracts, "room", "matchmaking", "battle.allocation", "battle.ticket")
+	assertBusinessNotificationTopics(t, eventPayload.BusinessNotificationTopics, "room", "matchmaking", "battle.allocation", "battle.ticket")
 
 	aliasEvent := handler.HandleWSSMessage(WSSMessage{
 		Name:      "business.event",
@@ -742,8 +742,8 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !reflect.DeepEqual(contractPayload.BusinessEventRequestKinds, core.ContractBusinessEventRequestKinds()) || stringSliceContains(contractPayload.BusinessEventRequestKinds, "battle.ticket.consume") {
 		t.Fatalf("business contract should document allowed event request kinds without service callbacks: %+v", contractPayload.BusinessEventRequestKinds)
 	}
-	assertBusinessEventRequestContracts(t, contractPayload.BusinessEventRequestContracts, "matchmaking", "battle.allocation", "battle.ticket", "settlement")
-	assertBusinessNotificationTopics(t, contractPayload.BusinessNotificationTopics, "matchmaking", "battle.allocation", "battle.ticket", "settlement")
+	assertBusinessEventRequestContracts(t, contractPayload.BusinessEventRequestContracts, "room", "matchmaking", "battle.allocation", "battle.ticket", "settlement")
+	assertBusinessNotificationTopics(t, contractPayload.BusinessNotificationTopics, "room", "matchmaking", "battle.allocation", "battle.ticket", "settlement")
 
 	activityEvent := handler.HandleWSSMessage(WSSMessage{
 		Name:      "business.event",
@@ -1962,7 +1962,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !roomEvent.OK {
 		t.Fatalf("host room business event failed: %+v", roomEvent)
 	}
-	if event := roomEvent.Payload.(*core.BusinessEvent); event.Room == nil || event.Room.RoomCode != room.RoomCode || event.ClientResultSubmitAllowed || event.HighFrequencyBattleTickAllowed {
+	if event := roomEvent.Payload.(*core.BusinessEvent); event.Room == nil || event.Room.RoomCode != room.RoomCode || !stringSliceContains(event.BusinessNotifications, "room") || businessEventRequestContractByKind(event.BusinessEventRequestContracts, "room") == nil || event.ClientResultSubmitAllowed || event.HighFrequencyBattleTickAllowed {
 		t.Fatalf("host room business event should expose audited low-frequency room state: %+v", event)
 	}
 
@@ -2863,6 +2863,15 @@ func assertBusinessEventRequestContracts(t *testing.T, contracts []core.Business
 			t.Fatalf("business event request contracts missing %q: %+v", expected, contracts)
 		}
 	}
+}
+
+func businessEventRequestContractByKind(contracts []core.BusinessEventRequestContract, kind string) *core.BusinessEventRequestContract {
+	for index := range contracts {
+		if contracts[index].Kind == kind {
+			return &contracts[index]
+		}
+	}
+	return nil
 }
 
 func (stmt nakamaSQLCaptureStmt) Query(args []driver.Value) (driver.Rows, error) {
