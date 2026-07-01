@@ -3043,6 +3043,70 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 }
 
+func TestRoomSnapshotDefensivelyCopiesNestedClientMetadata(t *testing.T) {
+	service := NewService(Config{})
+	host := mustLogin(t, service, "Snapshot Host")
+	guest := mustLogin(t, service, "Snapshot Guest")
+
+	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
+		ModeID:       "world_boss",
+		ActiveDeckID: "snapshot_host_deck",
+		DeckSnapshot: validDeck("snapshot_host_deck"),
+		ModeParams: map[string]any{
+			"stage_id":     "lunar_maze",
+			"character_id": "precision",
+			"display": map[string]any{
+				"route": "north",
+				"tags":  []any{"boss", map[string]any{"lane": "left"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if _, err := service.LobbyMessage(host.SessionToken, LobbyMessageRequest{
+		RoomCode:  created.RoomCode,
+		MessageID: "snapshot-message-1",
+		Kind:      "announcement",
+		Text:      "route locked",
+		Metadata: map[string]any{
+			"display": map[string]any{
+				"cta":  "ready",
+				"tags": []any{"boss", map[string]any{"lane": "left"}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("lobby message: %v", err)
+	}
+
+	first, err := service.Room(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("first room snapshot: %v", err)
+	}
+	first.ModeParams["stage_id"] = "starlit_lanes"
+	first.ModeParams["damage"] = 999
+	first.ModeParams["display"].(map[string]any)["route"] = "mutated"
+	first.ModeParams["display"].(map[string]any)["tags"].([]any)[1].(map[string]any)["lane"] = "right"
+	first.Messages[0].Metadata["display"].(map[string]any)["cta"] = "mutated"
+	first.Messages[0].Metadata["display"].(map[string]any)["tags"].([]any)[1].(map[string]any)["lane"] = "right"
+
+	second, err := service.Room(guest.SessionToken, created.RoomCode)
+	if err != nil {
+		t.Fatalf("second room snapshot: %v", err)
+	}
+	if second.ModeParams["stage_id"] != "lunar_maze" || second.ModeParams["damage"] != nil {
+		t.Fatalf("room mode params must be isolated from caller mutation: %+v", second.ModeParams)
+	}
+	display := second.ModeParams["display"].(map[string]any)
+	if display["route"] != "north" || display["tags"].([]any)[1].(map[string]any)["lane"] != "left" {
+		t.Fatalf("nested mode params must be defensively copied: %+v", display)
+	}
+	metadataDisplay := second.Messages[0].Metadata["display"].(map[string]any)
+	if metadataDisplay["cta"] != "ready" || metadataDisplay["tags"].([]any)[1].(map[string]any)["lane"] != "left" {
+		t.Fatalf("nested lobby metadata must be defensively copied: %+v", second.Messages[0].Metadata)
+	}
+}
+
 func TestMatchedRoomSnapshotKeepsParticipantProjection(t *testing.T) {
 	service := NewService(Config{})
 	host := mustLogin(t, service, "Matched Room Host")
