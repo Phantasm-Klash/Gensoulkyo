@@ -2145,6 +2145,7 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	now := s.clock()
 	signed := req.SignedResult
 	if err := validateSignedBattleResultShape(signed, now); err != nil {
+		s.recordBattleResultShapeRejectedAuditLocked(signed, ErrorCode(err), now)
 		return nil, err
 	}
 	result := signed.Result
@@ -5636,6 +5637,21 @@ func (s *Service) recordBattleResultRejectedAuditLocked(match *matchState, alloc
 	})
 	fingerprint := lifecycleFingerprint("battle:result:rejected", match.MatchID, match.ModeID, battleServerID, signed.Result.ResultHash, signed.Result.ReplayID, fmt.Sprintf("%d", signed.Result.SettledAtMS))
 	s.recordBattleAuditOutcomeLocked("battle_result_rejected", fingerprint, verifiedAt, err)
+}
+
+func (s *Service) recordBattleResultShapeRejectedAuditLocked(signed SignedBattleResult, reason string, verifiedAt time.Time) {
+	if s.battleAuditRepo == nil {
+		return
+	}
+	matchID := strings.TrimSpace(signed.Result.MatchID)
+	if matchID == "" {
+		return
+	}
+	match := s.matches[matchID]
+	if match == nil {
+		return
+	}
+	s.recordBattleResultRejectedAuditLocked(match, match.BattleAllocation, signed, reason, verifiedAt)
 }
 
 func (s *Service) recordReplayAuditLocked(replay *ReplayRecord) {
