@@ -656,6 +656,9 @@ func lobbyMessageRequest(body map[string]any, name string) (core.LobbyMessageReq
 }
 
 func businessEventRequest(body map[string]any, name string) (core.BusinessEventRequest, Response) {
+	if field := firstUnexpectedBusinessEventRequestField(body); field != "" {
+		return core.BusinessEventRequest{}, errorResponse(http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("business event lookup request cannot include %s", field))
+	}
 	var req core.BusinessEventRequest
 	if err := decodeBody(body, &req); err != nil {
 		return req, errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
@@ -667,4 +670,16 @@ func businessEventRequest(body map[string]any, name string) (core.BusinessEventR
 		req.Kind = "settlement"
 	}
 	return req, successResponse(nil)
+}
+
+func firstUnexpectedBusinessEventRequestField(body map[string]any) string {
+	for key := range body {
+		switch normalizeName(key) {
+		case "kind", "ticket_id", "ticket.id", "ticketid", "room_code", "room.code", "roomcode", "match_id", "match.id", "matchid":
+			continue
+		default:
+			return key
+		}
+	}
+	return ""
 }
