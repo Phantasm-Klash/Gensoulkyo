@@ -2121,12 +2121,12 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	if !lobbyStatus.OK {
 		t.Fatalf("lobby audit status failed: %+v", lobbyStatus)
 	}
-	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 3 || status.ReadyRecords != 2 || status.ConnectionRecords != 4 || status.MessageRecords != 2 || status.LastSuccessOperation != "reconnected" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
+	if status := lobbyStatus.Payload.(core.LobbyLifecycleAuditStatus); !status.OK || !status.Configured || status.RoomRecords != 3 || status.RoomReadRecords != 5 || status.ReadyRecords != 2 || status.ConnectionRecords != 4 || status.MessageRecords != 2 || status.LastSuccessOperation != "settlement_read" || !strings.HasPrefix(status.LastSuccessFingerprint, "sha256:") || status.LastSuccessAt.IsZero() {
 		t.Fatalf("lobby audit status should reflect SQL repository writes: %+v", status)
 	}
 
 	tableCounts := nakamaSQLTableCounts()
-	if tableCounts["business_envelope_audits"] < 18 || tableCounts["lobby_room_audits"] != 12 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 3 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
+	if tableCounts["business_envelope_audits"] < 18 || tableCounts["lobby_room_audits"] != 14 || tableCounts["lobby_message_audits"] != 2 || tableCounts["match_allocation_audits"] != 5 || tableCounts["battle_ticket_audits"] < 3 || tableCounts["battle_result_audits"] != 2 || tableCounts["replay_audits"] != 2 {
 		t.Fatalf("unexpected SQL audit inserts: counts=%+v calls=%+v", tableCounts, nakamaSQLCaptureCalls())
 	}
 	if !nakamaSQLHasBattleServerLifecycleAudits() {

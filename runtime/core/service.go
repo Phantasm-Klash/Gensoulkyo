@@ -3616,6 +3616,8 @@ func (s *Service) recordBusinessEventLobbyAuditLocked(kind string, userID string
 	switch kind {
 	case "room":
 		action = "snapshot_read"
+	case "settlement":
+		action = "settlement_read"
 	case "queue", "matchmaking", "match.ready", "battle.allocation", "battle.ticket":
 	default:
 		return
@@ -5407,7 +5409,7 @@ func (s *Service) recordLobbyAuditOutcomeLocked(operation string, fingerprint st
 		return
 	}
 	switch operation {
-	case "listed", "snapshot_read", "ticket_read":
+	case "listed", "snapshot_read", "ticket_read", "settlement_read":
 		s.lobbyAuditStatus.RoomReadRecords++
 	case "rules_read":
 		s.lobbyAuditStatus.RulesReadRecords++
