@@ -388,6 +388,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if !stringSliceContains(requestKinds, contract.Kind) || contract.ClientEventRequestOperation != expectedRequestOp || contract.ClientRPCOperation != expectedRequestOp || contract.ClientWSSOperation != expectedRequestOp {
 			t.Fatalf("business event request contract operation drifted: %+v request_kinds=%+v", contract, requestKinds)
 		}
+		if contract.ClientRequestAuthority != clientRequestAuthorityLookupOnly {
+			t.Fatalf("business event request contract must expose lookup-only client request authority: %+v", contract)
+		}
 		if !contract.BusinessEnvelopeRequired || !contract.ServerAuthoritativeProjection || contract.ServiceCallback || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
 			t.Fatalf("business event request contract must stay low-frequency read intent: %+v", contract)
 		}
@@ -422,6 +425,9 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		}
 		if topic.ClientEventRequestKind != topic.Kind {
 			t.Fatalf("business notification topic must publish its fixed read request kind: %+v", topic)
+		}
+		if topic.ClientRequestAuthority != clientRequestAuthorityLookupOnly {
+			t.Fatalf("business notification topic must expose lookup-only client request authority: %+v", topic)
 		}
 		if topic.Kind != "settlement" && topic.ClientEventRequestOperation == "business.event.settlement" {
 			t.Fatalf("settlement alias must not be reused for non-settlement notification topics: %+v", topic)
