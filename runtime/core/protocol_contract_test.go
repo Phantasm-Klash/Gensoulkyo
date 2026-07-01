@@ -531,10 +531,46 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			if !stringSliceContains(contract.ClientRequestFields, "match_id") || !stringSliceContains(contract.ServerProjectionFields, "ticket.ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "signature_hex") {
 				t.Fatalf("battle.ticket contract missing signed ticket request/projection fields: %+v", contract)
 			}
+			assertProjectionFields(t, contract.ServerProjectionFields, []string{
+				"ticket.version.protocol_version",
+				"ticket.version.business_api_version",
+				"ticket.version.battle_api_version",
+				"ticket.version.ruleset_version",
+				"ticket.ticket_id",
+				"ticket.match_id",
+				"ticket.player_id",
+				"ticket.mode_id",
+				"ticket.battle_server_id",
+				"ticket.endpoint",
+				"ticket.deck_snapshot_hash",
+				"ticket.mode_config_hash",
+				"ticket.ticket_nonce_hex",
+				"ticket.expires_at_ms",
+				"signature_alg",
+				"key_id",
+				"signature_hex",
+				"public_key_hex",
+				"server_authoritative",
+			}, "battle.ticket operation")
 		case "battle.allocation":
 			if !stringSliceContains(contract.ClientRequestFields, "match_id") || !stringSliceContains(contract.ServerProjectionFields, "players.deck_snapshot_hash") || !stringSliceContains(contract.ServerProjectionFields, "mode_config_hash") {
 				t.Fatalf("battle.allocation contract missing allocation request/projection fields: %+v", contract)
 			}
+			assertProjectionFields(t, contract.ServerProjectionFields, []string{
+				"version.protocol_version",
+				"version.business_api_version",
+				"version.battle_api_version",
+				"version.ruleset_version",
+				"battle_server_id",
+				"endpoint",
+				"players.player_id",
+				"players.deck_snapshot_hash",
+				"players.loadout",
+				"server_seed_hex",
+				"mode_config_hash",
+				"allocated_at",
+				"server_authoritative",
+			}, "battle.allocation operation")
 		case "business.contract":
 			if len(contract.ClientRequestFields) != 0 || !stringSliceContains(contract.ServerProjectionFields, "client_operation_contracts") {
 				t.Fatalf("business.contract should be bodyless contract lookup with structured projection: %+v", contract)
@@ -684,10 +720,46 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)
 			}
+			assertProjectionFields(t, contract.ServerProjectionFields, []string{
+				"battle_allocation.version.protocol_version",
+				"battle_allocation.version.business_api_version",
+				"battle_allocation.version.battle_api_version",
+				"battle_allocation.version.ruleset_version",
+				"battle_allocation.battle_server_id",
+				"battle_allocation.endpoint",
+				"battle_allocation.players.player_id",
+				"battle_allocation.players.deck_snapshot_hash",
+				"battle_allocation.players.loadout",
+				"battle_allocation.server_seed_hex",
+				"battle_allocation.mode_config_hash",
+				"battle_allocation.allocated_at",
+				"battle_allocation.server_authoritative",
+			}, "battle.allocation event request")
 		case "battle.ticket":
 			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
 				t.Fatalf("battle ticket request contract missing server projection field: %+v", contract)
 			}
+			assertProjectionFields(t, contract.ServerProjectionFields, []string{
+				"battle_ticket.ticket.version.protocol_version",
+				"battle_ticket.ticket.version.business_api_version",
+				"battle_ticket.ticket.version.battle_api_version",
+				"battle_ticket.ticket.version.ruleset_version",
+				"battle_ticket.ticket.ticket_id",
+				"battle_ticket.ticket.match_id",
+				"battle_ticket.ticket.player_id",
+				"battle_ticket.ticket.mode_id",
+				"battle_ticket.ticket.battle_server_id",
+				"battle_ticket.ticket.endpoint",
+				"battle_ticket.ticket.deck_snapshot_hash",
+				"battle_ticket.ticket.mode_config_hash",
+				"battle_ticket.ticket.ticket_nonce_hex",
+				"battle_ticket.ticket.expires_at_ms",
+				"battle_ticket.signature_alg",
+				"battle_ticket.key_id",
+				"battle_ticket.signature_hex",
+				"battle_ticket.public_key_hex",
+				"battle_ticket.server_authoritative",
+			}, "battle.ticket event request")
 		case "settlement":
 			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "settlement") {
 				t.Fatalf("settlement request contract missing server projection field: %+v", contract)
@@ -791,10 +863,46 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			if !stringSliceContains(topic.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation notification missing server projection field: %+v", topic)
 			}
+			assertProjectionFields(t, topic.ServerProjectionFields, []string{
+				"battle_allocation.version.protocol_version",
+				"battle_allocation.version.business_api_version",
+				"battle_allocation.version.battle_api_version",
+				"battle_allocation.version.ruleset_version",
+				"battle_allocation.battle_server_id",
+				"battle_allocation.endpoint",
+				"battle_allocation.players.player_id",
+				"battle_allocation.players.deck_snapshot_hash",
+				"battle_allocation.players.loadout",
+				"battle_allocation.server_seed_hex",
+				"battle_allocation.mode_config_hash",
+				"battle_allocation.allocated_at",
+				"battle_allocation.server_authoritative",
+			}, "battle.allocation notification")
 		case "battle.ticket":
 			if !stringSliceContains(topic.ServerProjectionFields, "battle_ticket") {
 				t.Fatalf("battle ticket notification missing server projection field: %+v", topic)
 			}
+			assertProjectionFields(t, topic.ServerProjectionFields, []string{
+				"battle_ticket.ticket.version.protocol_version",
+				"battle_ticket.ticket.version.business_api_version",
+				"battle_ticket.ticket.version.battle_api_version",
+				"battle_ticket.ticket.version.ruleset_version",
+				"battle_ticket.ticket.ticket_id",
+				"battle_ticket.ticket.match_id",
+				"battle_ticket.ticket.player_id",
+				"battle_ticket.ticket.mode_id",
+				"battle_ticket.ticket.battle_server_id",
+				"battle_ticket.ticket.endpoint",
+				"battle_ticket.ticket.deck_snapshot_hash",
+				"battle_ticket.ticket.mode_config_hash",
+				"battle_ticket.ticket.ticket_nonce_hex",
+				"battle_ticket.ticket.expires_at_ms",
+				"battle_ticket.signature_alg",
+				"battle_ticket.key_id",
+				"battle_ticket.signature_hex",
+				"battle_ticket.public_key_hex",
+				"battle_ticket.server_authoritative",
+			}, "battle.ticket notification")
 		case "settlement":
 			if !stringSliceContains(topic.ServerProjectionFields, "settlement") {
 				t.Fatalf("settlement notification missing server projection field: %+v", topic)
@@ -1074,6 +1182,15 @@ func assertWireFieldsMatchManifest(t *testing.T, messageName string, encoded []b
 		}
 	}
 	return roundTrip
+}
+
+func assertProjectionFields(t *testing.T, fields []string, required []string, context string) {
+	t.Helper()
+	for _, field := range required {
+		if !stringSliceContains(fields, field) {
+			t.Fatalf("%s missing server projection field %q: %+v", context, field, fields)
+		}
+	}
 }
 
 func mustMarshalJSON(t *testing.T, value any) []byte {
