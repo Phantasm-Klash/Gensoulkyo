@@ -2955,6 +2955,30 @@ func assertClientOperationContracts(t *testing.T, contracts []core.ClientOperati
 				t.Fatalf("structured client operation contract missing forbidden request field %q: %+v", forbiddenField, contract)
 			}
 		}
+		if len(contract.ServerProjectionFields) == 0 {
+			t.Fatalf("structured client operation contract must expose server projection fields: %+v", contract)
+		}
+		if stringSliceContains(contract.ClientRequestFields, "battle_allocation") || stringSliceContains(contract.ClientRequestFields, "battle_ticket") || stringSliceContains(contract.ClientRequestFields, "settlement") {
+			t.Fatalf("structured client operation contract must not accept server projection fields as client input: %+v", contract)
+		}
+		switch contract.Operation {
+		case "rooms.rules":
+			if !stringSliceContains(contract.ClientRequestFields, "room_code") || !stringSliceContains(contract.ServerProjectionFields, "client_operation_contracts") {
+				t.Fatalf("rooms.rules operation contract missing room lookup/projection fields: %+v", contract)
+			}
+		case "matchmaking.join", "rooms.create", "rooms.join":
+			if !stringSliceContains(contract.ClientRequestFields, "deck_snapshot") || !stringSliceContains(contract.ClientRequestFields, "client_version") || !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
+				t.Fatalf("%s operation contract missing matchmaking/ticket fields: %+v", contract.Operation, contract)
+			}
+		case "battle.ticket":
+			if !stringSliceContains(contract.ClientRequestFields, "match_id") || !stringSliceContains(contract.ServerProjectionFields, "signature_hex") {
+				t.Fatalf("battle.ticket operation contract missing signed ticket fields: %+v", contract)
+			}
+		case "business.contract":
+			if len(contract.ClientRequestFields) != 0 || !stringSliceContains(contract.ServerProjectionFields, "client_operation_contracts") {
+				t.Fatalf("business.contract should be a bodyless structured contract lookup: %+v", contract)
+			}
+		}
 	}
 	for _, operation := range clientOps {
 		if !seen[operation] {

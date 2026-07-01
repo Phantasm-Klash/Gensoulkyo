@@ -801,6 +801,8 @@ type ClientOperationContract struct {
 	Operation                      string   `json:"operation"`
 	Transports                     []string `json:"transports"`
 	Authority                      string   `json:"authority"`
+	ClientRequestFields            []string `json:"client_request_fields"`
+	ServerProjectionFields         []string `json:"server_projection_fields"`
 	BusinessEnvelopeRequired       bool     `json:"business_envelope_required"`
 	ServiceCallback                bool     `json:"service_callback"`
 	ServerAuthoritativeProjection  bool     `json:"server_authoritative_projection"`
