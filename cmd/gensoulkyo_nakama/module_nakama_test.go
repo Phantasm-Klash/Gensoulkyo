@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/heroiclabs/nakama-common/runtime"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestServiceOriginRPCContextGate(t *testing.T) {
-	base := context.WithValue(context.Background(), runtime.RUNTIME_CTX_MODE, "rpc")
+	base := context.WithValue(context.Background(), runtime.RUNTIME_CTX_MODE, core.ServiceCallbackContext()[core.ServiceCallbackRuntimeModeKey])
 	if isServiceOriginRPC(base, "battle.result.submit") {
 		t.Fatalf("service-origin RPC must require trusted battle callback vars")
 	}
@@ -64,5 +65,25 @@ func TestServiceOriginRPCContextGate(t *testing.T) {
 	}
 	if isServiceOriginRPC(withVars, "bootstrap") {
 		t.Fatalf("non-callback RPC must not be allowed by service-origin vars")
+	}
+}
+
+func TestServiceOriginRPCContextGateNormalizesSharedContractValues(t *testing.T) {
+	trustedVars := map[string]string{
+		serviceOriginVarKey:   "  " + strings.ToUpper(serviceCallbackContextValue(serviceOriginVarKey)) + "  ",
+		serviceCallbackVarKey: "  " + strings.ToUpper(core.ServiceCallbackAcceptedValues()[0]) + "  ",
+	}
+	normalized := context.WithValue(
+		context.Background(),
+		runtime.RUNTIME_CTX_MODE,
+		"  "+strings.ToUpper(core.ServiceCallbackContext()[core.ServiceCallbackRuntimeModeKey])+"  ",
+	)
+	normalized = context.WithValue(normalized, runtime.RUNTIME_CTX_VARS, trustedVars)
+	if !isServiceOriginRPC(normalized, "battle.result.submit") {
+		t.Fatalf("service-origin RPC should normalize shared callback mode/origin/flag values")
+	}
+	noMode := context.WithValue(context.Background(), runtime.RUNTIME_CTX_VARS, trustedVars)
+	if isServiceOriginRPC(noMode, "battle.result.submit") {
+		t.Fatalf("service-origin RPC must require the shared runtime mode context")
 	}
 }
