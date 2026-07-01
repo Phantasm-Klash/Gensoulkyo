@@ -128,6 +128,9 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 			t.Fatalf("migration README must document table %s", table)
 		}
 	}
+	if !strings.Contains(readme, "accepted, duplicate, and rejected battle result callback audits") {
+		t.Fatalf("migration README must document rejected battle result callback audit persistence")
+	}
 }
 
 func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.T) {
