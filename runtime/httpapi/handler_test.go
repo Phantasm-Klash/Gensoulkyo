@@ -560,6 +560,10 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	if !ok || !reflect.DeepEqual(anyStrings(requestKinds), core.ContractBusinessEventRequestKinds()) || anySliceContainsString(requestKinds, "battle.result.submit") {
 		t.Fatalf("service callback status missing business event request kind contract: %+v", statusBody)
 	}
+	requestContracts, ok := statusBody["business_event_request_contracts"].([]any)
+	if !ok || !anyBusinessEventRequestContractValid(requestContracts, "room") || !anyBusinessEventRequestContractValid(requestContracts, "battle.ticket") || anyBusinessEventRequestContractValid(requestContracts, "battle.result.submit") {
+		t.Fatalf("service callback status missing detailed business event request contracts: %+v", statusBody)
+	}
 	context, ok := statusBody["service_callback_context"].(map[string]any)
 	if !ok || context[serviceOriginContextKey] != core.ServiceCallbackContext()[serviceOriginContextKey] || context[serviceCallbackContextKey] != core.ServiceCallbackContext()[serviceCallbackContextKey] {
 		t.Fatalf("service callback status drifted from core context: %+v", statusBody)
@@ -1632,6 +1636,32 @@ func anyBusinessNotificationTopicValid(topics []any, want string) bool {
 			return false
 		}
 		return fields["server_push"] == true &&
+			fields["service_callback"] == false &&
+			fields["high_frequency_battle_tick_allowed"] == false &&
+			fields["client_result_submit_allowed"] == false
+	}
+	return false
+}
+
+func anyBusinessEventRequestContractValid(contracts []any, want string) bool {
+	for _, contract := range contracts {
+		fields, ok := contract.(map[string]any)
+		if !ok || fields["kind"] != want {
+			continue
+		}
+		requestOp, _ := fields["client_event_request_operation"].(string)
+		rpcOp, _ := fields["client_rpc_operation"].(string)
+		wssOp, _ := fields["client_wss_operation"].(string)
+		authority, _ := fields["client_request_authority"].(string)
+		expectedRequestOp := "business.event"
+		if want == "settlement" {
+			expectedRequestOp = "business.event.settlement"
+		}
+		if requestOp != expectedRequestOp || rpcOp != expectedRequestOp || wssOp != expectedRequestOp || authority != "lookup_only" {
+			return false
+		}
+		return fields["business_envelope_required"] == true &&
+			fields["server_authoritative_projection"] == true &&
 			fields["service_callback"] == false &&
 			fields["high_frequency_battle_tick_allowed"] == false &&
 			fields["client_result_submit_allowed"] == false

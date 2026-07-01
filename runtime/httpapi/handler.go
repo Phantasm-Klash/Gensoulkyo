@@ -854,11 +854,12 @@ func (h *Handler) serviceCallbackStatus(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"status": map[string]any{
-			"service_callbacks":            core.ServiceCallbackOperations(),
-			"service_callback_context":     core.ServiceCallbackContext(),
-			"disallowed_client_operations": core.ContractDisallowedClientOperations(),
-			"business_event_request_kinds": core.ContractBusinessEventRequestKinds(),
-			"business_notification_topics": core.ContractBusinessNotificationTopics(),
+			"service_callbacks":                core.ServiceCallbackOperations(),
+			"service_callback_context":         core.ServiceCallbackContext(),
+			"disallowed_client_operations":     core.ContractDisallowedClientOperations(),
+			"business_event_request_kinds":     core.ContractBusinessEventRequestKinds(),
+			"business_event_request_contracts": core.ContractBusinessEventRequestContracts(),
+			"business_notification_topics":     core.ContractBusinessNotificationTopics(),
 			"http_headers": map[string]string{
 				"service_origin":  headerServiceOrigin,
 				"battle_callback": headerBattleCallback,
