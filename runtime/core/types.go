@@ -797,6 +797,18 @@ type BusinessEventRequestContract struct {
 	ClientResultSubmitAllowed      bool     `json:"client_result_submit_allowed"`
 }
 
+type ClientOperationContract struct {
+	Operation                      string   `json:"operation"`
+	Transports                     []string `json:"transports"`
+	Authority                      string   `json:"authority"`
+	BusinessEnvelopeRequired       bool     `json:"business_envelope_required"`
+	ServiceCallback                bool     `json:"service_callback"`
+	ServerAuthoritativeProjection  bool     `json:"server_authoritative_projection"`
+	HighFrequencyBattleTickAllowed bool     `json:"high_frequency_battle_tick_allowed"`
+	ClientResultSubmitAllowed      bool     `json:"client_result_submit_allowed"`
+	ForbiddenClientRequestFields   []string `json:"forbidden_client_request_fields"`
+}
+
 type BusinessContractSnapshot struct {
 	OK                             bool                           `json:"ok"`
 	Version                        VersionStamp                   `json:"version"`
@@ -805,6 +817,7 @@ type BusinessContractSnapshot struct {
 	ClientOperations               []string                       `json:"client_operations"`
 	ClientRPCOperations            []string                       `json:"client_rpc_operations"`
 	ClientWSSOperations            []string                       `json:"client_wss_operations"`
+	ClientOperationContracts       []ClientOperationContract      `json:"client_operation_contracts"`
 	DisallowedClientOperations     []string                       `json:"disallowed_client_operations"`
 	ServiceOnlyOperations          []string                       `json:"service_only_operations"`
 	ServiceCallbacks               []string                       `json:"service_callbacks"`
@@ -840,6 +853,7 @@ type RoomRulesSnapshot struct {
 	ClientOperations               []string                       `json:"client_operations"`
 	ClientRPCOperations            []string                       `json:"client_rpc_operations"`
 	ClientWSSOperations            []string                       `json:"client_wss_operations"`
+	ClientOperationContracts       []ClientOperationContract      `json:"client_operation_contracts"`
 	DisallowedClientOperations     []string                       `json:"disallowed_client_operations"`
 	ServiceOnlyOperations          []string                       `json:"service_only_operations"`
 	ServiceCallbacks               []string                       `json:"service_callbacks"`
@@ -957,6 +971,7 @@ type BusinessEvent struct {
 	AllowedClientOperations        []string                       `json:"allowed_client_operations"`
 	AllowedClientRPCOperations     []string                       `json:"allowed_client_rpc_operations"`
 	AllowedClientWSSOperations     []string                       `json:"allowed_client_wss_operations"`
+	ClientOperationContracts       []ClientOperationContract      `json:"client_operation_contracts"`
 	DisallowedClientOperations     []string                       `json:"disallowed_client_operations"`
 	ServiceOnlyOperations          []string                       `json:"service_only_operations"`
 	ServiceCallbacks               []string                       `json:"service_callbacks"`

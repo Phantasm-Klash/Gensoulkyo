@@ -368,6 +368,7 @@ func TestNakamaLobbyRPCAndWSSExposeRoomMVP(t *testing.T) {
 	if !stringSliceContains(rulesPayload.ClientOperations, "business.contract") || !stringSliceContains(rulesPayload.ClientWSSOperations, "business.contract") {
 		t.Fatalf("room rules should expose business contract WSS/RPC snapshot: %+v", rulesPayload)
 	}
+	assertClientOperationContracts(t, rulesPayload.ClientOperationContracts, rulesPayload.ClientOperations, rulesPayload.ClientRPCOperations, rulesPayload.ClientWSSOperations)
 	if rulesPayload.ServiceCallbackContext[core.ServiceCallbackRuntimeModeKey] != core.ServiceCallbackRuntimeModeRPC || rulesPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer || rulesPayload.ServiceCallbackContext[core.ServiceCallbackFlagKey] != core.ServiceCallbackRequiredValue {
 		t.Fatalf("room rules should expose service callback context requirements: %+v", rulesPayload.ServiceCallbackContext)
 	}
@@ -727,6 +728,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 	if !stringSliceContains(contractPayload.ClientOperations, "business.contract") || !stringSliceContains(contractPayload.ClientWSSOperations, "business.contract") || stringSliceContains(contractPayload.ClientOperations, "battle.result.submit") || stringSliceContains(contractPayload.ClientWSSOperations, "battle.ticket.consume") {
 		t.Fatalf("business contract should expose client RPC/WSS operations without service callbacks: %+v", contractPayload)
 	}
+	assertClientOperationContracts(t, contractPayload.ClientOperationContracts, contractPayload.ClientOperations, contractPayload.ClientRPCOperations, contractPayload.ClientWSSOperations)
 	if !stringSliceContains(contractPayload.ServiceCallbacks, "battle.result.submit") || contractPayload.ServiceCallbackContext[core.ServiceCallbackOriginKey] != core.ServiceCallbackOriginBattleServer {
 		t.Fatalf("business contract should document service callback requirements without granting client authority: %+v", contractPayload)
 	}
@@ -2909,6 +2911,54 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 	for _, expected := range expectedKinds {
 		if !seen[expected] {
 			t.Fatalf("business notification topics missing %q: %+v", expected, topics)
+		}
+	}
+}
+
+func assertClientOperationContracts(t *testing.T, contracts []core.ClientOperationContract, clientOps []string, rpcOps []string, wssOps []string) {
+	t.Helper()
+	if len(contracts) != len(clientOps) {
+		t.Fatalf("structured client operation contracts must mirror client operation list: contracts=%+v client=%+v", contracts, clientOps)
+	}
+	seen := map[string]bool{}
+	for _, contract := range contracts {
+		if !stringSliceContains(clientOps, contract.Operation) {
+			t.Fatalf("structured client operation contract contains unknown operation: %+v client=%+v", contract, clientOps)
+		}
+		if seen[contract.Operation] {
+			t.Fatalf("structured client operation contract duplicated operation %q: %+v", contract.Operation, contracts)
+		}
+		seen[contract.Operation] = true
+		if contract.ServiceCallback || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
+			t.Fatalf("structured client operation contract must not grant service/tick/result authority: %+v", contract)
+		}
+		if !contract.BusinessEnvelopeRequired || !contract.ServerAuthoritativeProjection || len(contract.ForbiddenClientRequestFields) == 0 {
+			t.Fatalf("structured client operation contract missing business guard fields: %+v", contract)
+		}
+		if core.IsServiceCallbackOperation(contract.Operation) || stringSliceContains(core.ContractDisallowedClientOperations(), contract.Operation) {
+			t.Fatalf("structured client operation contract must not expose service/disallowed operation: %+v", contract)
+		}
+		if stringSliceContains(rpcOps, contract.Operation) && !stringSliceContains(contract.Transports, "nakama_rpc") {
+			t.Fatalf("structured client operation contract missing RPC transport: %+v rpc=%+v", contract, rpcOps)
+		}
+		if !stringSliceContains(rpcOps, contract.Operation) && stringSliceContains(contract.Transports, "nakama_rpc") {
+			t.Fatalf("structured client operation contract exposes unsupported RPC transport: %+v rpc=%+v", contract, rpcOps)
+		}
+		if stringSliceContains(wssOps, contract.Operation) && !stringSliceContains(contract.Transports, "nakama_wss") {
+			t.Fatalf("structured client operation contract missing WSS transport: %+v wss=%+v", contract, wssOps)
+		}
+		if !stringSliceContains(wssOps, contract.Operation) && stringSliceContains(contract.Transports, "nakama_wss") {
+			t.Fatalf("structured client operation contract exposes unsupported WSS transport: %+v wss=%+v", contract, wssOps)
+		}
+		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
+			if !stringSliceContains(contract.ForbiddenClientRequestFields, forbiddenField) {
+				t.Fatalf("structured client operation contract missing forbidden request field %q: %+v", forbiddenField, contract)
+			}
+		}
+	}
+	for _, operation := range clientOps {
+		if !seen[operation] {
+			t.Fatalf("structured client operation contracts missing operation %q: %+v", operation, contracts)
 		}
 	}
 }

@@ -2770,6 +2770,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult || rules.SettlementAuthority != contract.SettlementAuthority {
 		t.Fatalf("business contract and room rules settlement authority drifted: contract=%q rules=%q", contract.SettlementAuthority, rules.SettlementAuthority)
 	}
+	if !reflect.DeepEqual(contract.ClientOperationContracts, rules.ClientOperationContracts) {
+		t.Fatalf("business contract and room rules structured client operation contracts drifted: contract=%+v rules=%+v", contract.ClientOperationContracts, rules.ClientOperationContracts)
+	}
 	if !reflect.DeepEqual(contract.BusinessNotifications, rules.BusinessNotifications) || !reflect.DeepEqual(contract.BusinessEventRequestKinds, rules.BusinessEventRequestKinds) || !reflect.DeepEqual(contract.BusinessNotificationTopics, rules.BusinessNotificationTopics) {
 		t.Fatalf("business contract and room rules notification contract drifted: contract=%+v request_kinds=%+v topics=%+v rules=%+v request_kinds=%+v topics=%+v", contract.BusinessNotifications, contract.BusinessEventRequestKinds, contract.BusinessNotificationTopics, rules.BusinessNotifications, rules.BusinessEventRequestKinds, rules.BusinessNotificationTopics)
 	}
