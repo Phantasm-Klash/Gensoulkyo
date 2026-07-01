@@ -453,6 +453,10 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	if !ok || !anyBusinessNotificationTopicValid(topics, "battle.allocation") || !anyBusinessNotificationTopicValid(topics, "battle.ticket") || !anyBusinessNotificationTopicValid(topics, "settlement") || anyBusinessNotificationTopicValid(topics, "battle.result.submit") {
 		t.Fatalf("service callback status missing low-frequency business notification topic contract: %+v", statusBody)
 	}
+	requestKinds, ok := statusBody["business_event_request_kinds"].([]any)
+	if !ok || !reflect.DeepEqual(anyStrings(requestKinds), core.ContractBusinessEventRequestKinds()) || anySliceContainsString(requestKinds, "battle.result.submit") {
+		t.Fatalf("service callback status missing business event request kind contract: %+v", statusBody)
+	}
 	context, ok := statusBody["service_callback_context"].(map[string]any)
 	if !ok || context[serviceOriginContextKey] != core.ServiceCallbackContext()[serviceOriginContextKey] || context[serviceCallbackContextKey] != core.ServiceCallbackContext()[serviceCallbackContextKey] {
 		t.Fatalf("service callback status drifted from core context: %+v", statusBody)
@@ -1415,6 +1419,16 @@ func anySliceContainsString(values []any, target string) bool {
 		}
 	}
 	return false
+}
+
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text, ok := value.(string); ok {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 func itoa(value int) string {
