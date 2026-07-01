@@ -284,6 +284,84 @@ func TestSQLBattleLifecycleAuditRepositoryRecordsAllocationAndTicket(t *testing.
 	}
 }
 
+func TestSQLBattleLifecycleAuditRepositoryPersistsRejectedCallbacks(t *testing.T) {
+	driverName := registerBattleAuditCaptureDriver(t)
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	repo, err := NewSQLBattleLifecycleAuditRepository(db, withSQLBattleLifecycleAuditStatements(
+		"INSERT INTO match_allocation_audits VALUES ($1)",
+		"INSERT INTO battle_ticket_audits VALUES ($1)",
+		"INSERT INTO battle_result_audits VALUES ($1)",
+		"INSERT INTO replay_audits VALUES ($1)",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	if err := repo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            "ticket-rejected",
+		MatchID:             "match-rejected",
+		UserID:              "user-a",
+		PlayerID:            "player-a",
+		BattleServerID:      "battle-a",
+		Endpoint:            "127.0.0.1:7901",
+		KeyID:               "dev-ed25519-0",
+		RulesetVersion:      RulesetVersion,
+		ProtocolVersion:     "1",
+		BusinessAPIVersion:  BusinessAPIVersion,
+		BattleAPIVersion:    BattleAPIVersion,
+		DeckSnapshotHash:    "sha256:deck",
+		ModeConfigHash:      "sha256:mode",
+		Nonce:               "nonce-rejected",
+		SignaturePrefix:     "0123456789abcdef",
+		Status:              "rejected",
+		RejectReason:        "ticket_signature_invalid",
+		IssuedAt:            now,
+		ExpiresAt:           now.Add(time.Minute),
+		ServerAuthoritative: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordBattleResultAudit(BattleResultAuditRecord{
+		MatchID:             "match-rejected",
+		ModeID:              "pvp_duel",
+		BattleServerID:      "battle-a",
+		ResultHash:          "sha256:rejected-result",
+		ReplayID:            "replay-rejected",
+		KeyID:               "battle-a",
+		PlayerIDs:           []string{"player-a", "player-b"},
+		SettlementKey:       "battle-result:match-rejected",
+		Status:              "rejected",
+		RejectReason:        "result_signature_invalid",
+		VerifiedAt:          now,
+		SettledAt:           now,
+		ServerAuthoritative: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := battleAuditCaptureCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected two rejected callback audit inserts, got %+v", calls)
+	}
+	if !strings.Contains(calls[0].query, "INSERT INTO battle_ticket_audits") || len(calls[0].args) != 21 {
+		t.Fatalf("rejected ticket insert invalid: %+v", calls[0])
+	}
+	if calls[0].args[0] != "ticket-rejected" || calls[0].args[17] != "rejected" || calls[0].args[18] != "ticket_signature_invalid" || calls[0].args[19] != true {
+		t.Fatalf("rejected ticket args invalid: %+v", calls[0].args)
+	}
+	if !strings.Contains(calls[1].query, "INSERT INTO battle_result_audits") || len(calls[1].args) != 13 {
+		t.Fatalf("rejected result insert invalid: %+v", calls[1])
+	}
+	if calls[1].args[0] != "match-rejected" || calls[1].args[8] != "rejected" || calls[1].args[9] != "result_signature_invalid" || calls[1].args[12] != true {
+		t.Fatalf("rejected result args invalid: %+v", calls[1].args)
+	}
+}
+
 func TestSQLBattleLifecycleAuditRepositoryRejectsNilDB(t *testing.T) {
 	if _, err := NewSQLBattleLifecycleAuditRepository(nil); err == nil {
 		t.Fatalf("expected nil db rejection")
