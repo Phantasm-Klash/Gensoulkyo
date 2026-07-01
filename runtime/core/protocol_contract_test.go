@@ -460,6 +460,41 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("business event request contract must not let clients submit server projection fields: %+v", contract)
 		}
 		switch contract.Kind {
+		case "queue", "matchmaking":
+			for _, projectionField := range []string{
+				"queue.queue_status",
+				"queue.ticket_id",
+				"queue.match_id",
+				"queue.mode_id",
+				"queue.room_code",
+				"queue.required_players",
+				"queue.current_players",
+				"queue.loadout",
+				"queue.battle_allocation",
+				"queue.battle_ticket",
+			} {
+				if !stringSliceContains(contract.ServerProjectionFields, projectionField) {
+					t.Fatalf("%s request contract missing queue projection field %q: %+v", contract.Kind, projectionField, contract)
+				}
+			}
+		case "room":
+			for _, projectionField := range []string{
+				"room.room_status",
+				"room.required_players",
+				"room.current_players",
+				"room.match_id",
+				"room.participants.user_id",
+				"room.participants.ticket_id",
+				"room.participants.deck_snapshot_hash",
+				"room.participants.loadout",
+				"room.messages.message_id",
+				"room.messages.metadata",
+				"room.server_authoritative",
+			} {
+				if !stringSliceContains(contract.ServerProjectionFields, projectionField) {
+					t.Fatalf("room request contract missing lobby projection field %q: %+v", projectionField, contract)
+				}
+			}
 		case "battle.allocation":
 			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)
@@ -521,6 +556,41 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 			t.Fatalf("business notification topic must not let clients submit server projection fields: %+v", topic)
 		}
 		switch topic.Kind {
+		case "queue", "matchmaking":
+			for _, projectionField := range []string{
+				"queue.queue_status",
+				"queue.ticket_id",
+				"queue.match_id",
+				"queue.mode_id",
+				"queue.room_code",
+				"queue.required_players",
+				"queue.current_players",
+				"queue.loadout",
+				"queue.battle_allocation",
+				"queue.battle_ticket",
+			} {
+				if !stringSliceContains(topic.ServerProjectionFields, projectionField) {
+					t.Fatalf("%s notification missing queue projection field %q: %+v", topic.Kind, projectionField, topic)
+				}
+			}
+		case "room":
+			for _, projectionField := range []string{
+				"room.room_status",
+				"room.required_players",
+				"room.current_players",
+				"room.match_id",
+				"room.participants.user_id",
+				"room.participants.ticket_id",
+				"room.participants.deck_snapshot_hash",
+				"room.participants.loadout",
+				"room.messages.message_id",
+				"room.messages.metadata",
+				"room.server_authoritative",
+			} {
+				if !stringSliceContains(topic.ServerProjectionFields, projectionField) {
+					t.Fatalf("room notification missing lobby projection field %q: %+v", projectionField, topic)
+				}
+			}
 		case "battle.allocation":
 			if !stringSliceContains(topic.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation notification missing server projection field: %+v", topic)
