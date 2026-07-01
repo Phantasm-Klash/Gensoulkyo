@@ -2148,6 +2148,10 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 		s.recordBattleResultShapeRejectedAuditLocked(signed, ErrorCode(err), now)
 		return nil, err
 	}
+	if err := validateReplayInputStreamSummary(req.ReplaySummary, signed.Result); err != nil {
+		s.recordBattleResultShapeRejectedAuditLocked(signed, ErrorCode(err), now)
+		return nil, err
+	}
 	result := signed.Result
 	match, ok := s.matches[result.MatchID]
 	if !ok {
@@ -5772,6 +5776,51 @@ func validateSignedBattleResultShape(signed SignedBattleResult, now time.Time) e
 		return newError(codeForbiddenField, "battle result mode projection cannot include %s", forbidden)
 	}
 	return nil
+}
+
+func validateReplayInputStreamSummary(summary ReplayInputStreamSummary, result BattleResult) error {
+	if !hasReplayInputStreamSummary(summary) {
+		return nil
+	}
+	if !versionStampCompatible(summary.Version) {
+		return newError(codeInvalidRequest, "replay summary version is incompatible")
+	}
+	if strings.TrimSpace(summary.ReplayID) == "" || strings.TrimSpace(summary.MatchID) == "" || strings.TrimSpace(summary.OwnerUserID) == "" {
+		return newError(codeInvalidRequest, "replay summary replay_id, match_id, and owner_user_id are required")
+	}
+	if summary.ReplayID != result.ReplayID || summary.MatchID != result.MatchID {
+		return newError(codeInvalidRequest, "replay summary does not match signed battle result")
+	}
+	if summary.InputCount <= 0 || summary.EventCount <= 0 || summary.FinalTick <= 0 {
+		return newError(codeInvalidRequest, "replay summary counts and final_tick are required")
+	}
+	for _, hashValue := range []string{summary.InputStreamHash, summary.EventStreamHash, summary.FinalStateHash} {
+		if !looksLikeSha256Label(hashValue) {
+			return newError(codeInvalidRequest, "replay summary hash is invalid")
+		}
+	}
+	return nil
+}
+
+func hasReplayInputStreamSummary(summary ReplayInputStreamSummary) bool {
+	return strings.TrimSpace(summary.ReplayID) != "" ||
+		strings.TrimSpace(summary.MatchID) != "" ||
+		strings.TrimSpace(summary.OwnerUserID) != "" ||
+		summary.InputCount != 0 ||
+		summary.EventCount != 0 ||
+		strings.TrimSpace(summary.InputStreamHash) != "" ||
+		strings.TrimSpace(summary.EventStreamHash) != "" ||
+		strings.TrimSpace(summary.FinalStateHash) != "" ||
+		summary.FinalTick != 0 ||
+		summary.Version.ProtocolVersion != 0 ||
+		summary.Version.BusinessAPIVersion != "" ||
+		summary.Version.BattleAPIVersion != "" ||
+		summary.Version.RulesetVersion != ""
+}
+
+func looksLikeSha256Label(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "sha256:") && strings.TrimPrefix(value, "sha256:") != ""
 }
 
 func firstForbiddenBattleResultProjectionField(raw string) string {

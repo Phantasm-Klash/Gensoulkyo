@@ -809,7 +809,13 @@ func TestBattleResultSubmitVerifiesAllocationAndSettlesMatch(t *testing.T) {
 	}
 
 	signed := signedBattleResultForAllocation(allocation)
-	resp, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
+	mismatchedReplaySummary := replaySummaryForSignedResult(signed, alice.UserID)
+	mismatchedReplaySummary.MatchID = "match-wrong"
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed, ReplaySummary: mismatchedReplaySummary}); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected replay summary mismatch rejection, got %v", err)
+	}
+
+	resp, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed, ReplaySummary: replaySummaryForSignedResult(signed, alice.UserID)})
 	if err != nil {
 		t.Fatalf("submit battle result: %v", err)
 	}
@@ -831,7 +837,7 @@ func TestBattleResultSubmitVerifiesAllocationAndSettlesMatch(t *testing.T) {
 		t.Fatalf("replay missing battle result audit fields: %+v", replay.ModeResult)
 	}
 
-	duplicate, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed})
+	duplicate, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed, ReplaySummary: replaySummaryForSignedResult(signed, alice.UserID)})
 	if err != nil {
 		t.Fatalf("duplicate battle result should be accepted idempotently: %v", err)
 	}
@@ -3758,6 +3764,21 @@ func signedBattleResultForAllocation(allocation *BattleServerAllocation) SignedB
 		SignatureHex:        phkv1.BattleResultCallbackSignatureHex,
 		PublicKeyHex:        phkv1.BattleResultCallbackPublicKeyHex,
 		ServerAuthoritative: true,
+	}
+}
+
+func replaySummaryForSignedResult(signed SignedBattleResult, ownerUserID string) ReplayInputStreamSummary {
+	return ReplayInputStreamSummary{
+		Version:         currentVersionStamp(),
+		ReplayID:        signed.Result.ReplayID,
+		MatchID:         signed.Result.MatchID,
+		OwnerUserID:     ownerUserID,
+		InputCount:      phkv1.GoldenReplaySummaryInputCount,
+		EventCount:      phkv1.GoldenReplaySummaryEventCount,
+		InputStreamHash: phkv1.GoldenReplaySummaryInputStreamHash,
+		EventStreamHash: phkv1.GoldenReplaySummaryEventStreamHash,
+		FinalStateHash:  phkv1.GoldenReplaySummaryFinalStateHash,
+		FinalTick:       phkv1.GoldenReplaySummaryFinalTick,
 	}
 }
 

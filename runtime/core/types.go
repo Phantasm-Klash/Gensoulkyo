@@ -426,7 +426,21 @@ type SignedBattleResult struct {
 }
 
 type BattleResultSubmitRequest struct {
-	SignedResult SignedBattleResult `json:"signed_result"`
+	SignedResult  SignedBattleResult       `json:"signed_result"`
+	ReplaySummary ReplayInputStreamSummary `json:"replay_summary,omitempty"`
+}
+
+type ReplayInputStreamSummary struct {
+	Version         VersionStamp `json:"version"`
+	ReplayID        string       `json:"replay_id"`
+	MatchID         string       `json:"match_id"`
+	OwnerUserID     string       `json:"owner_user_id"`
+	InputCount      int          `json:"input_count"`
+	EventCount      int          `json:"event_count"`
+	InputStreamHash string       `json:"input_stream_hash"`
+	EventStreamHash string       `json:"event_stream_hash"`
+	FinalStateHash  string       `json:"final_state_hash"`
+	FinalTick       int          `json:"final_tick"`
 }
 
 type BattleResultSubmitResponse struct {
