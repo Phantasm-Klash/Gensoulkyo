@@ -6517,6 +6517,8 @@ func clientOperationContracts() []ClientOperationContract {
 			Operation:                      operation,
 			Transports:                     transports,
 			Authority:                      clientOperationAuthority(operation),
+			ClientRequestFields:            clientOperationRequestFields(operation),
+			ServerProjectionFields:         clientOperationProjectionFields(operation),
 			BusinessEnvelopeRequired:       operation != "auth.anonymous",
 			ServiceCallback:                false,
 			ServerAuthoritativeProjection:  true,
@@ -6530,6 +6532,105 @@ func clientOperationContracts() []ClientOperationContract {
 
 func ContractClientOperationContracts() []ClientOperationContract {
 	return clientOperationContracts()
+}
+
+func clientOperationRequestFields(operation string) []string {
+	switch operation {
+	case "bootstrap", "inventory.get", "decks.list", "chests.list", "battle.servers", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
+		return []string{}
+	case "cards.upgrade":
+		return []string{"card_id", "target_level"}
+	case "decks.save":
+		return []string{"deck_id", "name", "format", "card_ids", "active", "updated_at"}
+	case "chests.open":
+		return []string{"pool_id", "count"}
+	case "presence.heartbeat":
+		return []string{"ticket_id", "match_id", "client_tick", "last_event_cursor"}
+	case "matchmaking.join", "rooms.create", "rooms.join":
+		return []string{"mode_id", "active_deck_id", "deck_snapshot", "mode_params", "client_version"}
+	case "matchmaking.ticket", "matchmaking.cancel":
+		return []string{"ticket_id"}
+	case "rooms.list", "business.contract":
+		return []string{}
+	case "rooms.get", "rooms.rules", "rooms.leave":
+		return []string{"room_code"}
+	case "rooms.message", "rooms.chat", "rooms.announcement":
+		return []string{"room_code", "message_id", "kind", "text", "metadata"}
+	case "business.event":
+		return businessNotificationClientRequestFields("presence")
+	case "business.event.settlement":
+		return businessNotificationClientRequestFields("settlement")
+	case "match.ready", "match.disconnect", "match.reconnect", "match.rematch", "battle.allocation", "battle.ticket":
+		return []string{"match_id"}
+	case "activity.claim":
+		return []string{"claim_kind", "claim_id"}
+	case "replay.get":
+		return []string{"replay_id"}
+	default:
+		return []string{}
+	}
+}
+
+func clientOperationProjectionFields(operation string) []string {
+	common := []string{"ok", "server_authoritative"}
+	switch operation {
+	case "bootstrap":
+		return append(common, "user_id", "session_token", "server_version", "ruleset_version", "modes", "inventory", "decks", "chests", "certification", "world_boss")
+	case "inventory.get":
+		return append(common, "user_id", "ruleset_version", "items", "server_time")
+	case "cards.upgrade":
+		return append(common, "user_id", "card_id", "old_level", "new_level", "wallet", "inventory", "server_time")
+	case "decks.list":
+		return append(common, "user_id", "active_deck_id", "ruleset_version", "decks", "server_time")
+	case "decks.save":
+		return append(common, "user_id", "deck", "active_deck_id", "validation", "server_time")
+	case "chests.list":
+		return append(common, "user_id", "ruleset_version", "wallet", "owned_chests", "pools", "pity_counters", "opening_log", "last_results", "server_time")
+	case "chests.open":
+		return append(common, "user_id", "pool_id", "count", "wallet", "owned_chests", "inventory", "pity_counters", "results", "audit", "server_time")
+	case "presence.heartbeat":
+		return append(common, "user_id", "presence_status", "session_status", "ticket_id", "queue_status", "room_code", "room_status", "match_id", "match_status", "battle_allocation", "battle_ticket", "server_time")
+	case "matchmaking.join", "matchmaking.ticket", "matchmaking.cancel", "rooms.create", "rooms.join", "rooms.leave":
+		return append(common, "queue_status", "ticket_id", "match_id", "mode_id", "loadout", "room_code", "room_status", "required_players", "current_players", "match_start", "battle_allocation", "battle_ticket")
+	case "rooms.list":
+		return append(common, "rooms", "rooms.room_code", "rooms.room_status", "rooms.mode_id", "rooms.participants", "rooms.participants.deck_snapshot_hash", "rooms.participants.loadout", "server_time")
+	case "rooms.get":
+		return append(common, "room_code", "room_status", "mode_id", "host_user_id", "required_players", "current_players", "match_id", "stage_id", "mode_config_hash", "participants", "participants.deck_snapshot_hash", "participants.loadout", "messages", "server_time")
+	case "rooms.rules":
+		return append(common, "version", "room", "mode", "tick_rate", "input_delay_ticks", "battle_ticket_ttl_seconds", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
+	case "rooms.message", "rooms.chat", "rooms.announcement":
+		return append(common, "message_id", "room_code", "mode_id", "kind", "user_id", "display_name", "text", "metadata", "created_at", "duplicate")
+	case "business.event":
+		return businessNotificationServerProjectionFields("presence")
+	case "business.event.settlement":
+		return businessNotificationServerProjectionFields("settlement")
+	case "business.contract":
+		return append(common, "version", "business_transports", "battle_transports", "client_operation_contracts", "disallowed_client_operations", "service_only_operations", "business_notification_topics", "forbidden_fields", "server_time")
+	case "match.ready":
+		return append(common, "match_id", "ready_status", "ready_count", "required_players", "match_start", "battle_ticket")
+	case "match.disconnect", "match.reconnect":
+		return append(common, "match_id", "user_id", "reconnect_status", "connected", "seconds_left", "match_start", "snapshot", "battle_ticket", "server_time")
+	case "match.rematch":
+		return append(common, "match_id", "new_match_id", "rematch_status", "accepted_count", "required_players", "mode_id", "stage_id", "loadout", "match_start", "server_time")
+	case "activity.claim":
+		return append(common, "duplicate", "reason", "claim_kind", "claim_id", "user_id", "reward_json", "claimed", "reward_status", "settlement_key", "settled_at")
+	case "battle.servers":
+		return append(common, "servers", "servers.battle_server_id", "servers.endpoint", "servers.region", "servers.capacity", "servers.active_matches", "servers.supported_modes", "server_time")
+	case "business.envelope.audit.status":
+		return append(common, "accepted", "rejected", "audits")
+	case "battle.audit.status":
+		return append(common, "configured", "server_lifecycle_records", "allocation_records", "ticket_records", "result_records", "replay_records", "last_success_operation", "last_error_operation")
+	case "lobby.audit.status":
+		return append(common, "configured", "room_records", "room_read_records", "rules_read_records", "ready_records", "connection_records", "message_records", "last_success_operation", "last_error_operation")
+	case "battle.allocation":
+		return append(common, "version", "match_id", "mode_id", "battle_server_id", "endpoint", "players", "players.deck_snapshot_hash", "mode_config_hash", "allocated_at")
+	case "battle.ticket":
+		return append(common, "ticket", "ticket.ticket_id", "ticket.match_id", "ticket.user_id", "ticket.player_id", "ticket.battle_server_id", "ticket.endpoint", "ticket.deck_snapshot_hash", "ticket.mode_config_hash", "ticket.expires_at", "signature_alg", "key_id", "signature_hex", "server_time")
+	case "replay.get":
+		return append(common, "replay_id", "match_id", "user_id", "mode_id", "ruleset_version", "mode_ruleset_version", "state_hash", "input_count", "event_count", "settlement")
+	default:
+		return common
+	}
 }
 
 func clientOperationAuthority(operation string) string {
