@@ -546,9 +546,17 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		if !contract.BusinessEnvelopeRequired || !contract.ServerAuthoritativeProjection || contract.ServiceCallback || contract.HighFrequencyBattleTickAllowed || contract.ClientResultSubmitAllowed {
 			t.Fatalf("business event request contract must stay low-frequency read intent: %+v", contract)
 		}
+		if !reflect.DeepEqual(contract.LookupKeyFields, businessNotificationLookupKeyFields(contract.Kind)) {
+			t.Fatalf("business event request contract lookup key fields drifted: %+v", contract)
+		}
 		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
 			if !stringSliceContains(contract.ClientRequestFields, requestField) {
 				t.Fatalf("business event request contract missing lookup field %q: %+v", requestField, contract)
+			}
+		}
+		for _, requiredLookup := range contract.LookupKeyFields {
+			if !stringSliceContains(contract.ClientRequestFields, requiredLookup) {
+				t.Fatalf("business event request contract lookup key field %q must be an allowed client request field: %+v", requiredLookup, contract)
 			}
 		}
 		if !stringSliceContains(contract.ServerProjectionFields, "server_time") || !stringSliceContains(contract.ServerProjectionFields, "server_authoritative") {
@@ -559,6 +567,11 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		}
 		switch contract.Kind {
 		case "queue", "matchmaking":
+			for _, requiredLookup := range []string{"ticket_id", "room_code", "match_id"} {
+				if !stringSliceContains(contract.LookupKeyFields, requiredLookup) {
+					t.Fatalf("%s request contract missing queue lookup key %q: %+v", contract.Kind, requiredLookup, contract)
+				}
+			}
 			for _, projectionField := range []string{
 				"queue.queue_status",
 				"queue.ticket_id",
@@ -576,6 +589,11 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 				}
 			}
 		case "room":
+			for _, requiredLookup := range []string{"room_code", "ticket_id"} {
+				if !stringSliceContains(contract.LookupKeyFields, requiredLookup) {
+					t.Fatalf("room request contract missing room lookup key %q: %+v", requiredLookup, contract)
+				}
+			}
 			for _, projectionField := range []string{
 				"room.room_status",
 				"room.required_players",
@@ -594,15 +612,15 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 				}
 			}
 		case "battle.allocation":
-			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
+			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)
 			}
 		case "battle.ticket":
-			if !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
+			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
 				t.Fatalf("battle ticket request contract missing server projection field: %+v", contract)
 			}
 		case "settlement":
-			if !stringSliceContains(contract.ServerProjectionFields, "settlement") {
+			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "settlement") {
 				t.Fatalf("settlement request contract missing server projection field: %+v", contract)
 			}
 		}
@@ -648,6 +666,14 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
 			if !stringSliceContains(topic.ClientRequestFields, requestField) {
 				t.Fatalf("business notification topic missing allowed read request field %q: %+v", requestField, topic)
+			}
+		}
+		if !reflect.DeepEqual(topic.LookupKeyFields, businessNotificationLookupKeyFields(topic.Kind)) {
+			t.Fatalf("business notification topic lookup key fields drifted: %+v", topic)
+		}
+		for _, requiredLookup := range topic.LookupKeyFields {
+			if !stringSliceContains(topic.ClientRequestFields, requiredLookup) {
+				t.Fatalf("business notification topic lookup key field %q must be an allowed client request field: %+v", requiredLookup, topic)
 			}
 		}
 		if !stringSliceContains(topic.ServerProjectionFields, "server_time") || !stringSliceContains(topic.ServerProjectionFields, "server_authoritative") {

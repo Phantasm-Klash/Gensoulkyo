@@ -6169,6 +6169,7 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 			ClientEventRequestKind:         kind,
 			ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
 			ClientRequestFields:            businessNotificationClientRequestFields(kind),
+			LookupKeyFields:                businessNotificationLookupKeyFields(kind),
 			ServerProjectionFields:         businessNotificationServerProjectionFields(kind),
 			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
 			ServerAuthoritativeProjection:  true,
@@ -6213,6 +6214,21 @@ func businessNotificationRequestOperation(kind string) string {
 
 func businessNotificationClientRequestFields(kind string) []string {
 	return []string{"kind", "ticket_id", "room_code", "match_id"}
+}
+
+func businessNotificationLookupKeyFields(kind string) []string {
+	switch kind {
+	case "presence", "activity":
+		return []string{}
+	case "room":
+		return []string{"room_code", "ticket_id"}
+	case "queue", "matchmaking":
+		return []string{"ticket_id", "room_code", "match_id"}
+	case "match.ready", "battle.allocation", "battle.ticket", "settlement":
+		return []string{"match_id", "ticket_id"}
+	default:
+		return []string{"ticket_id", "room_code", "match_id"}
+	}
 }
 
 func businessNotificationServerProjectionFields(kind string) []string {
@@ -6321,6 +6337,7 @@ func businessEventRequestContracts() []BusinessEventRequestContract {
 			ClientWSSOperation:             operation,
 			ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
 			ClientRequestFields:            businessNotificationClientRequestFields(kind),
+			LookupKeyFields:                businessNotificationLookupKeyFields(kind),
 			ServerProjectionFields:         businessNotificationServerProjectionFields(kind),
 			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
 			BusinessEnvelopeRequired:       true,
