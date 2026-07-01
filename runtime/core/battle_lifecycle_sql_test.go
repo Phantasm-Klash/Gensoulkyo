@@ -25,11 +25,54 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	assertMigrationCoversInsertColumns(t, upSQL, insertReplayAuditSQL, "replay_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertLobbyRoomAuditSQL, "lobby_room_audits")
 	assertMigrationCoversInsertColumns(t, upSQL, insertLobbyMessageAuditSQL, "lobby_message_audits")
+	assertMigrationHasColumns(t, upSQL, "battle_servers", []string{
+		"battle_server_id",
+		"endpoint",
+		"region",
+		"build_id",
+		"capacity",
+		"active_matches",
+		"load",
+		"status",
+		"supported_modes_json",
+		"registered_at",
+		"last_seen_at",
+		"server_authoritative",
+	})
+	assertMigrationHasColumns(t, upSQL, "packet_key_versions", []string{
+		"key_id",
+		"scope",
+		"protocol_version",
+		"suite",
+		"status",
+		"public_key_hex",
+		"server_key_ref",
+		"not_before",
+		"not_after",
+		"created_at",
+		"rotated_at",
+		"notes",
+		"server_authoritative",
+	})
+	if !strings.Contains(upSQL, "scope IN ('business_envelope', 'battle_ticket', 'battle_packet', 'service_callback')") {
+		t.Fatalf("packet key version migration must cover business, ticket, battle packet, and service callback key scopes")
+	}
+	if !strings.Contains(upSQL, "status IN ('online', 'draining', 'offline')") {
+		t.Fatalf("battle server registry migration must constrain lifecycle status values")
+	}
+	if !strings.Contains(upSQL, "ix_battle_servers_status_load") || !strings.Contains(upSQL, "ix_packet_key_versions_scope_status") {
+		t.Fatalf("battle server/key version migrations must include operational lookup indexes")
+	}
 	if !strings.Contains(upSQL, "'dev-ed25519-0'") {
 		t.Fatalf("migration must seed dev-ed25519-0 so battle_ticket_audits.key_id foreign key can accept signed ticket audits")
 	}
 	if !strings.Contains(upSQL, "'client-dev-key'") {
 		t.Fatalf("migration must seed client-dev-key so Nakama RPC/WSS envelope audit tests satisfy the key foreign key")
+	}
+	for _, seed := range []string{"'business_envelope'", "'battle_ticket'", "'dev-business-envelope-v0'", "'client-dev-key'", "'dev-ed25519-0'"} {
+		if !strings.Contains(upSQL, seed) {
+			t.Fatalf("packet key version migration must seed scaffold key metadata %s", seed)
+		}
 	}
 	for _, status := range []string{"'server_registered'", "'server_heartbeat'", "'server_offline'"} {
 		if !strings.Contains(upSQL, status) {
@@ -67,9 +110,13 @@ func TestBattleLifecycleAuditMigrationMatchesRepositoryTables(t *testing.T) {
 	assertDownMigrationDropsTable(t, downSQL, "lobby_message_audits")
 	assertDownMigrationDropsTable(t, downSQL, "battle_result_audits")
 	assertDownMigrationDropsTable(t, downSQL, "replay_audits")
+	assertDownMigrationDropsTable(t, downSQL, "battle_servers")
+	assertDownMigrationDropsTable(t, downSQL, "packet_key_versions")
 	for _, table := range []string{
 		"business_envelope_audits",
+		"packet_key_versions",
 		"business_envelope_nonce_windows",
+		"battle_servers",
 		"battle_ticket_audits",
 		"match_allocation_audits",
 		"battle_result_audits",
@@ -354,6 +401,16 @@ func assertMigrationCoversInsertColumns(t *testing.T, migrationSQL string, inser
 	for _, column := range insertColumns {
 		if !createColumns[column] {
 			t.Fatalf("migration table %s missing repository column %s; columns=%v", table, column, keysForTest(createColumns))
+		}
+	}
+}
+
+func assertMigrationHasColumns(t *testing.T, migrationSQL string, table string, columns []string) {
+	t.Helper()
+	createColumns := extractCreateTableColumns(t, migrationSQL, table)
+	for _, column := range columns {
+		if !createColumns[column] {
+			t.Fatalf("migration table %s missing column %s; columns=%v", table, column, keysForTest(createColumns))
 		}
 	}
 }

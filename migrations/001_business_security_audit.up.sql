@@ -59,6 +59,28 @@ CREATE INDEX IF NOT EXISTS ix_business_envelope_audit_user_time
 CREATE INDEX IF NOT EXISTS ix_business_envelope_audit_rejected
     ON business_envelope_audits (accepted, error_code, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS packet_key_versions (
+    key_id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL CHECK (scope IN ('business_envelope', 'battle_ticket', 'battle_packet', 'service_callback')),
+    protocol_version TEXT NOT NULL,
+    suite TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('dev_scaffold', 'active', 'retired', 'revoked')),
+    public_key_hex TEXT,
+    server_key_ref TEXT NOT NULL DEFAULT '',
+    not_before TIMESTAMPTZ NOT NULL DEFAULT now(),
+    not_after TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    rotated_at TIMESTAMPTZ,
+    notes TEXT,
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS ix_packet_key_versions_scope_status
+    ON packet_key_versions (scope, status, not_before DESC);
+
+CREATE INDEX IF NOT EXISTS ix_packet_key_versions_rotation
+    ON packet_key_versions (status, not_after, rotated_at);
+
 CREATE TABLE IF NOT EXISTS business_envelope_nonce_windows (
     session_id_hint TEXT PRIMARY KEY,
     last_seq BIGINT NOT NULL DEFAULT 0,
@@ -66,6 +88,27 @@ CREATE TABLE IF NOT EXISTS business_envelope_nonce_windows (
     nonce_window_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS battle_servers (
+    battle_server_id TEXT PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    region TEXT NOT NULL DEFAULT '',
+    build_id TEXT NOT NULL DEFAULT '',
+    capacity INTEGER NOT NULL DEFAULT 0,
+    active_matches INTEGER NOT NULL DEFAULT 0,
+    load DOUBLE PRECISION NOT NULL DEFAULT 0,
+    status TEXT NOT NULL CHECK (status IN ('online', 'draining', 'offline')) DEFAULT 'online',
+    supported_modes_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    server_authoritative BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS ix_battle_servers_status_load
+    ON battle_servers (status, load, active_matches);
+
+CREATE INDEX IF NOT EXISTS ix_battle_servers_region_seen
+    ON battle_servers (region, last_seen_at DESC);
 
 CREATE TABLE IF NOT EXISTS battle_ticket_audits (
     audit_id BIGSERIAL PRIMARY KEY,
@@ -261,6 +304,66 @@ INSERT INTO business_envelope_keys (
     NULL,
     'local-dev-placeholder',
     'Development scaffold key id used by HTTP fallback tests. Replace before production.'
+) ON CONFLICT (key_id) DO NOTHING;
+
+INSERT INTO packet_key_versions (
+    key_id,
+    scope,
+    protocol_version,
+    suite,
+    status,
+    public_key_hex,
+    server_key_ref,
+    notes
+) VALUES (
+    'dev-business-envelope-v0',
+    'business_envelope',
+    'business-v0-scaffold',
+    'tls13_plus_x25519_hkdf_chacha20poly1305_ed25519_target',
+    'dev_scaffold',
+    NULL,
+    'local-dev-placeholder',
+    'Development scaffold key id used by HTTP fallback tests. Replace before production.'
+) ON CONFLICT (key_id) DO NOTHING;
+
+INSERT INTO packet_key_versions (
+    key_id,
+    scope,
+    protocol_version,
+    suite,
+    status,
+    public_key_hex,
+    server_key_ref,
+    notes
+) VALUES (
+    'client-dev-key',
+    'business_envelope',
+    'business-v0-scaffold',
+    'tls13_plus_x25519_hkdf_chacha20poly1305_client_dev_scaffold',
+    'dev_scaffold',
+    NULL,
+    'local-dev-client-envelope-placeholder',
+    'Development scaffold key id used by Nakama RPC/WSS envelope tests. Replace before production.'
+) ON CONFLICT (key_id) DO NOTHING;
+
+INSERT INTO packet_key_versions (
+    key_id,
+    scope,
+    protocol_version,
+    suite,
+    status,
+    public_key_hex,
+    server_key_ref,
+    notes
+) VALUES (
+    'dev-ed25519-0',
+    'battle_ticket',
+    'battle-ticket-v0-scaffold',
+    'ed25519_battle_ticket_dev_scaffold',
+    'dev_scaffold',
+    NULL,
+    'local-dev-ticket-signing-placeholder',
+    'Development scaffold key id used by signed battle ticket audits. Replace before production.'
 ) ON CONFLICT (key_id) DO NOTHING;
 
 INSERT INTO business_envelope_keys (
