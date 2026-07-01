@@ -334,6 +334,12 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult {
 		t.Fatalf("business contract must publish service-signed settlement authority, got %+v", contract)
 	}
+	if contract.ServiceCallbackPlayerAllowed || contract.ServiceCallbackEnvelopeAllowed {
+		t.Fatalf("business contract must publish service callbacks as non-player, non-envelope callbacks: %+v", contract)
+	}
+	if contract.ServiceCallbackContext[ServiceCallbackPlayerSessionContextKey] != ServiceCallbackDisallowedValue || contract.ServiceCallbackContext[ServiceCallbackBusinessEnvelopeAllowedKey] != ServiceCallbackDisallowedValue {
+		t.Fatalf("business contract service callback booleans drifted from shared context: %+v", contract)
+	}
 	for _, ops := range [][]string{clientOps, clientRPCOps, clientWSSOps} {
 		if !stringSliceContains(ops, "battle.servers") {
 			t.Fatalf("client operation contract should expose battle server discovery: client=%+v rpc=%+v wss=%+v", clientOps, clientRPCOps, clientWSSOps)

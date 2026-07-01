@@ -789,6 +789,8 @@ type BusinessContractSnapshot struct {
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
 	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
+	ServiceCallbackPlayerAllowed   bool                        `json:"service_callback_player_session_allowed"`
+	ServiceCallbackEnvelopeAllowed bool                        `json:"service_callback_business_envelope_allowed"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessEventRequestKinds      []string                    `json:"business_event_request_kinds"`
@@ -820,6 +822,8 @@ type RoomRulesSnapshot struct {
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
 	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
+	ServiceCallbackPlayerAllowed   bool                        `json:"service_callback_player_session_allowed"`
+	ServiceCallbackEnvelopeAllowed bool                        `json:"service_callback_business_envelope_allowed"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessEventRequestKinds      []string                    `json:"business_event_request_kinds"`
@@ -933,6 +937,8 @@ type BusinessEvent struct {
 	ServiceCallbacks               []string                    `json:"service_callbacks"`
 	ServiceCallbackContext         map[string]string           `json:"service_callback_context"`
 	ServiceCallbackAcceptedValues  []string                    `json:"service_callback_accepted_values"`
+	ServiceCallbackPlayerAllowed   bool                        `json:"service_callback_player_session_allowed"`
+	ServiceCallbackEnvelopeAllowed bool                        `json:"service_callback_business_envelope_allowed"`
 	SettlementAuthority            string                      `json:"settlement_authority"`
 	BusinessNotifications          []string                    `json:"business_notifications"`
 	BusinessEventRequestKinds      []string                    `json:"business_event_request_kinds"`

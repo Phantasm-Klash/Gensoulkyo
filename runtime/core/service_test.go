@@ -2680,6 +2680,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	if rules.ServiceCallbackContext[ServiceCallbackPlayerSessionContextKey] != ServiceCallbackDisallowedValue || rules.ServiceCallbackContext[ServiceCallbackBusinessEnvelopeAllowedKey] != ServiceCallbackDisallowedValue {
 		t.Fatalf("room rules should keep service callbacks out of player/envelope paths: %+v", rules.ServiceCallbackContext)
 	}
+	if rules.ServiceCallbackPlayerAllowed || rules.ServiceCallbackEnvelopeAllowed {
+		t.Fatalf("room rules should publish service callbacks as non-player, non-envelope callbacks: %+v", rules)
+	}
 	if !stringSliceContains(rules.BusinessNotifications, "activity") || !stringSliceContains(rules.BusinessNotifications, "battle.allocation") || !stringSliceContains(rules.BusinessNotifications, "battle.ticket") || !stringSliceContains(rules.BusinessNotifications, "settlement") || stringSliceContains(rules.BusinessNotifications, "battle.result.submit") {
 		t.Fatalf("room rules should publish low-frequency business WSS notifications only: %+v", rules)
 	}
@@ -2701,6 +2704,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(contract.ServiceCallbackAcceptedValues, ServiceCallbackAcceptedValues()) || !reflect.DeepEqual(contract.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues) {
 		t.Fatalf("business contract and room rules accepted service callback values drifted: contract=%+v rules=%+v expected=%+v", contract.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues, ServiceCallbackAcceptedValues())
+	}
+	if contract.ServiceCallbackPlayerAllowed != rules.ServiceCallbackPlayerAllowed || contract.ServiceCallbackEnvelopeAllowed != rules.ServiceCallbackEnvelopeAllowed {
+		t.Fatalf("business contract and room rules service callback booleans drifted: contract=%+v rules=%+v", contract, rules)
 	}
 	if contract.SettlementAuthority != settlementAuthorityServiceSignedBattleResult || rules.SettlementAuthority != contract.SettlementAuthority {
 		t.Fatalf("business contract and room rules settlement authority drifted: contract=%q rules=%q", contract.SettlementAuthority, rules.SettlementAuthority)
@@ -2729,6 +2735,9 @@ func TestRoomLobbyListRulesAndLeave(t *testing.T) {
 	}
 	if !reflect.DeepEqual(event.ServiceCallbackAcceptedValues, rules.ServiceCallbackAcceptedValues) {
 		t.Fatalf("room rules and business event service callback accepted values drifted: rules=%+v event=%+v", rules.ServiceCallbackAcceptedValues, event.ServiceCallbackAcceptedValues)
+	}
+	if event.ServiceCallbackPlayerAllowed != rules.ServiceCallbackPlayerAllowed || event.ServiceCallbackEnvelopeAllowed != rules.ServiceCallbackEnvelopeAllowed {
+		t.Fatalf("room rules and business event service callback booleans drifted: rules=%+v event=%+v", rules, event)
 	}
 	if event.SettlementAuthority != rules.SettlementAuthority {
 		t.Fatalf("room rules and business event settlement authority drifted: rules=%q event=%q", rules.SettlementAuthority, event.SettlementAuthority)
