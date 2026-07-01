@@ -2880,6 +2880,28 @@ func assertBusinessNotificationTopics(t *testing.T, topics []core.BusinessNotifi
 		if !topic.ServerAuthoritativeProjection || !stringSliceContains(topic.ClientRequestFields, "match_id") || !stringSliceContains(topic.ClientRequestFields, "ticket_id") {
 			t.Fatalf("business notification topic must expose read-only client lookup fields: %+v", topic)
 		}
+		if len(topic.LookupKeyFields) > len(topic.ClientRequestFields) {
+			t.Fatalf("business notification topic lookup key fields cannot exceed allowed lookup fields: %+v", topic)
+		}
+		for _, requiredLookup := range topic.LookupKeyFields {
+			if !stringSliceContains(topic.ClientRequestFields, requiredLookup) {
+				t.Fatalf("business notification topic lookup key field %q must be an allowed client request field: %+v", requiredLookup, topic)
+			}
+		}
+		switch topic.Kind {
+		case "presence", "activity":
+			if len(topic.LookupKeyFields) != 0 {
+				t.Fatalf("%s topic should not require extra lookup keys: %+v", topic.Kind, topic)
+			}
+		case "room":
+			if !stringSliceContains(topic.LookupKeyFields, "room_code") || !stringSliceContains(topic.LookupKeyFields, "ticket_id") {
+				t.Fatalf("room topic missing room/ticket lookup keys: %+v", topic)
+			}
+		case "battle.allocation", "battle.ticket", "settlement":
+			if !stringSliceContains(topic.LookupKeyFields, "match_id") || !stringSliceContains(topic.LookupKeyFields, "ticket_id") {
+				t.Fatalf("%s topic missing match/ticket lookup keys: %+v", topic.Kind, topic)
+			}
+		}
 		if !stringSliceContains(topic.ServerProjectionFields, "server_time") || !stringSliceContains(topic.ServerProjectionFields, "server_authoritative") {
 			t.Fatalf("business notification topic must expose common server projection fields: %+v", topic)
 		}
@@ -3015,9 +3037,17 @@ func assertBusinessEventRequestContracts(t *testing.T, contracts []core.Business
 		if contract.ClientRequestAuthority != "lookup_only" {
 			t.Fatalf("business event request contract must expose lookup-only client request authority: %+v", contract)
 		}
+		if len(contract.LookupKeyFields) > len(contract.ClientRequestFields) {
+			t.Fatalf("business event request contract lookup key fields cannot exceed allowed lookup fields: %+v", contract)
+		}
 		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
 			if !stringSliceContains(contract.ClientRequestFields, requestField) {
 				t.Fatalf("business event request contract missing lookup field %q: %+v", requestField, contract)
+			}
+		}
+		for _, requiredLookup := range contract.LookupKeyFields {
+			if !stringSliceContains(contract.ClientRequestFields, requiredLookup) {
+				t.Fatalf("business event request contract lookup key field %q must be an allowed client request field: %+v", requiredLookup, contract)
 			}
 		}
 		if !stringSliceContains(contract.ServerProjectionFields, "server_time") || !stringSliceContains(contract.ServerProjectionFields, "server_authoritative") {
@@ -3028,27 +3058,37 @@ func assertBusinessEventRequestContracts(t *testing.T, contracts []core.Business
 		}
 		switch contract.Kind {
 		case "queue", "matchmaking":
+			for _, requiredLookup := range []string{"ticket_id", "room_code", "match_id"} {
+				if !stringSliceContains(contract.LookupKeyFields, requiredLookup) {
+					t.Fatalf("%s request contract missing queue lookup key %q: %+v", contract.Kind, requiredLookup, contract)
+				}
+			}
 			for _, projectionField := range []string{"queue.ticket_id", "queue.match_id", "queue.mode_id", "queue.required_players", "queue.current_players", "queue.battle_allocation", "queue.battle_ticket"} {
 				if !stringSliceContains(contract.ServerProjectionFields, projectionField) {
 					t.Fatalf("%s request contract missing queue projection field %q: %+v", contract.Kind, projectionField, contract)
 				}
 			}
 		case "room":
+			for _, requiredLookup := range []string{"room_code", "ticket_id"} {
+				if !stringSliceContains(contract.LookupKeyFields, requiredLookup) {
+					t.Fatalf("room request contract missing room lookup key %q: %+v", requiredLookup, contract)
+				}
+			}
 			for _, projectionField := range []string{"room.room_status", "room.current_players", "room.required_players", "room.participants.ticket_id", "room.messages.message_id", "room.server_authoritative"} {
 				if !stringSliceContains(contract.ServerProjectionFields, projectionField) {
 					t.Fatalf("room request contract missing lobby projection field %q: %+v", projectionField, contract)
 				}
 			}
 		case "battle.allocation":
-			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
+			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
 				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)
 			}
 		case "battle.ticket":
-			if !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
+			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
 				t.Fatalf("battle ticket request contract missing server projection field: %+v", contract)
 			}
 		case "settlement":
-			if !stringSliceContains(contract.ServerProjectionFields, "settlement") {
+			if !stringSliceContains(contract.LookupKeyFields, "match_id") || !stringSliceContains(contract.LookupKeyFields, "ticket_id") || !stringSliceContains(contract.ServerProjectionFields, "settlement") {
 				t.Fatalf("settlement request contract missing server projection field: %+v", contract)
 			}
 		}
