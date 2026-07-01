@@ -410,6 +410,26 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 				t.Fatalf("business event request contract missing lookup field %q: %+v", requestField, contract)
 			}
 		}
+		if !stringSliceContains(contract.ServerProjectionFields, "server_time") || !stringSliceContains(contract.ServerProjectionFields, "server_authoritative") {
+			t.Fatalf("business event request contract missing common server projection fields: %+v", contract)
+		}
+		if stringSliceContains(contract.ClientRequestFields, "battle_allocation") || stringSliceContains(contract.ClientRequestFields, "battle_ticket") || stringSliceContains(contract.ClientRequestFields, "settlement") || stringSliceContains(contract.ClientRequestFields, "activity") {
+			t.Fatalf("business event request contract must not let clients submit server projection fields: %+v", contract)
+		}
+		switch contract.Kind {
+		case "battle.allocation":
+			if !stringSliceContains(contract.ServerProjectionFields, "battle_allocation") {
+				t.Fatalf("battle allocation request contract missing server projection field: %+v", contract)
+			}
+		case "battle.ticket":
+			if !stringSliceContains(contract.ServerProjectionFields, "battle_ticket") {
+				t.Fatalf("battle ticket request contract missing server projection field: %+v", contract)
+			}
+		case "settlement":
+			if !stringSliceContains(contract.ServerProjectionFields, "settlement") {
+				t.Fatalf("settlement request contract missing server projection field: %+v", contract)
+			}
+		}
 		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "settlement_key"} {
 			if !stringSliceContains(contract.ForbiddenClientRequestFields, forbiddenField) {
 				t.Fatalf("business event request contract missing forbidden field %q: %+v", forbiddenField, contract)
@@ -449,6 +469,26 @@ func TestBusinessOperationContractsKeepServiceCallbacksOutOfClientList(t *testin
 		for _, requestField := range []string{"kind", "ticket_id", "room_code", "match_id"} {
 			if !stringSliceContains(topic.ClientRequestFields, requestField) {
 				t.Fatalf("business notification topic missing allowed read request field %q: %+v", requestField, topic)
+			}
+		}
+		if !stringSliceContains(topic.ServerProjectionFields, "server_time") || !stringSliceContains(topic.ServerProjectionFields, "server_authoritative") {
+			t.Fatalf("business notification topic missing common server projection fields: %+v", topic)
+		}
+		if stringSliceContains(topic.ClientRequestFields, "battle_allocation") || stringSliceContains(topic.ClientRequestFields, "battle_ticket") || stringSliceContains(topic.ClientRequestFields, "settlement") || stringSliceContains(topic.ClientRequestFields, "activity") {
+			t.Fatalf("business notification topic must not let clients submit server projection fields: %+v", topic)
+		}
+		switch topic.Kind {
+		case "battle.allocation":
+			if !stringSliceContains(topic.ServerProjectionFields, "battle_allocation") {
+				t.Fatalf("battle allocation notification missing server projection field: %+v", topic)
+			}
+		case "battle.ticket":
+			if !stringSliceContains(topic.ServerProjectionFields, "battle_ticket") {
+				t.Fatalf("battle ticket notification missing server projection field: %+v", topic)
+			}
+		case "settlement":
+			if !stringSliceContains(topic.ServerProjectionFields, "settlement") {
+				t.Fatalf("settlement notification missing server projection field: %+v", topic)
 			}
 		}
 		for _, forbiddenField := range []string{"result_hash", "final_result", "damage", "damage_dealt", "boss_hp_after_global", "rank", "rank_score_delta", "reward_status", "settlement_key"} {

@@ -6096,6 +6096,7 @@ func businessNotificationTopics() []BusinessNotificationTopic {
 			ClientEventRequestKind:         kind,
 			ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
 			ClientRequestFields:            businessNotificationClientRequestFields(kind),
+			ServerProjectionFields:         businessNotificationServerProjectionFields(kind),
 			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
 			ServerAuthoritativeProjection:  true,
 			ServerPush:                     true,
@@ -6116,6 +6117,40 @@ func businessNotificationRequestOperation(kind string) string {
 
 func businessNotificationClientRequestFields(kind string) []string {
 	return []string{"kind", "ticket_id", "room_code", "match_id"}
+}
+
+func businessNotificationServerProjectionFields(kind string) []string {
+	common := []string{
+		"kind",
+		"topic",
+		"user_id",
+		"mode_id",
+		"room_code",
+		"ticket_id",
+		"match_id",
+		"server_time",
+		"server_authoritative",
+	}
+	switch kind {
+	case "presence":
+		return append(common, "queue_status", "room_status", "match_status")
+	case "queue", "matchmaking":
+		return append(common, "queue_status", "required_players", "current_players", "queue")
+	case "room":
+		return append(common, "room_status", "required_players", "current_players", "room")
+	case "match.ready":
+		return append(common, "match_status", "ready_count", "required_players", "ready")
+	case "activity":
+		return append(common, "activity")
+	case "battle.allocation":
+		return append(common, "battle_allocation")
+	case "battle.ticket":
+		return append(common, "battle_ticket")
+	case "settlement":
+		return append(common, "settlement")
+	default:
+		return common
+	}
 }
 
 func ContractBusinessNotificationTopics() []BusinessNotificationTopic {
@@ -6142,6 +6177,7 @@ func businessEventRequestContracts() []BusinessEventRequestContract {
 			ClientWSSOperation:             operation,
 			ClientRequestAuthority:         clientRequestAuthorityLookupOnly,
 			ClientRequestFields:            businessNotificationClientRequestFields(kind),
+			ServerProjectionFields:         businessNotificationServerProjectionFields(kind),
 			ForbiddenClientRequestFields:   sortedForbiddenClientFields(),
 			BusinessEnvelopeRequired:       true,
 			ServerAuthoritativeProjection:  true,
