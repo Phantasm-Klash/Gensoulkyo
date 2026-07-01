@@ -552,6 +552,10 @@ func TestHTTPServiceCallbackStatusPublishesSharedContract(t *testing.T) {
 	if !ok || !anySliceContainsString(disallowed, "match.input") || !anySliceContainsString(disallowed, "battle.result.submit") || anySliceContainsString(disallowed, "battle.ticket") {
 		t.Fatalf("service callback status missing disallowed client operation contract: %+v", statusBody)
 	}
+	disallowedContracts, ok := statusBody["disallowed_client_operation_contracts"].([]any)
+	if !ok || !anyDisallowedClientOperationContractValid(disallowedContracts, "battle.result.submit", true, true) || !anyDisallowedClientOperationContractValid(disallowedContracts, "battle.ticket.consume", true, false) || !anyDisallowedClientOperationContractValid(disallowedContracts, "battle.input", false, false) {
+		t.Fatalf("service callback status missing structured disallowed operation contracts: %+v", statusBody)
+	}
 	topics, ok := statusBody["business_notification_topics"].([]any)
 	if !ok || !anyBusinessNotificationTopicValid(topics, "room") || !anyBusinessNotificationTopicValid(topics, "battle.allocation") || !anyBusinessNotificationTopicValid(topics, "battle.ticket") || !anyBusinessNotificationTopicValid(topics, "settlement") || anyBusinessNotificationTopicValid(topics, "battle.result.submit") {
 		t.Fatalf("service callback status missing low-frequency business notification topic contract: %+v", statusBody)
@@ -1639,6 +1643,28 @@ func anyBusinessNotificationTopicValid(topics []any, want string) bool {
 			fields["service_callback"] == false &&
 			fields["high_frequency_battle_tick_allowed"] == false &&
 			fields["client_result_submit_allowed"] == false
+	}
+	return false
+}
+
+func anyDisallowedClientOperationContractValid(contracts []any, want string, serviceOnly bool, clientResultSubmit bool) bool {
+	for _, contract := range contracts {
+		fields, ok := contract.(map[string]any)
+		if !ok || fields["operation"] != want {
+			continue
+		}
+		reason, _ := fields["reason"].(string)
+		if strings.TrimSpace(reason) == "" {
+			return false
+		}
+		return fields["service_only"] == serviceOnly &&
+			fields["service_callback_required"] == serviceOnly &&
+			fields["player_session_allowed"] == false &&
+			fields["business_envelope_allowed"] == false &&
+			fields["client_rpc_allowed"] == false &&
+			fields["client_wss_allowed"] == false &&
+			fields["client_result_submit"] == clientResultSubmit &&
+			fields["server_authoritative"] == true
 	}
 	return false
 }
