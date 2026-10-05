@@ -4,10 +4,14 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
+	"gensoulkyo/runtime/battlespawn"
 	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/httpapi"
+	"gensoulkyo/runtime/lobbyws"
 	"gensoulkyo/runtime/storage"
 )
 
@@ -49,11 +53,36 @@ func main() {
 		service = wired.Service
 		handler = wired.Handler
 	}
+
+	lobbyEndpoint := strings.TrimSpace(os.Getenv("GENSOULKYO_LOBBY_ENDPOINT"))
+	if lobbyEndpoint == "" {
+		lobbyEndpoint = *addr
+	}
+	battleRuleset := strings.TrimSpace(os.Getenv("GENSOULKYO_BATTLE_RULESET"))
+	spawner := battlespawn.NewSpawner(battlespawn.Config{
+		BinaryPath:    strings.TrimSpace(os.Getenv(battlespawn.EnvBinary)),
+		AdvertiseHost: strings.TrimSpace(os.Getenv(battlespawn.EnvAdvertiseHost)),
+		LobbyEndpoint: lobbyEndpoint,
+		Ruleset:       battleRuleset,
+	})
+	lobby := lobbyws.New(lobbyws.Options{
+		Service:       service,
+		Spawner:       spawner,
+		LobbyEndpoint: lobbyEndpoint,
+		BattleRuleset: battleRuleset,
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/lobby/ws", lobby.HandleLobby)
+	mux.HandleFunc("/v1/battle/relay", lobby.HandleRelay)
+	mux.HandleFunc("/internal/battle/result", lobby.HandleBattleResult)
+	mux.Handle("/", handler)
+
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           handler,
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	log.Printf("Gensoulkyo %s listening on http://%s", core.ServerVersion, *addr)
+	log.Printf("Gensoulkyo %s listening on http://%s (lobby ws %s, battle bin %s)", core.ServerVersion, *addr, lobbyEndpoint, spawner.Config().BinaryPath)
 	log.Fatal(server.ListenAndServe())
 }
