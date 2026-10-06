@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -31,6 +32,10 @@ const (
 	EnvBinary = "GENSOULKYO_BATTLE_SERVER_BIN"
 	// EnvAdvertiseHost is the host advertised to clients for the spawned UDP endpoint.
 	EnvAdvertiseHost = "GENSOULKYO_BATTLE_ADVERTISE_HOST"
+	// EnvPortMin and EnvPortMax bound the UDP port range a spawned battle server
+	// may bind. When either is unset the OS picks an ephemeral port (--port 0).
+	EnvPortMin = "GENSOULKYO_BATTLE_PORT_MIN"
+	EnvPortMax = "GENSOULKYO_BATTLE_PORT_MAX"
 	// DefaultBinaryPath is used when EnvBinary is unset.
 	DefaultBinaryPath = "../PhK-BattleServer/build-linux/phk_battle_server"
 	// DefaultAdvertiseHost is used when EnvAdvertiseHost is unset.
@@ -41,6 +46,9 @@ const (
 	DefaultReadyTimeout = 10 * time.Second
 	// DefaultKillGrace bounds how long we wait for a graceful exit before SIGKILL.
 	DefaultKillGrace = 3 * time.Second
+	// DefaultPortPickAttempts bounds how many candidate ports we probe before
+	// falling back to an ephemeral port.
+	DefaultPortPickAttempts = 12
 )
 
 // SpawnRequest describes a per-match battle server process.
@@ -66,6 +74,14 @@ type Config struct {
 	LobbyEndpoint string
 	ReadyTimeout  time.Duration
 	KillGrace     time.Duration
+	// PortMin and PortMax, when both are in 1..65535 and PortMin <= PortMax,
+	// restrict the UDP port a spawned battle server binds. When unset (the
+	// default) the OS assigns an ephemeral port via --port 0.
+	PortMin int
+	PortMax int
+	// PortPickAttempts bounds how many candidate ports are probed before falling
+	// back to an ephemeral port. Zero uses DefaultPortPickAttempts.
+	PortPickAttempts int
 	// ExtraEnv is appended to the inherited environment for spawned processes.
 	ExtraEnv []string
 	// OnLine, when set, receives every stdout line emitted by the process.
@@ -96,7 +112,37 @@ func (c Config) withDefaults() Config {
 	if c.KillGrace <= 0 {
 		c.KillGrace = DefaultKillGrace
 	}
+	if c.PortPickAttempts <= 0 {
+		c.PortPickAttempts = DefaultPortPickAttempts
+	}
+	if c.PortMin <= 0 && c.PortMax <= 0 {
+		c.PortMin = envPort(EnvPortMin)
+		c.PortMax = envPort(EnvPortMax)
+	}
+	if !validPortRange(c.PortMin, c.PortMax) {
+		c.PortMin, c.PortMax = 0, 0
+	}
 	return c
+}
+
+func envPort(key string) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 || value > 65535 {
+		return 0
+	}
+	return value
+}
+
+func validPortRange(min int, max int) bool {
+	return min >= 1 && max <= 65535 && min <= max
+}
+
+func (c Config) hasPortRange() bool {
+	return validPortRange(c.PortMin, c.PortMax)
 }
 
 // Spawner tracks the battle server processes it started.
@@ -115,6 +161,45 @@ func NewSpawner(cfg Config) *Spawner {
 // Config exposes the resolved configuration (useful for tests and logging).
 func (s *Spawner) Config() Config { return s.cfg }
 
+// choosePort returns a concrete UDP port from the configured range, or 0 to let
+// the OS assign an ephemeral port (the default when no range is configured).
+//
+// A candidate is only accepted if it can be bound right now; this is a
+// best-effort probe, so a small race window with the child process remains and
+// callers must still tolerate a spawn failure.
+func (s *Spawner) choosePort() int {
+	cfg := s.cfg
+	if !cfg.hasPortRange() {
+		return 0
+	}
+	span := cfg.PortMax - cfg.PortMin + 1
+	attempts := cfg.PortPickAttempts
+	if attempts <= 0 {
+		attempts = DefaultPortPickAttempts
+	}
+	if attempts > span {
+		attempts = span
+	}
+	for i := 0; i < attempts; i++ {
+		candidate := cfg.PortMin + rand.Intn(span)
+		if udpPortAvailable(candidate) {
+			return candidate
+		}
+	}
+	return 0
+}
+
+// udpPortAvailable reports whether the given UDP port can currently be bound on
+// all interfaces.
+func udpPortAvailable(port int) bool {
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: port})
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
 // Process is a running battle server process.
 type Process struct {
 	MatchID  string
@@ -126,9 +211,9 @@ type Process struct {
 	waitDone chan struct{}
 	waitErr  error
 
-	stopOnce sync.Once
-	stopped  chan struct{}
-	killTTL  *time.Timer
+	stopOnce  sync.Once
+	stopped   chan struct{}
+	killTTL   *time.Timer
 	killGrace time.Duration
 }
 
@@ -166,8 +251,12 @@ func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) (*Process, error)
 	if ruleset == "" {
 		ruleset = cfg.Ruleset
 	}
+	port := req.Port
+	if port == 0 {
+		port = s.choosePort()
+	}
 	args := []string{
-		"--port", strconv.Itoa(req.Port),
+		"--port", strconv.Itoa(port),
 		"--match-id", matchID,
 		"--seed", strconv.FormatUint(req.Seed, 10),
 		"--players", strings.Join(req.PlayerIDs, ","),

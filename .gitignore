@@ -12,4 +12,6 @@ build/
 coverage/
 *.test
 *.out
+/gensoulkyo
+__pycache__/
 

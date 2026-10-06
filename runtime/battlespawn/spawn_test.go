@@ -3,6 +3,7 @@ package battlespawn
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"testing"
@@ -174,4 +175,104 @@ func TestSpawnerProcessExitAfterReady(t *testing.T) {
 		t.Fatalf("process should have exited on its own")
 	}
 	spawner.KillAll()
+}
+
+func TestConfigPortRangeFromEnv(t *testing.T) {
+	t.Setenv(EnvPortMin, "46000")
+	t.Setenv(EnvPortMax, "46099")
+	spawner := NewSpawner(Config{})
+	cfg := spawner.Config()
+	if cfg.PortMin != 46000 || cfg.PortMax != 46099 {
+		t.Fatalf("port range = [%d,%d], want [46000,46099]", cfg.PortMin, cfg.PortMax)
+	}
+	if !cfg.hasPortRange() {
+		t.Fatalf("expected a valid port range")
+	}
+}
+
+func TestConfigPortRangeInvalidFallsBackToEphemeral(t *testing.T) {
+	cases := []struct {
+		name string
+		min  string
+		max  string
+	}{
+		{"inverted", "47000", "46000"},
+		{"out-of-range", "70000", "70001"},
+		{"only-min", "46000", ""},
+		{"only-max", "", "46000"},
+		{"garbage", "abc", "def"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(EnvPortMin, tc.min)
+			t.Setenv(EnvPortMax, tc.max)
+			cfg := NewSpawner(Config{}).Config()
+			if cfg.hasPortRange() || cfg.PortMin != 0 || cfg.PortMax != 0 {
+				t.Fatalf("invalid range must be disabled, got [%d,%d]", cfg.PortMin, cfg.PortMax)
+			}
+		})
+	}
+}
+
+func TestSpawnerUsesConfiguredPortRange(t *testing.T) {
+	spawner := NewSpawner(Config{
+		BinaryPath:    testBinary(t),
+		AdvertiseHost: "10.0.0.9",
+		ReadyTimeout:  5 * time.Second,
+		KillGrace:     2 * time.Second,
+		PortMin:       46000,
+		PortMax:       46099,
+		ExtraEnv:      []string{"PHK_FAKE_BATTLE_SERVER=1", "PHK_FAKE_BATTLE_MODE=ready"},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	proc, err := spawner.Spawn(ctx, SpawnRequest{MatchID: "match_range", Port: 0})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer spawner.KillAll()
+	if proc.Port < 46000 || proc.Port > 46099 {
+		t.Fatalf("spawned port %d outside configured range [46000,46099]", proc.Port)
+	}
+	wantEndpoint := "10.0.0.9:" + strconv.Itoa(proc.Port)
+	if proc.Endpoint != wantEndpoint {
+		t.Fatalf("endpoint = %q, want %q", proc.Endpoint, wantEndpoint)
+	}
+}
+
+func TestSpawnerEphemeralPortWhenNoRange(t *testing.T) {
+	t.Setenv(EnvPortMin, "")
+	t.Setenv(EnvPortMax, "")
+	spawner := NewSpawner(Config{
+		BinaryPath:   testBinary(t),
+		ReadyTimeout: 5 * time.Second,
+		KillGrace:    2 * time.Second,
+		ExtraEnv:     []string{"PHK_FAKE_BATTLE_SERVER=1", "PHK_FAKE_BATTLE_MODE=ready"},
+	})
+	if spawner.choosePort() != 0 {
+		t.Fatalf("choosePort must return 0 when no range is configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	proc, err := spawner.Spawn(ctx, SpawnRequest{MatchID: "match_ephemeral", Port: 0})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer spawner.KillAll()
+	if proc.Port != 45678 {
+		t.Fatalf("fake server should fall back to its default port, got %d", proc.Port)
+	}
+}
+
+func TestUDPPortAvailable(t *testing.T) {
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		t.Fatalf("listen udp: %v", err)
+	}
+	defer conn.Close()
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	if udpPortAvailable(port) {
+		t.Fatalf("port %d is bound but reported available", port)
+	}
 }

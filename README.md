@@ -126,6 +126,46 @@ context contract used by room rules, Nakama RPC gating, and the HTTP fallback he
 including the allowed low-frequency `business_event_request_kinds` for WSS/status reads.
 Use Nakama service-origin RPC gating plus mTLS/private networking for production callbacks.
 
+## Remote Deployment Ports
+
+To let a client running on another machine reach a self-hosted Gensoulkyo
+server, the following ports must be reachable. `-addr` controls the HTTP bind
+address: use `-addr 0.0.0.0:7350` (not the `127.0.0.1` default) so the socket is
+not limited to loopback.
+
+| Port | Proto | Purpose | Required |
+| --- | --- | --- | --- |
+| 7350 | TCP | Lobby HTTP API, `/v1/lobby/ws`, `/v1/battle/relay`, `/internal/battle/result` | yes |
+| `GENSOULKYO_BATTLE_PORT_MIN`..`MAX` (e.g. 7400-7419) | UDP | Per-match `phk_battle_server` sockets for direct-UDP clients | only for direct UDP |
+| 22 | TCP | SSH (often mapped to a host port such as 6122) | optional |
+
+Notes:
+
+- The per-match battle server binds a UDP port chosen from
+  `GENSOULKYO_BATTLE_PORT_MIN`/`GENSOULKYO_BATTLE_PORT_MAX` when both are set;
+  otherwise the OS assigns a random ephemeral port (`--port 0`). Publish that
+  range as UDP forwards if clients dial the battle server directly.
+- Clients that cannot reach the UDP range can instead tunnel battle datagrams
+  through `/v1/battle/relay` (WebSocket over the TCP lobby port), which needs no
+  UDP forwarding.
+- The advertised endpoint host comes from `GENSOULKYO_BATTLE_ADVERTISE_HOST`
+  (default `127.0.0.1`); set it to the public hostname/IP clients should dial.
+- If the server runs in a NAT'd container (for example a Proxmox LXC), the host
+  must forward each port (TCP and/or UDP) to the container, or the client must
+  use an SSH tunnel.
+
+### CORS
+
+Browser clients are served cross-origin headers on `/v1/...` and `/internal/...`
+routes. `OPTIONS` preflight requests are answered with `204`.
+
+| Env | Default |
+| --- | --- |
+| `GENSOULKYO_CORS_ALLOW_ORIGIN` | `*` (comma-separated list accepted) |
+| `GENSOULKYO_CORS_ALLOW_METHODS` | `GET, POST, PUT, PATCH, DELETE, OPTIONS` |
+| `GENSOULKYO_CORS_ALLOW_HEADERS` | `Authorization, Content-Type, X-Session-Token, X-PhK-*` |
+| `GENSOULKYO_CORS_MAX_AGE` | `600` |
+
 ## Boundary
 
 This repository must not include commercial platform SDK files, private API keys, closed economy parameters, anti-fraud operational secrets, or unlicensed media.

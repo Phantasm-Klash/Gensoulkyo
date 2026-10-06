@@ -78,9 +78,12 @@ func main() {
 	mux.HandleFunc("/internal/battle/result", lobby.HandleBattleResult)
 	mux.Handle("/", handler)
 
+	cors := httpapi.CORSConfigFromEnv()
+	rootHandler := cors.Middleware(mux)
+
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("Gensoulkyo %s listening on http://%s (lobby ws %s, battle bin %s)", core.ServerVersion, *addr, lobbyEndpoint, spawner.Config().BinaryPath)
