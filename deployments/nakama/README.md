@@ -78,21 +78,50 @@ go run ./cmd/gensoulkyo \
 
 ```sh
 # 1. server health
-curl -s http://127.0.0.1:7350/health
+curl -s http://127.0.0.1:7350/healthcheck          # -> {}
 
-# 2. plugin loaded + RPC registered: authenticate then call a business RPC
-#    (device auth gives you a session token)
-curl -s -X POST http://127.0.0.1:7350/v2/account/authenticate/device \
+# 2. authenticate (device auth returns a session token)
+TOKEN=$(curl -s -X POST http://127.0.0.1:7350/v2/account/authenticate/device \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Basic ZGVmYXVsdGtleTo=' \
-  -d '{"id":"dev-verify-0001","create":true}'
+  -d '{"id":"dev-verify-0001","create":true}' \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 
-# 3. call a Gensoulkyo RPC through Nakama with the returned token
-curl -s -X POST http://127.0.0.1:7350/v2/rpc/auth.anonymous \
+# 3. call a Gensoulkyo RPC through Nakama
+NOW=$(date +%s%3N)
+PAYLOAD=$(printf '"{\\"business_envelope\\":{\\"version\\":\\"business-v0-scaffold\\",\\"seq\\":1,\\"timestamp_ms\\":%s,\\"nonce\\":\\"verify-nonce-0001\\",\\"op\\":\\"bootstrap\\",\\"key_id\\":\\"client-dev-key\\",\\"auth_tag\\":\\"%064d\\",\\"ciphertext_mode\\":\\"aead\\",\\"body_hash\\":\\"\\"}}" 0' "$NOW")
+curl -s -X POST http://127.0.0.1:7350/v2/rpc/bootstrap \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <session_token>' \
-  -d '{}'
+  -H "Authorization: Bearer $TOKEN" \
+  --data-raw "$PAYLOAD"
 ```
+
+Two details matter here:
+
+- Nakama's HTTP RPC payload is a **JSON string** (not a raw object), so the body is
+  double-encoded.
+- Authenticated business RPCs require a **business envelope** whose `key_id` is
+  registered in `business_envelope_keys`. The dev seed provides `client-dev-key`
+  for Nakama RPC/WSS and `dev-business-envelope-v0` for the HTTP fallback. An
+  unknown `key_id` still runs the business call but fails the audit insert on the
+  `fk_business_envelope_audit_key` foreign key, which shows up as `audit_errors`
+  in the `business.envelope.audit.status` RPC.
+
+A successful call returns
+`{"payload":"{\"ok\":true,...\"session_token\":\"nakama-http-session:...\"}"}`.
+Accepted and rejected envelopes are persisted to `business_envelope_audits`, so
+you can confirm the durable audit path with:
+
+```sh
+docker compose exec postgres \
+  psql -U postgres -d nakama \
+  -c "select accepted, endpoint, error_code, key_id from business_envelope_audits order by audit_id desc limit 5"
+```
+
+Nakama's HTTP RPC context forwards the authenticated `user_id` but no session id
+(`server/api_rpc.go` passes an empty session id). The binding derives a stable
+core session token (`nakama-http-session:<user_id>`) from the user id so HTTP
+calls reach the same session model as the WebSocket path.
 
 `docker compose logs nakama` prints
 `Gensoulkyo Nakama runtime registered N RPC handlers` when the plugin loads.
