@@ -89,6 +89,7 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	if rpcID == "" {
 		return errorResponse(http.StatusBadRequest, CodeInvalidRequest, "rpc id is required")
 	}
+	request.SessionID = resolveSessionID(request.UserID, request.SessionID)
 	if response := payloadErrorResponse(request.PayloadError); !response.OK {
 		return response
 	}
@@ -288,6 +289,7 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	if name == "" {
 		return errorResponse(http.StatusBadRequest, CodeInvalidRequest, "message name is required")
 	}
+	message.SessionID = resolveSessionID(message.UserID, message.SessionID)
 	if rpcRequiresServiceOrigin(name) {
 		handler.auditRejectedServiceOnlyWSS(message, name)
 		return errorResponse(http.StatusForbidden, CodeServiceOriginRequired, fmt.Sprintf("wss message %q is service-origin RPC only", message.Name))
@@ -418,6 +420,28 @@ func (handler *Handler) validateRPCEnvelope(request RPCRequest) Response {
 		return successResponse(nil)
 	}
 	return envelopeErrorResponse(result)
+}
+
+// nakamaHTTPSessionPrefix namespaces the core session tokens that Gensoulkyo
+// derives for Nakama's HTTP RPC path.
+//
+// Nakama forwards the authenticated user id into the runtime context on both
+// the HTTP RPC and WebSocket paths, but only the WebSocket path also forwards a
+// session id: server/api_rpc.go passes an empty session id when it builds the
+// RPC context. Core sessions are keyed by token, so HTTP RPC calls derive a
+// stable token from the user id to reach the same session model the WebSocket
+// path uses. WebSocket calls keep Nakama's session id verbatim.
+const nakamaHTTPSessionPrefix = "nakama-http-session:"
+
+// resolveSessionID returns the core session token for a Nakama call.
+func resolveSessionID(userID string, sessionID string) string {
+	if token := strings.TrimSpace(sessionID); token != "" {
+		return token
+	}
+	if uid := strings.TrimSpace(userID); uid != "" {
+		return nakamaHTTPSessionPrefix + uid
+	}
+	return ""
 }
 
 func (handler *Handler) ensureExternalRPCSession(request RPCRequest) Response {

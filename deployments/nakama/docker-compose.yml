@@ -42,12 +42,11 @@ services:
     entrypoint:
       - "/bin/sh"
       - "-ec"
-      - >
+      - |
         for f in /migrations/*.up.sql; do
-          echo "applying $$f";
-          psql -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nakama}
-               -v ON_ERROR_STOP=1 -f "$$f";
-        done;
+          echo "applying $$f"
+          psql -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nakama} -v ON_ERROR_STOP=1 -f "$$f"
+        done
         echo "gensoulkyo migrations applied"
     restart: "no"
 

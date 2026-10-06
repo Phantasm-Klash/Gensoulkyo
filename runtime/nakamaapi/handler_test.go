@@ -3157,3 +3157,57 @@ func (nakamaSQLCaptureRows) Close() error {
 func (nakamaSQLCaptureRows) Next(dest []driver.Value) error {
 	return io.EOF
 }
+
+func TestResolveSessionIDPrefersNakamaSessionID(t *testing.T) {
+	if got := resolveSessionID("user-1", "session-abc"); got != "session-abc" {
+		t.Fatalf("expected the Nakama session id to win, got %q", got)
+	}
+	if got := resolveSessionID("user-1", "  "); got != nakamaHTTPSessionPrefix+"user-1" {
+		t.Fatalf("expected a derived session token, got %q", got)
+	}
+	if got := resolveSessionID("  user-2  ", ""); got != nakamaHTTPSessionPrefix+"user-2" {
+		t.Fatalf("expected a trimmed derived session token, got %q", got)
+	}
+	if got := resolveSessionID("", ""); got != "" {
+		t.Fatalf("expected an empty session token, got %q", got)
+	}
+}
+
+func TestNakamaHTTPRPCWithoutSessionIDDerivesCoreSession(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+
+	// Nakama's HTTP RPC path (server/api_rpc.go) forwards the authenticated
+	// user id but passes an empty session id into the runtime context. The
+	// handler must still resolve a core session from the user id.
+	bootstrap := handler.HandleRPC(RPCRequest{
+		ID:      "bootstrap",
+		UserID:  "nakama-http-user-1",
+		Payload: envelopePayload(1, "nonce-http-bootstrap", "bootstrap", map[string]any{}),
+	})
+	if !bootstrap.OK || bootstrap.Status != 200 {
+		t.Fatalf("expected bootstrap on a derived session, got %+v", bootstrap)
+	}
+	if _, ok := bootstrap.Payload.(*core.BootstrapSnapshot); !ok {
+		t.Fatalf("expected bootstrap payload, got %T", bootstrap.Payload)
+	}
+
+	// The derived token is stable, so a second HTTP RPC reaches the same
+	// core session.
+	inventory := handler.HandleRPC(RPCRequest{
+		ID:      "inventory.get",
+		UserID:  "nakama-http-user-1",
+		Payload: envelopePayload(2, "nonce-http-inventory", "inventory_get", map[string]any{}),
+	})
+	if !inventory.OK || inventory.Status != 200 {
+		t.Fatalf("expected inventory read on the derived session, got %+v", inventory)
+	}
+
+	// Without a user id or session id the envelope still fails closed.
+	anonymous := handler.HandleRPC(RPCRequest{
+		ID:      "bootstrap",
+		Payload: envelopePayload(3, "nonce-http-anonymous", "bootstrap", map[string]any{}),
+	})
+	if anonymous.OK || anonymous.Status != 401 || anonymous.ErrorCode != security.CodeBusinessEnvelopeInvalid {
+		t.Fatalf("expected envelope session rejection without identity, got %+v", anonymous)
+	}
+}
