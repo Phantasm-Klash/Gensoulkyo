@@ -4,28 +4,36 @@ Nakama Go Runtime binding for the Gensoulkyo business server.
 
 This package is compiled only when the `nakama` build tag is enabled. The default local MVP stays a standard-library HTTP service, while this binding registers Nakama RPC entrypoints and forwards them into `runtime/nakamaapi`.
 
-Planned build shape:
+## Build shape
 
-```powershell
+`go.mod` durably pins `github.com/heroiclabs/nakama-common v1.48.0` and declares
+`go 1.27.1`, matching the `heroiclabs/nakama:3.41.0` server line, so the tag
+build runs out of the box:
+
+```sh
 go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...
 go build -tags nakama -buildmode=plugin -o gensoulkyo.so ./cmd/gensoulkyo_nakama
 ```
 
-Local validation found `github.com/heroiclabs/nakama-common@v1.34.0` to be the newest tested SDK baseline here that still supports the repository's Go 1.20 Docker image. Newer Nakama common releases currently require Go 1.23+ or later, so pin or bump this dependency together with the Go/Docker baseline before enabling this tag build in CI.
-
-For scoped validation without mutating the repository's `go.mod`/`go.sum`, run:
+Go plugins only load when the plugin and the Nakama server were built with the
+exact same Go toolchain, so the deployable artifact must be produced inside
+`heroiclabs/nakama-pluginbuilder:<version>` rather than a local Go install. Use
+`deployments/nakama/build-plugin.sh`, or the compose profile:
 
 ```sh
 docker-compose --profile nakama-tag-build run --rm nakama-tag-build
 ```
 
-If the default Go module proxy or checksum service is unreachable from the runner, use explicit disposable-container overrides:
+That profile runs the pluginbuilder matching the pinned Nakama version, applies
+the local PhK-Protocol replace, builds the Go Runtime plugin artifact, and never
+mutates the repository's `go.mod`/`go.sum`.
 
-```sh
-docker-compose --profile nakama-tag-build run --rm -e GOPROXY=https://goproxy.cn,direct -e GOSUMDB=off nakama-tag-build
-```
+If the default Go module proxy or checksum service is unreachable from the
+runner, the profile already defaults to `GOPROXY=https://goproxy.cn,direct` and
+`GOSUMDB=off`; override them with `GOPROXY=... GOSUMDB=... docker-compose ...`.
 
-That profile copies the repository into a temporary container workspace, applies the local PhK-Protocol replace, temporarily pins `github.com/heroiclabs/nakama-common/runtime` to `NAKAMA_COMMON_VERSION` (default `v1.34.0`), runs the Nakama tag tests, and builds the Go Runtime plugin artifact at `/tmp/gensoulkyo.so`.
+See `deployments/nakama/` for the full self-hosted Nakama + PostgreSQL stack
+(plugin build, migrations, server and web console).
 
 The binding is intentionally thin: Nakama SDK context/session extraction and JSON payload wrapping happen here; security checks, audit snapshots, and business dispatch stay in `runtime/nakamaapi`.
 

@@ -1,4 +1,4 @@
-FROM golang:1.20-bookworm AS test
+FROM golang:1.27-bookworm AS test
 
 WORKDIR /workspace/Gensoulkyo
 

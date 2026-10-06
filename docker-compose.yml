@@ -8,7 +8,7 @@ services:
       target: test
     working_dir: /workspace/Gensoulkyo
     environment:
-      GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+      GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     volumes:
       - .:/workspace/Gensoulkyo
       - ../PhK-Protocol:/workspace/PhK-Protocol:ro
@@ -32,33 +32,31 @@ services:
       - go-build-cache:/root/.cache/go-build
     command: ["go", "test", "./..."]
 
+  # Builds the Nakama Go runtime plugin with the pluginbuilder that matches the
+  # target Nakama server version, so the resulting .so passes Nakama's Go ABI
+  # check. See deployments/nakama/ for the full self-hosted Nakama stack.
   nakama-tag-build:
     profiles:
       - nakama-tag-build
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: test
+    image: heroiclabs/nakama-pluginbuilder:${NAKAMA_VERSION:-3.41.0}
+    working_dir: /workspace/Gensoulkyo
     environment:
-      GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-      GOSUMDB: ${GOSUMDB:-sum.golang.org}
-      NAKAMA_COMMON_VERSION: ${NAKAMA_COMMON_VERSION:-v1.34.0}
+      GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+      GOSUMDB: ${GOSUMDB:-off}
     volumes:
-      - .:/workspace/Gensoulkyo:ro
+      - .:/workspace/Gensoulkyo
       - ../PhK-Protocol:/workspace/PhK-Protocol:ro
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/root/.cache/go-build
     command:
-      - /bin/sh
-      - -ec
-      - |
-        rm -rf /tmp/gensoulkyo-nakama-build
-        cp -a /workspace/Gensoulkyo /tmp/gensoulkyo-nakama-build
-        cd /tmp/gensoulkyo-nakama-build
-        go mod edit -replace github.com/phantasm-klash/phk-protocol=/workspace/PhK-Protocol
-        go get github.com/heroiclabs/nakama-common/runtime@$${NAKAMA_COMMON_VERSION}
-        go test -tags nakama ./cmd/gensoulkyo_nakama ./runtime/...
-        go build -tags nakama -buildmode=plugin -o /tmp/gensoulkyo.so ./cmd/gensoulkyo_nakama
+      - "build"
+      - "-tags"
+      - "nakama"
+      - "-trimpath"
+      - "-buildmode=plugin"
+      - "-o"
+      - "/workspace/Gensoulkyo/gensoulkyo.so"
+      - "./cmd/gensoulkyo_nakama"
 
 volumes:
   go-mod-cache:

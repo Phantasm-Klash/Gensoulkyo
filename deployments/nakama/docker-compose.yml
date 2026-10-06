@@ -1,0 +1,86 @@
+# Self-hosted Nakama + PostgreSQL for Gensoulkyo.
+#
+# Usage (from this directory, on a host with the Docker Compose v2 plugin):
+#   ./build-plugin.sh                 # produces ./modules/gensoulkyo.so
+#   docker compose up -d              # starts postgres, applies migrations, starts nakama
+#   docker compose logs -f nakama
+#
+# Ports: 7349 gRPC, 7350 HTTP/WebSocket, 7351 web console.
+# Override the defaults with a local .env file (see .env.example).
+
+name: gensoulkyo-nakama
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16}-alpine
+    container_name: gensoulkyo_nakama_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nakama}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdb}
+    volumes:
+      - nakama_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nakama}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Applies the Gensoulkyo business/lobby/battle audit schema (.up.sql files)
+  # on top of the database that Nakama migrates. Idempotent, runs once and exits.
+  migrate:
+    image: postgres:${POSTGRES_VERSION:-16}-alpine
+    container_name: gensoulkyo_nakama_migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-localdb}
+    volumes:
+      - ../../migrations:/migrations:ro
+    entrypoint:
+      - "/bin/sh"
+      - "-ec"
+      - >
+        for f in /migrations/*.up.sql; do
+          echo "applying $$f";
+          psql -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nakama}
+               -v ON_ERROR_STOP=1 -f "$$f";
+        done;
+        echo "gensoulkyo migrations applied"
+    restart: "no"
+
+  nakama:
+    image: heroiclabs/nakama:${NAKAMA_VERSION:-3.41.0}
+    container_name: gensoulkyo_nakama
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./modules:/nakama/data/modules:ro
+      - ./local.yml:/nakama/data/local.yml:ro
+    entrypoint:
+      - "/bin/sh"
+      - "-ecx"
+      - >
+        /nakama/nakama migrate up
+        --database.address ${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-localdb}@postgres:5432/${POSTGRES_DB:-nakama}?sslmode=disable &&
+        exec /nakama/nakama
+        --config /nakama/data/local.yml
+        --database.address ${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-localdb}@postgres:5432/${POSTGRES_DB:-nakama}?sslmode=disable
+    ports:
+      - "${NAKAMA_GRPC_PORT:-7349}:7349"
+      - "${NAKAMA_HTTP_PORT:-7350}:7350"
+      - "${NAKAMA_CONSOLE_PORT:-7351}:7351"
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  nakama_pgdata:

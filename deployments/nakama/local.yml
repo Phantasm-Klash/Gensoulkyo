@@ -1,0 +1,30 @@
+# Gensoulkyo Nakama server configuration (self-hosted / test profile).
+#
+# Mounted read-only at /nakama/data/local.yml inside the heroiclabs/nakama
+# container. Values are intentionally development friendly; override
+# socket.server_key / runtime.http_key / session secrets for any deployment
+# reachable from untrusted networks. Every key here can also be overridden
+# with a NAKAMA_* environment variable (e.g. NAKAMA_SOCKET_SERVER_KEY).
+
+name: gensoulkyo
+
+logger:
+  level: "INFO"
+
+# Nakama loads *.so (Go plugin), *.js and *.lua runtime modules from this path.
+runtime:
+  path: "/nakama/data/modules"
+  # Server key used by trusted backend callers (HTTP RPC with ?http_key=...).
+  http_key: "defaulthttpkey"
+
+# Client-facing socket key. Clients authenticate against this key.
+socket:
+  server_key: "defaultkey"
+  max_message_size_bytes: 4096
+  max_request_size_bytes: 131072
+
+console:
+  max_message_size_bytes: 409600
+
+session:
+  token_expiry_sec: 7200 # 2 hours
