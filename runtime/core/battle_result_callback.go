@@ -94,6 +94,11 @@ func (s *Service) ApplyBattleResultCallback(req BattleResultCallback) (*BattleRe
 		s.recordBattleResultCallbackAuditLocked(match, allocation, req, "rejected", ErrorCode(err), now)
 		return nil, err
 	}
+	if match.Status != "running" {
+		err := newError(codeMatchState, "battle result requires a running match, got %s", match.Status)
+		s.recordBattleResultCallbackAuditLocked(match, allocation, req, "rejected", ErrorCode(err), now)
+		return nil, err
+	}
 
 	playerToUser := s.matchPlayerIDMapLocked(match)
 	winnerUserID := ""

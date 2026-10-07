@@ -846,6 +846,44 @@ func TestBattleResultSubmitVerifiesAllocationAndSettlesMatch(t *testing.T) {
 	}
 }
 
+func TestBattleResultSubmitRejectsLoadingMatch(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Signed Loading Alice")
+	bob := mustLogin(t, service, "Signed Loading Bob")
+	if _, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "signed-loading-alice-deck",
+		DeckSnapshot: validDeck("signed-loading-alice-deck"),
+	}); err != nil {
+		t.Fatalf("join alice: %v", err)
+	}
+	queue, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "signed-loading-bob-deck",
+		DeckSnapshot: validDeck("signed-loading-bob-deck"),
+	})
+	if err != nil {
+		t.Fatalf("join bob: %v", err)
+	}
+	if queue.MatchID == "" {
+		t.Fatalf("expected loading match after queue fill: %+v", queue)
+	}
+	allocation, err := service.BattleAllocation(alice.SessionToken, queue.MatchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	signed := signedBattleResultForAllocation(allocation)
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed}); ErrorCode(err) != codeMatchState {
+		t.Fatalf("expected loading match rejection, got %v", err)
+	}
+	service.mu.Lock()
+	match := service.matches[queue.MatchID]
+	service.mu.Unlock()
+	if match == nil || match.Status != "loading" || match.BattleResultHash != "" {
+		t.Fatalf("loading signed result must not settle match: %+v", match)
+	}
+}
+
 func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRecords(t *testing.T) {
 	now := time.Date(2026, 6, 28, 9, 0, 0, 0, time.UTC)
 	repo := &captureBattleLifecycleAuditRepo{}

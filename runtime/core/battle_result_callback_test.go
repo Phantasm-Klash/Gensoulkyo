@@ -277,6 +277,45 @@ func TestApplyBattleResultCallbackAuditsAcceptedDuplicateAndRejected(t *testing.
 	}
 }
 
+func TestApplyBattleResultCallbackRejectsLoadingMatch(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Callback Loading Alice")
+	bob := mustLogin(t, service, "Callback Loading Bob")
+	first, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "certification",
+		ActiveDeckID: "loading-alice-deck",
+		DeckSnapshot: validDeck("loading-alice-deck"),
+	})
+	if err != nil {
+		t.Fatalf("join alice: %v", err)
+	}
+	second, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "certification",
+		ActiveDeckID: "loading-bob-deck",
+		DeckSnapshot: validDeck("loading-bob-deck"),
+	})
+	if err != nil {
+		t.Fatalf("join bob: %v", err)
+	}
+	if first.MatchID != "" || second.MatchID == "" {
+		t.Fatalf("expected a loading match after queue fill: first=%+v second=%+v", first, second)
+	}
+	allocation, ok := service.BattleAllocationForMatch(second.MatchID)
+	if !ok {
+		t.Fatalf("allocation for match %s not found", second.MatchID)
+	}
+	req := battleResultCallbackForAllocation(t, allocation, allocation.Players[0].PlayerID)
+	if _, err := service.ApplyBattleResultCallback(req); ErrorCode(err) != codeMatchState {
+		t.Fatalf("expected loading match rejection, got %v", err)
+	}
+	service.mu.Lock()
+	match := service.matches[second.MatchID]
+	service.mu.Unlock()
+	if match == nil || match.Status != "loading" || match.BattleResultHash != "" {
+		t.Fatalf("loading callback must not settle match: %+v", match)
+	}
+}
+
 func TestApplyBattleResultCallbackUnknownMatch(t *testing.T) {
 	service := NewService(Config{})
 	if _, err := service.ApplyBattleResultCallback(BattleResultCallback{MatchID: "match_missing"}); err == nil {
