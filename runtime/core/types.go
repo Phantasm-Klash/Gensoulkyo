@@ -1396,3 +1396,85 @@ type ActivityClaimResult struct {
 	SettlementKey       string       `json:"settlement_key"`
 	SettledAt           time.Time    `json:"settled_at"`
 }
+
+// ---- 签到 Check-in / 商城 Shop ----
+
+// CheckinDayState 描述签到周期中某一天的状态。
+type CheckinDayState struct {
+	Day       int           `json:"day"`
+	Reward    CheckinReward `json:"reward"`
+	Claimed   bool          `json:"claimed"`
+	Claimable bool          `json:"claimable"`
+}
+
+// CheckinReward 描述签到奖励（gold/ticket 为钱包货币键）。
+type CheckinReward struct {
+	Gold   int `json:"gold,omitempty"`
+	Ticket int `json:"ticket,omitempty"`
+}
+
+// CheckinView 是 GET /v1/checkin 的响应。
+type CheckinView struct {
+	OK               bool              `json:"ok"`
+	UserID           string            `json:"user_id"`
+	CycleID          string            `json:"cycle_id"`
+	Days             []CheckinDayState `json:"days"`
+	Streak           int               `json:"streak"`
+	NextClaimableDay int               `json:"next_claimable_day"`
+	ServerTimeMs     int64             `json:"server_time_ms"`
+}
+
+// CheckinClaimView 是 POST /v1/checkin/claim 的响应。
+type CheckinClaimView struct {
+	OK               bool           `json:"ok"`
+	Day              int            `json:"day"`
+	Reward           CheckinReward  `json:"reward"`
+	Wallet           map[string]int `json:"wallet"`
+	Streak           int            `json:"streak"`
+	NextClaimableDay int            `json:"next_claimable_day"`
+	ServerTimeMs     int64          `json:"server_time_ms"`
+}
+
+// ShopItemView 描述商城中的一个商品。
+type ShopItemView struct {
+	ItemID      string         `json:"item_id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Price       map[string]int `json:"price"`
+	Grants      ShopGrant      `json:"grants"`
+	Stock       int            `json:"stock"`
+	Purchased   int            `json:"purchased"`
+	Purchasable bool           `json:"purchasable"`
+}
+
+// ShopGrant 描述购买后发放的内容。
+type ShopGrant struct {
+	Item  string `json:"item"`
+	Count int    `json:"count"`
+}
+
+// ShopView 是 GET /v1/shop 的响应。
+type ShopView struct {
+	OK           bool           `json:"ok"`
+	Currency     string         `json:"currency"`
+	Wallet       map[string]int `json:"wallet"`
+	Items        []ShopItemView `json:"items"`
+	ServerTimeMs int64          `json:"server_time_ms"`
+}
+
+// ShopPurchaseRequest 是 POST /v1/shop/purchase 的请求体。
+type ShopPurchaseRequest struct {
+	ItemID string `json:"item_id"`
+	Count  int    `json:"count"`
+}
+
+// ShopPurchaseView 是 POST /v1/shop/purchase 的响应。
+type ShopPurchaseView struct {
+	OK           bool           `json:"ok"`
+	ItemID       string         `json:"item_id"`
+	Count        int            `json:"count"`
+	Spent        map[string]int `json:"spent"`
+	Wallet       map[string]int `json:"wallet"`
+	Inventory    map[string]int `json:"inventory"`
+	ServerTimeMs int64          `json:"server_time_ms"`
+}

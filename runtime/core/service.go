@@ -15,47 +15,51 @@ import (
 )
 
 const (
-	codeUnauthorized     = "unauthorized"
-	codeNotFound         = "not_found"
-	codeInvalidRequest   = "invalid_request"
-	codeInvalidDeck      = "deck_invalid"
-	codeInvalidMode      = "mode_invalid"
-	codeForbiddenField   = "forbidden_field"
-	codeInvalidInput     = "input_invalid"
-	codeMatchState       = "match_state_invalid"
-	codeClaimIneligible  = "claim_ineligible"
-	codeRoomUnavailable  = "room_unavailable"
-	codeReconnectExpired = "reconnect_expired"
-	codeModeAction       = "mode_action_invalid"
-	codeBattleServer     = "battle_server_unavailable"
-	startX               = 480.0
-	startY               = 600.0
-	playfieldMinX        = 160.0
-	playfieldMaxX        = 800.0
-	playfieldMinY        = 48.0
-	playfieldMaxY        = 672.0
-	cardHandLimit        = 4
-	cardStartingEnergy   = 2.0
-	cardMaxEnergy        = 10.0
-	cardEnergyPerTick    = 0.0025
-	deckSize             = 20
-	maxCopiesPerCard     = 2
-	maxHighRareCards     = 6
-	maxInterferenceCards = 4
-	defaultDeckID        = "local_default"
-	defaultDeckName      = "Local Practice"
-	defaultDeckFormat    = "local_practice"
-	defaultChestPoolID   = "local_basic"
-	maxChestOpenCount    = 10
-	maxCardLevel         = 5
-	maxEventLogEntries   = 256
-	defaultSeasonID      = "local_s0"
-	defaultRatingCode    = "copper"
-	defaultRankScore     = 1000
-	top30Threshold       = 0.30
-	worldBossInstanceID  = "world_boss_local_s0_001"
-	worldBossMaxHP       = 100000
-	worldBossDailyLimit  = 3
+	codeUnauthorized      = "unauthorized"
+	codeNotFound          = "not_found"
+	codeInvalidRequest    = "invalid_request"
+	codeInvalidDeck       = "deck_invalid"
+	codeInvalidMode       = "mode_invalid"
+	codeForbiddenField    = "forbidden_field"
+	codeInvalidInput      = "input_invalid"
+	codeMatchState        = "match_state_invalid"
+	codeClaimIneligible   = "claim_ineligible"
+	codeRoomUnavailable   = "room_unavailable"
+	codeReconnectExpired  = "reconnect_expired"
+	codeModeAction        = "mode_action_invalid"
+	codeBattleServer      = "battle_server_unavailable"
+	codeInsufficientFunds = "insufficient_funds"
+	codeAlreadyClaimed    = "already_claimed"
+	codeOutOfWindow       = "out_of_window"
+	codeOutOfStock        = "out_of_stock"
+	startX                = 480.0
+	startY                = 600.0
+	playfieldMinX         = 160.0
+	playfieldMaxX         = 800.0
+	playfieldMinY         = 48.0
+	playfieldMaxY         = 672.0
+	cardHandLimit         = 4
+	cardStartingEnergy    = 2.0
+	cardMaxEnergy         = 10.0
+	cardEnergyPerTick     = 0.0025
+	deckSize              = 20
+	maxCopiesPerCard      = 2
+	maxHighRareCards      = 6
+	maxInterferenceCards  = 4
+	defaultDeckID         = "local_default"
+	defaultDeckName       = "Local Practice"
+	defaultDeckFormat     = "local_practice"
+	defaultChestPoolID    = "local_basic"
+	maxChestOpenCount     = 10
+	maxCardLevel          = 5
+	maxEventLogEntries    = 256
+	defaultSeasonID       = "local_s0"
+	defaultRatingCode     = "copper"
+	defaultRankScore      = 1000
+	top30Threshold        = 0.30
+	worldBossInstanceID   = "world_boss_local_s0_001"
+	worldBossMaxHP        = 100000
+	worldBossDailyLimit   = 3
 )
 
 const settlementAuthorityServiceSignedBattleResult = "service_signed_battle_result_callback"
@@ -158,24 +162,30 @@ type Service struct {
 }
 
 type userState struct {
-	UserID           string
-	SessionToken     string
-	DeviceID         string
-	DisplayName      string
-	CreatedAt        time.Time
-	LastSeenAt       time.Time
-	Wallet           map[string]int
-	Inventory        map[string]CardInventoryEntry
-	Decks            map[string]DeckRecord
-	ActiveDeckID     string
-	Chests           map[string]int
-	ChestPity        map[string]ChestPityState
-	ChestOpenings    []ChestOpeningRecord
-	LastChestResults []ChestOpenResult
-	Tasks            map[string]TaskState
-	Events           map[string]EventState
-	Leaderboards     map[string]LeaderboardRow
-	Certification    CertificationProfile
+	UserID             string
+	SessionToken       string
+	DeviceID           string
+	DisplayName        string
+	CreatedAt          time.Time
+	LastSeenAt         time.Time
+	Wallet             map[string]int
+	Inventory          map[string]CardInventoryEntry
+	Decks              map[string]DeckRecord
+	ActiveDeckID       string
+	Chests             map[string]int
+	ChestPity          map[string]ChestPityState
+	ChestOpenings      []ChestOpeningRecord
+	LastChestResults   []ChestOpenResult
+	Tasks              map[string]TaskState
+	Events             map[string]EventState
+	Leaderboards       map[string]LeaderboardRow
+	Certification      CertificationProfile
+	CheckinCycleDay    int
+	CheckinStreak      int
+	CheckinLastDay     string
+	CheckinClaimedDays map[string]int
+	ShopPurchased      map[string]int
+	ShopInventory      map[string]int
 }
 
 type queueTicket struct {
@@ -488,24 +498,28 @@ func (s *Service) LoginAnonymous(req AnonymousLoginRequest) (*AuthSession, error
 	token := s.nextIDLocked("session")
 	now := s.clock()
 	user := &userState{
-		UserID:           userID,
-		SessionToken:     token,
-		DeviceID:         strings.TrimSpace(req.DeviceID),
-		DisplayName:      displayName,
-		CreatedAt:        now,
-		LastSeenAt:       now,
-		Wallet:           map[string]int{"points": 0, "card_dust": 0, "chest_keys": 1},
-		Inventory:        defaultInventory(now),
-		Decks:            map[string]DeckRecord{},
-		ActiveDeckID:     defaultDeckID,
-		Chests:           defaultChests(),
-		ChestPity:        map[string]ChestPityState{},
-		ChestOpenings:    []ChestOpeningRecord{},
-		LastChestResults: []ChestOpenResult{},
-		Tasks:            defaultTasks(),
-		Events:           defaultEvents(),
-		Leaderboards:     defaultLeaderboards(),
-		Certification:    defaultCertificationProfile("", now),
+		UserID:             userID,
+		SessionToken:       token,
+		DeviceID:           strings.TrimSpace(req.DeviceID),
+		DisplayName:        displayName,
+		CreatedAt:          now,
+		LastSeenAt:         now,
+		Wallet:             map[string]int{"gold": 1000, "points": 0, "card_dust": 0, "chest_keys": 1},
+		Inventory:          defaultInventory(now),
+		Decks:              map[string]DeckRecord{},
+		ActiveDeckID:       defaultDeckID,
+		Chests:             defaultChests(),
+		ChestPity:          map[string]ChestPityState{},
+		ChestOpenings:      []ChestOpeningRecord{},
+		LastChestResults:   []ChestOpenResult{},
+		Tasks:              defaultTasks(),
+		Events:             defaultEvents(),
+		Leaderboards:       defaultLeaderboards(),
+		Certification:      defaultCertificationProfile("", now),
+		CheckinCycleDay:    1,
+		CheckinClaimedDays: map[string]int{},
+		ShopPurchased:      map[string]int{},
+		ShopInventory:      map[string]int{},
 	}
 	user.Certification.UserID = user.UserID
 	defaultDeck := defaultDeckRecord(now)
@@ -543,24 +557,28 @@ func (s *Service) LoginExternal(req ExternalSessionRequest) (*AuthSession, error
 			deviceID = "external"
 		}
 		user = &userState{
-			UserID:           userID,
-			SessionToken:     sessionToken,
-			DeviceID:         deviceID,
-			DisplayName:      displayName,
-			CreatedAt:        now,
-			LastSeenAt:       now,
-			Wallet:           map[string]int{"points": 0, "card_dust": 0, "chest_keys": 1},
-			Inventory:        defaultInventory(now),
-			Decks:            map[string]DeckRecord{},
-			ActiveDeckID:     defaultDeckID,
-			Chests:           defaultChests(),
-			ChestPity:        map[string]ChestPityState{},
-			ChestOpenings:    []ChestOpeningRecord{},
-			LastChestResults: []ChestOpenResult{},
-			Tasks:            defaultTasks(),
-			Events:           defaultEvents(),
-			Leaderboards:     defaultLeaderboards(),
-			Certification:    defaultCertificationProfile("", now),
+			UserID:             userID,
+			SessionToken:       sessionToken,
+			DeviceID:           deviceID,
+			DisplayName:        displayName,
+			CreatedAt:          now,
+			LastSeenAt:         now,
+			Wallet:             map[string]int{"gold": 1000, "points": 0, "card_dust": 0, "chest_keys": 1},
+			Inventory:          defaultInventory(now),
+			Decks:              map[string]DeckRecord{},
+			ActiveDeckID:       defaultDeckID,
+			Chests:             defaultChests(),
+			ChestPity:          map[string]ChestPityState{},
+			ChestOpenings:      []ChestOpeningRecord{},
+			LastChestResults:   []ChestOpenResult{},
+			Tasks:              defaultTasks(),
+			Events:             defaultEvents(),
+			Leaderboards:       defaultLeaderboards(),
+			Certification:      defaultCertificationProfile("", now),
+			CheckinCycleDay:    1,
+			CheckinClaimedDays: map[string]int{},
+			ShopPurchased:      map[string]int{},
+			ShopInventory:      map[string]int{},
 		}
 		user.Certification.UserID = user.UserID
 		defaultDeck := defaultDeckRecord(now)
@@ -7383,4 +7401,322 @@ func connectedPlayerCount(match *matchState) int {
 		}
 	}
 	return count
+}
+
+// ---- 签到 Check-in ----
+
+const (
+	checkinCycleDays   = 7
+	shopCurrencyGold   = "gold"
+	shopCurrencyTicket = "ticket"
+)
+
+// checkinRewardForDay 返回某一天的固定签到奖励。
+func checkinRewardForDay(day int) CheckinReward {
+	base := 100
+	switch day {
+	case 1:
+		base = 100
+	case 2:
+		base = 150
+	case 3:
+		base = 200
+	case 4:
+		base = 250
+	case 5:
+		base = 300
+	case 6:
+		base = 350
+	case 7:
+		base = 500
+	default:
+		base = 100
+	}
+	reward := CheckinReward{Gold: base}
+	if day == 3 || day == 7 {
+		reward.Ticket = 1
+	}
+	return reward
+}
+
+func checkinCycleID(now time.Time) string {
+	return now.UTC().Format("2006-01")
+}
+
+func checkinDayKey(now time.Time) string {
+	return now.UTC().Format("2006-01-02")
+}
+
+// checkinProjectionLocked 计算用户当前签到状态。
+// 返回：当前解锁到第几天（已领的最大天数）、streak、下一天、是否今天已领。
+func (s *Service) checkinProjectionLocked(user *userState) (int, int, int) {
+	dayKey := checkinDayKey(s.clock())
+	claimedDays := 0
+	if user.CheckinClaimedDays != nil {
+		claimedDays = user.CheckinClaimedDays[dayKey]
+	}
+	return claimedDays, user.CheckinStreak, user.CheckinCycleDay
+}
+
+// Checkin 返回签到状态快照。
+func (s *Service) Checkin(sessionToken string) (*CheckinView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	now := s.clock()
+	s.ensureUserWalletLocked(user)
+	nextDay := s.checkinNextDayLocked(user, now)
+	cycleDay := user.CheckinCycleDay
+	if cycleDay <= 0 {
+		cycleDay = 1
+	}
+	days := make([]CheckinDayState, 0, checkinCycleDays)
+	for day := 1; day <= checkinCycleDays; day++ {
+		claimed := day < cycleDay
+		claimable := day == nextDay
+		days = append(days, CheckinDayState{
+			Day:       day,
+			Reward:    checkinRewardForDay(day),
+			Claimed:   claimed,
+			Claimable: claimable,
+		})
+	}
+	return &CheckinView{
+		OK:               true,
+		UserID:           user.UserID,
+		CycleID:          checkinCycleID(now),
+		Days:             days,
+		Streak:           user.CheckinStreak,
+		NextClaimableDay: nextDay,
+		ServerTimeMs:     now.UnixMilli(),
+	}, nil
+}
+
+// checkinNextDayLocked 返回下一次可领取的 day（若今天已领则返回已领+1，封顶 7；新一周则 1）。
+func (s *Service) checkinNextDayLocked(user *userState, now time.Time) int {
+	cycleDay := user.CheckinCycleDay
+	if cycleDay <= 0 {
+		cycleDay = 1
+	}
+	if cycleDay > checkinCycleDays {
+		cycleDay = 1
+	}
+	return cycleDay
+}
+
+// ClaimCheckin 领取当天签到奖励。
+func (s *Service) ClaimCheckin(sessionToken string) (*CheckinClaimView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	now := s.clock()
+	s.ensureUserWalletLocked(user)
+	dayKey := checkinDayKey(now)
+	if user.CheckinLastDay == dayKey {
+		return nil, newError(codeAlreadyClaimed, "already claimed today")
+	}
+	day := s.checkinNextDayLocked(user, now)
+	if day < 1 || day > checkinCycleDays {
+		return nil, newError(codeOutOfWindow, "checkin window has passed")
+	}
+	reward := checkinRewardForDay(day)
+	if reward.Gold > 0 {
+		user.Wallet[shopCurrencyGold] += reward.Gold
+	}
+	if reward.Ticket > 0 {
+		user.Wallet[shopCurrencyTicket] += reward.Ticket
+	}
+	// streak：昨天领过则 +1，否则重置为 1。
+	yesterdayKey := now.AddDate(0, 0, -1).UTC().Format("2006-01-02")
+	if user.CheckinLastDay == yesterdayKey {
+		user.CheckinStreak++
+	} else {
+		user.CheckinStreak = 1
+	}
+	user.CheckinLastDay = dayKey
+	if user.CheckinClaimedDays == nil {
+		user.CheckinClaimedDays = map[string]int{}
+	}
+	user.CheckinClaimedDays[dayKey] = day
+	// 推进到第二天；满 7 天则开启新一轮。
+	if day >= checkinCycleDays {
+		user.CheckinCycleDay = 1
+	} else {
+		user.CheckinCycleDay = day + 1
+	}
+	nextDay := user.CheckinCycleDay
+	return &CheckinClaimView{
+		OK:               true,
+		Day:              day,
+		Reward:           reward,
+		Wallet:           copyIntMap(user.Wallet),
+		Streak:           user.CheckinStreak,
+		NextClaimableDay: nextDay,
+		ServerTimeMs:     now.UnixMilli(),
+	}, nil
+}
+
+// ---- 商城 Shop ----
+
+// shopItemDef 是商品的静态定义。
+type shopItemDef struct {
+	ItemID      string
+	Name        string
+	Description string
+	Price       map[string]int
+	GrantItem   string
+	GrantCount  int
+	Stock       int
+}
+
+func shopItemCatalog() []shopItemDef {
+	return []shopItemDef{
+		{
+			ItemID:      "stamina_potion",
+			Name:        "Stamina Potion",
+			Description: "Restores one ranked attempt.",
+			Price:       map[string]int{shopCurrencyGold: 300},
+			GrantItem:   "stamina_potion",
+			GrantCount:  1,
+			Stock:       -1,
+		},
+		{
+			ItemID:      "gacha_ticket",
+			Name:        "Gacha Ticket",
+			Description: "One pull on the standard banner.",
+			Price:       map[string]int{shopCurrencyGold: 500},
+			GrantItem:   "gacha_ticket",
+			GrantCount:  1,
+			Stock:       -1,
+		},
+		{
+			ItemID:      "card_dust_bundle",
+			Name:        "Card Dust Bundle",
+			Description: "A bundle of card dust for upgrades.",
+			Price:       map[string]int{shopCurrencyGold: 200},
+			GrantItem:   "card_dust",
+			GrantCount:  50,
+			Stock:       -1,
+		},
+	}
+}
+
+func shopItemByID(itemID string) (shopItemDef, bool) {
+	for _, def := range shopItemCatalog() {
+		if def.ItemID == itemID {
+			return def, true
+		}
+	}
+	return shopItemDef{}, false
+}
+
+func (s *Service) ensureUserWalletLocked(user *userState) {
+	if user.Wallet == nil {
+		user.Wallet = map[string]int{}
+	}
+	if user.ShopPurchased == nil {
+		user.ShopPurchased = map[string]int{}
+	}
+}
+
+// Shop 返回商城列表。
+func (s *Service) Shop(sessionToken string) (*ShopView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	s.ensureUserWalletLocked(user)
+	items := make([]ShopItemView, 0, len(shopItemCatalog()))
+	for _, def := range shopItemCatalog() {
+		purchasable := def.Stock != 0 && s.walletCovers(user.Wallet, def.Price)
+		items = append(items, ShopItemView{
+			ItemID:      def.ItemID,
+			Name:        def.Name,
+			Description: def.Description,
+			Price:       copyIntMap(def.Price),
+			Grants:      ShopGrant{Item: def.GrantItem, Count: def.GrantCount},
+			Stock:       def.Stock,
+			Purchased:   user.ShopPurchased[def.ItemID],
+			Purchasable: purchasable,
+		})
+	}
+	return &ShopView{
+		OK:           true,
+		Currency:     shopCurrencyGold,
+		Wallet:       copyIntMap(user.Wallet),
+		Items:        items,
+		ServerTimeMs: s.clock().UnixMilli(),
+	}, nil
+}
+
+// PurchaseShopItem 购买商品。
+func (s *Service) PurchaseShopItem(sessionToken string, req ShopPurchaseRequest) (*ShopPurchaseView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	s.ensureUserWalletLocked(user)
+	itemID := strings.TrimSpace(req.ItemID)
+	if itemID == "" {
+		return nil, newError(codeInvalidRequest, "item_id is required")
+	}
+	def, ok := shopItemByID(itemID)
+	if !ok {
+		return nil, newError(codeNotFound, "item not found")
+	}
+	count := req.Count
+	if count <= 0 {
+		count = 1
+	}
+	if def.Stock >= 0 && count > def.Stock-user.ShopPurchased[itemID] {
+		return nil, newError(codeOutOfStock, "item is out of stock")
+	}
+	cost := map[string]int{}
+	for key, amount := range def.Price {
+		cost[key] = amount * count
+	}
+	if !s.walletCovers(user.Wallet, cost) {
+		return nil, newError(codeInsufficientFunds, "insufficient funds")
+	}
+	for key, amount := range cost {
+		user.Wallet[key] -= amount
+	}
+	grantCount := def.GrantCount * count
+	if user.ShopInventory == nil {
+		user.ShopInventory = map[string]int{}
+	}
+	user.ShopInventory[def.GrantItem] += grantCount
+	user.ShopPurchased[itemID] += count
+	return &ShopPurchaseView{
+		OK:           true,
+		ItemID:       itemID,
+		Count:        count,
+		Spent:        cost,
+		Wallet:       copyIntMap(user.Wallet),
+		Inventory:    copyIntMap(user.ShopInventory),
+		ServerTimeMs: s.clock().UnixMilli(),
+	}, nil
+}
+
+func (s *Service) walletCovers(wallet map[string]int, cost map[string]int) bool {
+	for key, amount := range cost {
+		if wallet[key] < amount {
+			return false
+		}
+	}
+	return true
 }

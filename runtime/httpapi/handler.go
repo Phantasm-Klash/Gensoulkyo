@@ -180,6 +180,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.claimActivity(w, r)
 		return
 	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "checkin" && r.Method == http.MethodGet {
+		h.checkin(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "checkin" && segments[2] == "claim" && r.Method == http.MethodPost {
+		h.claimCheckin(w, r)
+		return
+	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "shop" && r.Method == http.MethodGet {
+		h.shop(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "shop" && segments[2] == "purchase" && r.Method == http.MethodPost {
+		h.purchaseShopItem(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "servers" && r.Method == http.MethodGet {
 		h.battleServers(w, r)
 		return
@@ -711,6 +727,49 @@ func (h *Handler) claimActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) checkin(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.Checkin(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) claimCheckin(w http.ResponseWriter, r *http.Request) {
+	raw := map[string]any{}
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
+	resp, err := h.service.ClaimCheckin(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) shop(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.Shop(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) purchaseShopItem(w http.ResponseWriter, r *http.Request) {
+	var req core.ShopPurchaseRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.PurchaseShopItem(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
 func (h *Handler) battleServers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.service.BattleServers())
 }
@@ -964,6 +1023,12 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 		return false
 	}
 	if len(segments) == 3 && segments[1] == "security" && (segments[2] == "battle-audit" || segments[2] == "lobby-audit") && method == http.MethodGet {
+		return false
+	}
+	if method == http.MethodPost && len(segments) == 3 && segments[1] == "checkin" && segments[2] == "claim" {
+		return false
+	}
+	if method == http.MethodPost && len(segments) == 3 && segments[1] == "shop" && segments[2] == "purchase" {
 		return false
 	}
 	return true
