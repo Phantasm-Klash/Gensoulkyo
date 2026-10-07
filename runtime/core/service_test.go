@@ -3913,3 +3913,143 @@ func verifySignedBattleTicket(t *testing.T, signed *SignedBattleTicket) bool {
 	}
 	return ed25519.Verify(ed25519.PublicKey(publicKey), payload, signature)
 }
+
+func TestBattleAgentAssignmentsReportsLiveMatches(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "agent-battle-1",
+		Endpoint:       "203.0.113.10:7400",
+		Region:         "raksmart",
+		BuildID:        "battle-agent-test",
+		Capacity:       4,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register battle server: %v", err)
+	}
+
+	if _, err := service.BattleAgentAssignments("missing-battle-server"); ErrorCode(err) != codeNotFound {
+		t.Fatalf("unknown battle server must be rejected, got %v", err)
+	}
+	if _, err := service.BattleAgentAssignments("   "); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("blank battle server id must be rejected, got %v", err)
+	}
+
+	empty, err := service.BattleAgentAssignments("agent-battle-1")
+	if err != nil {
+		t.Fatalf("empty assignments: %v", err)
+	}
+	if !empty.OK || len(empty.Assignments) != 0 || empty.Endpoint != "203.0.113.10:7400" || !empty.ServerAuthoritative {
+		t.Fatalf("empty assignment response invalid: %+v", empty)
+	}
+
+	alice := mustLogin(t, service, "Agent Alice")
+	bob := mustLogin(t, service, "Agent Bob")
+	if _, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "agent_alice_deck",
+		DeckSnapshot: validDeck("agent_alice_deck"),
+	}); err != nil {
+		t.Fatalf("join alice: %v", err)
+	}
+	queued, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "agent_bob_deck",
+		DeckSnapshot: validDeck("agent_bob_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join bob: %v", err)
+	}
+	if queued.MatchID == "" || queued.BattleAllocation == nil {
+		t.Fatalf("expected matched queue with allocation: %+v", queued)
+	}
+
+	assignments, err := service.BattleAgentAssignments("agent-battle-1")
+	if err != nil {
+		t.Fatalf("assignments after match: %v", err)
+	}
+	if len(assignments.Assignments) != 1 {
+		t.Fatalf("expected exactly one live assignment, got %+v", assignments.Assignments)
+	}
+	item := assignments.Assignments[0]
+	if item.MatchID != queued.MatchID || item.Endpoint != "203.0.113.10:7400" || item.ModeID != "pvp_duel" {
+		t.Fatalf("assignment mismatch: %+v (match want %s)", item, queued.MatchID)
+	}
+	if item.ModeConfigHash == "" || item.ServerSeedHex == "" {
+		t.Fatalf("assignment must carry seed hash and config hash: %+v", item)
+	}
+	if len(item.PlayerIDs) != 2 {
+		t.Fatalf("assignment must carry the player roster: %+v", item.PlayerIDs)
+	}
+}
+
+func TestBattleAgentAssignmentsExpiresStaleAllocations(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	clockNow := now
+	service := NewService(Config{Clock: func() time.Time { return clockNow }})
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "agent-battle-ttl",
+		Endpoint:       "203.0.113.20:7400",
+		Region:         "raksmart",
+		BuildID:        "battle-agent-ttl",
+		Capacity:       4,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register battle server: %v", err)
+	}
+
+	alice := mustLogin(t, service, "TTL Alice")
+	bob := mustLogin(t, service, "TTL Bob")
+	if _, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "ttl_alice_deck",
+		DeckSnapshot: validDeck("ttl_alice_deck"),
+	}); err != nil {
+		t.Fatalf("join alice: %v", err)
+	}
+	queued, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "ttl_bob_deck",
+		DeckSnapshot: validDeck("ttl_bob_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join bob: %v", err)
+	}
+	if queued.MatchID == "" {
+		t.Fatalf("expected a matched queue: %+v", queued)
+	}
+
+	// Fresh allocation is live.
+	live, err := service.BattleAgentAssignments("agent-battle-ttl")
+	if err != nil {
+		t.Fatalf("fresh assignments: %v", err)
+	}
+	if len(live.Assignments) != 1 {
+		t.Fatalf("fresh allocation must be live, got %+v", live.Assignments)
+	}
+
+	// Advance past the TTL without ever submitting a result.
+	clockNow = now.Add(battleAllocationTTL + time.Minute)
+	expired, err := service.BattleAgentAssignments("agent-battle-ttl")
+	if err != nil {
+		t.Fatalf("expired assignments: %v", err)
+	}
+	if len(expired.Assignments) != 0 {
+		t.Fatalf("stale allocation must drop out of the live set, got %+v", expired.Assignments)
+	}
+
+	// The match must be settled as a no-contest so it stops being re-spawned.
+	service.mu.Lock()
+	match := service.matches[queued.MatchID]
+	if match == nil {
+		service.mu.Unlock()
+		t.Fatalf("match %s disappeared", queued.MatchID)
+	}
+	if match.EndedAt.IsZero() {
+		service.mu.Unlock()
+		t.Fatalf("abandoned match must be ended")
+	}
+	service.mu.Unlock()
+}

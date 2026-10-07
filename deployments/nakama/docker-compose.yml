@@ -58,6 +58,11 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    environment:
+      # Shared secret that out-of-process battle servers present (via the
+      # X-Gensoulkyo-Service-Key header or service_key query parameter) to act
+      # with service-to-service authority. Override in production.
+      GENSOULKYO_SERVICE_CALLBACK_KEY: ${GENSOULKYO_SERVICE_CALLBACK_KEY:-defaulthttpkey}
     volumes:
       - ./modules:/nakama/data/modules:ro
       - ./local.yml:/nakama/data/local.yml:ro

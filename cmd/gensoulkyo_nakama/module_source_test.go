@@ -143,7 +143,13 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 		t.Fatalf("public Nakama RPC binding must not mark every RPC as service-origin")
 	}
 	for _, expected := range []string{
-		"Service:      isServiceOriginRPC(ctx, rpcID)",
+		"Service:      isServiceCall(ctx, rpcID)",
+		"func isServiceCall(ctx context.Context, rpcID string) bool",
+		"if isServiceOriginRPC(ctx, rpcID) {",
+		"return externalServiceKeyMatches(ctx)",
+		"func externalServiceKeyMatches(ctx context.Context) bool",
+		"runtime.RUNTIME_CTX_HEADERS",
+		"runtime.RUNTIME_CTX_QUERY_PARAMS",
 		"var serviceOriginRPCIDs = serviceOriginRPCIDSet()",
 		"func isServiceOriginRPC(ctx context.Context, rpcID string) bool",
 		"func serviceOriginRPCIDSet() map[string]struct{}",

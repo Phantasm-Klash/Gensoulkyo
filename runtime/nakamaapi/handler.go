@@ -250,6 +250,9 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.BattleServerOffline(req) })
+	case "battle.agent.assignments":
+		battleServerID := fieldString(body, "battle_server_id", "battleServerId")
+		return handler.call(func() (any, error) { return handler.service.BattleAgentAssignments(battleServerID) })
 	case "battle.servers":
 		return successResponse(handler.service.BattleServers())
 	case "business.envelope.audit.status":

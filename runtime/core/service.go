@@ -2032,6 +2032,100 @@ func (s *Service) BattleTicket(sessionToken string, matchID string) (*SignedBatt
 	return &copy, nil
 }
 
+// BattleAgentAssignments returns the live match allocations currently routed to
+// the given battle server. An out-of-process battle agent polls this to learn
+// which matches it must spawn a battle process for, and which endpoint clients
+// have already been told to dial.
+//
+// Only allocations whose match is still active are returned; settled matches
+// drop out automatically so the agent can reap the corresponding process.
+// battleAllocationTTL bounds how long a match may sit in the live allocation
+// set without producing a result. A battle server that dies before its match
+// finishes (crash, host reboot, agent restart) would otherwise leave the match
+// "live" forever, so every agent poll would re-spawn it. Once an allocation is
+// older than this TTL it is abandoned: the match is settled as a no-contest so
+// it leaves the live set and is not re-spawned.
+const battleAllocationTTL = 15 * time.Minute
+
+// expireStaleAllocationsLocked settles matches whose allocation has outlived
+// battleAllocationTTL without a result. Callers must hold s.mu.
+func (s *Service) expireStaleAllocationsLocked(now time.Time) {
+	for matchID, alloc := range s.battleAllocations {
+		if alloc == nil || alloc.AllocatedAt.IsZero() {
+			continue
+		}
+		if now.Sub(alloc.AllocatedAt) < battleAllocationTTL {
+			continue
+		}
+		match := s.matches[matchID]
+		if match == nil {
+			delete(s.battleAllocations, matchID)
+			continue
+		}
+		if !match.EndedAt.IsZero() {
+			continue
+		}
+		s.settleMatchLocked(match)
+		appendMatchEventLocked(match, MatchEvent{Type: "match_abandoned", Tick: match.Tick})
+	}
+}
+
+func (s *Service) BattleAgentAssignments(battleServerID string) (*BattleAgentAssignmentsResponse, error) {
+	battleServerID = strings.TrimSpace(battleServerID)
+	if battleServerID == "" {
+		return nil, newError(codeInvalidRequest, "battle_server_id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	server := s.battleServers[battleServerID]
+	if server == nil {
+		return nil, newError(codeNotFound, "battle server %q not found", battleServerID)
+	}
+
+	s.expireStaleAllocationsLocked(s.clock())
+
+	assignments := make([]BattleAgentAssignment, 0, len(s.battleAllocations))
+	for matchID, alloc := range s.battleAllocations {
+		if alloc == nil || alloc.BattleServerID != battleServerID {
+			continue
+		}
+		match := s.matches[matchID]
+		if match == nil || !match.EndedAt.IsZero() {
+			continue
+		}
+		players := make([]BattleAgentPlayer, 0, len(alloc.Players))
+		for _, player := range alloc.Players {
+			players = append(players, BattleAgentPlayer{
+				UserID:      player.UserID,
+				PlayerID:    player.PlayerID,
+				DisplayName: player.DisplayName,
+			})
+		}
+		assignments = append(assignments, BattleAgentAssignment{
+			MatchID:        alloc.MatchID,
+			ModeID:         alloc.ModeID,
+			Ruleset:        match.RulesetVersion,
+			Endpoint:       alloc.Endpoint,
+			ServerSeedHex:  alloc.ServerSeedHex,
+			ModeConfigHash: alloc.ModeConfigHash,
+			PlayerIDs:      append([]string{}, match.PlayerIDs...),
+			Players:        players,
+			AllocatedAt:    alloc.AllocatedAt,
+		})
+	}
+	sort.Slice(assignments, func(i, j int) bool { return assignments[i].MatchID < assignments[j].MatchID })
+	return &BattleAgentAssignmentsResponse{
+		OK:                  true,
+		Version:             currentVersionStamp(),
+		BattleServerID:      battleServerID,
+		Endpoint:            server.Endpoint,
+		Assignments:         assignments,
+		ServerTime:          s.clock(),
+		ServerAuthoritative: true,
+	}, nil
+}
+
 func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTicketConsumeResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -7051,6 +7145,7 @@ func disallowedClientOperations() []string {
 		"battle.servers.register",
 		"battle.servers.heartbeat",
 		"battle.servers.offline",
+		"battle.agent.assignments",
 	}
 }
 
@@ -7063,6 +7158,7 @@ func serviceCallbackOperations() []string {
 		"battle.servers.register",
 		"battle.servers.heartbeat",
 		"battle.servers.offline",
+		"battle.agent.assignments",
 		"battle.ticket.consume",
 		"battle.result.submit",
 	}

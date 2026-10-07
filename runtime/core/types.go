@@ -338,6 +338,44 @@ type BattleServerAllocation struct {
 	ServerAuthoritative bool                     `json:"server_authoritative"`
 }
 
+// BattleAgentAssignment describes one live match an out-of-process battle
+// agent must have a battle process running for. It is the agent-facing view of
+// a BattleServerAllocation: endpoint + seed + roster, plus the ruleset the
+// process must be started with.
+type BattleAgentAssignment struct {
+	MatchID        string   `json:"match_id"`
+	ModeID         string   `json:"mode_id"`
+	Ruleset        string   `json:"ruleset,omitempty"`
+	Endpoint       string   `json:"endpoint"`
+	ServerSeedHex  string   `json:"server_seed_hex"`
+	ModeConfigHash string   `json:"mode_config_hash"`
+	PlayerIDs      []string `json:"player_ids"`
+	// Players carries the server-authoritative player refs. PlayerID is the
+	// value a battle result must echo back; UserID is the Nakama user.
+	Players     []BattleAgentPlayer `json:"players"`
+	AllocatedAt time.Time           `json:"allocated_at"`
+}
+
+// BattleAgentPlayer is the agent-facing view of an allocated player. The
+// PlayerID is derived by core (p-<hash>) and is the identifier a submitted
+// battle result must use; UserID is the underlying Nakama user.
+type BattleAgentPlayer struct {
+	UserID      string `json:"user_id"`
+	PlayerID    string `json:"player_id"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// BattleAgentAssignmentsResponse is the reply to battle.agent.assignments.
+type BattleAgentAssignmentsResponse struct {
+	OK                  bool                    `json:"ok"`
+	Version             VersionStamp            `json:"version"`
+	BattleServerID      string                  `json:"battle_server_id"`
+	Endpoint            string                  `json:"endpoint"`
+	Assignments         []BattleAgentAssignment `json:"assignments"`
+	ServerTime          time.Time               `json:"server_time"`
+	ServerAuthoritative bool                    `json:"server_authoritative"`
+}
+
 type BattleTicket struct {
 	Version             VersionStamp `json:"version"`
 	TicketID            string       `json:"ticket_id"`
