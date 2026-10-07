@@ -36,19 +36,59 @@ func playerIDsByUser(t *testing.T, service *Service, matchID string, users ...st
 	return out
 }
 
+func battleResultCallbackForAllocation(t *testing.T, allocation *BattleServerAllocation, winnerPlayerID string) BattleResultCallback {
+	t.Helper()
+	if allocation == nil {
+		t.Fatal("battle allocation is nil")
+	}
+	if len(allocation.Players) == 0 {
+		t.Fatal("battle allocation has no players")
+	}
+	if winnerPlayerID == "" {
+		winnerPlayerID = allocation.Players[0].PlayerID
+	}
+	players := make([]BattleResultPlayer, 0, len(allocation.Players))
+	for index, player := range allocation.Players {
+		bossCurrentHP := int64(250)
+		if player.PlayerID == winnerPlayerID {
+			bossCurrentHP = 0
+		}
+		players = append(players, BattleResultPlayer{
+			PlayerID:      player.PlayerID,
+			DamageDealt:   int64(1000 - index*200),
+			BossCurrentHP: bossCurrentHP,
+		})
+	}
+	return BattleResultCallback{
+		MatchID:        allocation.MatchID,
+		ModeID:         allocation.ModeID,
+		RulesetVersion: allocation.Version.RulesetVersion,
+		MatchSeed:      uint64(allocation.ServerSeed),
+		WinnerPlayerID: winnerPlayerID,
+		WinnerTick:     1200,
+		StateHash:      "sha256:callback-state",
+		Players:        players,
+	}
+}
+
 func TestApplyBattleResultCallbackSettlesAndIsIdempotent(t *testing.T) {
 	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
 	service := NewService(Config{Clock: func() time.Time { return now }})
 	alice := mustLogin(t, service, "Alice")
 	bob := mustLogin(t, service, "Bob")
 	matchID := runningMatch(t, service, alice, bob)
+	allocation, ok := service.BattleAllocationForMatch(matchID)
+	if !ok {
+		t.Fatalf("allocation for match %s not found", matchID)
+	}
 	ids := playerIDsByUser(t, service, matchID, alice.UserID, bob.UserID)
 	alicePlayer, bobPlayer := ids[alice.UserID], ids[bob.UserID]
 
 	req := BattleResultCallback{
 		MatchID:        matchID,
-		ModeID:         "mvp_boss_race",
-		RulesetVersion: RulesetVersion,
+		ModeID:         allocation.ModeID,
+		RulesetVersion: allocation.Version.RulesetVersion,
+		MatchSeed:      uint64(allocation.ServerSeed),
 		WinnerPlayerID: alicePlayer,
 		WinnerTick:     1200,
 		StateHash:      "sha256:state-1",
@@ -102,6 +142,177 @@ func TestApplyBattleResultCallbackSettlesAndIsIdempotent(t *testing.T) {
 	conflicting.StateHash = "sha256:other"
 	if _, err := service.ApplyBattleResultCallback(conflicting); err == nil {
 		t.Fatalf("expected conflict error for a different state hash")
+	}
+}
+
+func TestApplyBattleResultCallbackRejectsAllocationContractMismatch(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Callback Contract Alice")
+	bob := mustLogin(t, service, "Callback Contract Bob")
+	matchID := runningMatch(t, service, alice, bob)
+	allocation, ok := service.BattleAllocationForMatch(matchID)
+	if !ok {
+		t.Fatalf("allocation for match %s not found", matchID)
+	}
+	valid := battleResultCallbackForAllocation(t, allocation, allocation.Players[0].PlayerID)
+
+	tests := []struct {
+		name   string
+		code   string
+		mutate func(*BattleResultCallback)
+	}{
+		{
+			name: "mode",
+			code: codeInvalidMode,
+			mutate: func(req *BattleResultCallback) {
+				req.ModeID = "mode-tampered"
+			},
+		},
+		{
+			name: "ruleset",
+			code: codeInvalidRequest,
+			mutate: func(req *BattleResultCallback) {
+				req.RulesetVersion = "ruleset-tampered"
+			},
+		},
+		{
+			name: "seed",
+			code: codeInvalidRequest,
+			mutate: func(req *BattleResultCallback) {
+				req.MatchSeed++
+			},
+		},
+		{
+			name: "state_hash",
+			code: codeInvalidRequest,
+			mutate: func(req *BattleResultCallback) {
+				req.StateHash = ""
+			},
+		},
+		{
+			name: "players",
+			code: codeInvalidRequest,
+			mutate: func(req *BattleResultCallback) {
+				req.Players = req.Players[:1]
+			},
+		},
+		{
+			name: "winner",
+			code: codeInvalidRequest,
+			mutate: func(req *BattleResultCallback) {
+				req.WinnerPlayerID = "player-tampered"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := valid
+			req.Players = append([]BattleResultPlayer(nil), valid.Players...)
+			test.mutate(&req)
+			if _, err := service.ApplyBattleResultCallback(req); ErrorCode(err) != test.code {
+				t.Fatalf("expected %s, got %v", test.code, err)
+			}
+		})
+	}
+
+	service.mu.Lock()
+	match := service.matches[matchID]
+	service.mu.Unlock()
+	if match == nil || match.Status == "ended" || match.BattleResultHash != "" {
+		t.Fatalf("rejected callbacks must not settle the match: %+v", match)
+	}
+}
+
+func TestApplyBattleResultCallbackAuditsAcceptedDuplicateAndRejected(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                    func() time.Time { return now },
+		BattleLifecycleAuditRepo: repo,
+	})
+	alice := mustLogin(t, service, "Callback Audit Alice")
+	bob := mustLogin(t, service, "Callback Audit Bob")
+	matchID := runningMatch(t, service, alice, bob)
+	allocation, ok := service.BattleAllocationForMatch(matchID)
+	if !ok {
+		t.Fatalf("allocation for match %s not found", matchID)
+	}
+	valid := battleResultCallbackForAllocation(t, allocation, allocation.Players[0].PlayerID)
+
+	rejected := valid
+	rejected.StateHash = ""
+	if _, err := service.ApplyBattleResultCallback(rejected); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("expected rejected callback, got %v", err)
+	}
+	if len(repo.results) != 1 || repo.results[0].Status != "rejected" || repo.results[0].RejectReason != codeInvalidRequest {
+		t.Fatalf("rejected callback audit invalid: %+v", repo.results)
+	}
+
+	accepted, err := service.ApplyBattleResultCallback(valid)
+	if err != nil {
+		t.Fatalf("accepted callback: %v", err)
+	}
+	if !accepted.OK || accepted.Duplicate {
+		t.Fatalf("unexpected accepted callback response: %+v", accepted)
+	}
+	duplicate, err := service.ApplyBattleResultCallback(valid)
+	if err != nil {
+		t.Fatalf("duplicate callback: %v", err)
+	}
+	if !duplicate.OK || !duplicate.Duplicate {
+		t.Fatalf("unexpected duplicate callback response: %+v", duplicate)
+	}
+	if len(repo.results) != 3 {
+		t.Fatalf("expected rejected, accepted and duplicate audits: %+v", repo.results)
+	}
+	if repo.results[1].Status != "accepted" || repo.results[1].MatchID != matchID || repo.results[1].BattleServerID != allocation.BattleServerID || repo.results[1].KeyID != allocation.BattleServerID || repo.results[1].ResultHash != valid.StateHash || len(repo.results[1].PlayerIDs) != len(allocation.Players) || repo.results[1].SettlementKey == "" || !repo.results[1].ServerAuthoritative {
+		t.Fatalf("accepted callback audit invalid: %+v", repo.results[1])
+	}
+	if repo.results[2].Status != "duplicate" || repo.results[2].MatchID != matchID || repo.results[2].RejectReason != "" || !repo.results[2].ServerAuthoritative {
+		t.Fatalf("duplicate callback audit invalid: %+v", repo.results[2])
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || !status.Configured || status.ResultRecords != 1 || status.ResultDuplicateRecords != 1 || status.ResultRejectedRecords != 1 || status.ReplayRecords != 2 || status.RejectedRecords != 0 || status.LastSuccessOperation != "battle_result_duplicate" {
+		t.Fatalf("callback audit status invalid: %+v", status)
+	}
+}
+
+func TestApplyBattleResultCallbackRejectsLoadingMatch(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Callback Loading Alice")
+	bob := mustLogin(t, service, "Callback Loading Bob")
+	first, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "certification",
+		ActiveDeckID: "loading-alice-deck",
+		DeckSnapshot: validDeck("loading-alice-deck"),
+	})
+	if err != nil {
+		t.Fatalf("join alice: %v", err)
+	}
+	second, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "certification",
+		ActiveDeckID: "loading-bob-deck",
+		DeckSnapshot: validDeck("loading-bob-deck"),
+	})
+	if err != nil {
+		t.Fatalf("join bob: %v", err)
+	}
+	if first.MatchID != "" || second.MatchID == "" {
+		t.Fatalf("expected a loading match after queue fill: first=%+v second=%+v", first, second)
+	}
+	allocation, ok := service.BattleAllocationForMatch(second.MatchID)
+	if !ok {
+		t.Fatalf("allocation for match %s not found", second.MatchID)
+	}
+	req := battleResultCallbackForAllocation(t, allocation, allocation.Players[0].PlayerID)
+	if _, err := service.ApplyBattleResultCallback(req); ErrorCode(err) != codeMatchState {
+		t.Fatalf("expected loading match rejection, got %v", err)
+	}
+	service.mu.Lock()
+	match := service.matches[second.MatchID]
+	service.mu.Unlock()
+	if match == nil || match.Status != "loading" || match.BattleResultHash != "" {
+		t.Fatalf("loading callback must not settle match: %+v", match)
 	}
 }
 

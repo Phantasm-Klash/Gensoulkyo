@@ -965,6 +965,29 @@ func TestNakamaRematchRPCAndWSSRequireVerifiedSettlement(t *testing.T) {
 		t.Fatalf("rematch before verified settlement should be rejected: %+v", early)
 	}
 
+	hostReady := handler.HandleRPC(RPCRequest{
+		ID:        "match.ready",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(3, "nonce-rematch-host-ready", "match_ready", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !hostReady.OK || hostReady.Payload.(*core.ReadyResponse).ReadyStatus != "loading" {
+		t.Fatalf("rematch host ready failed: %+v", hostReady)
+	}
+	guestReady := handler.HandleWSSMessage(WSSMessage{
+		Name:      "match.ready",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(2, "nonce-rematch-guest-ready", "match_ready", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !guestReady.OK || guestReady.Payload.(*core.ReadyResponse).MatchStart == nil {
+		t.Fatalf("rematch guest ready should start match: %+v", guestReady)
+	}
+
 	playerIDs := []string{}
 	for _, player := range match.BattleAllocation.Players {
 		playerIDs = append(playerIDs, player.PlayerID)
@@ -1005,7 +1028,7 @@ func TestNakamaRematchRPCAndWSSRequireVerifiedSettlement(t *testing.T) {
 		ID:        "match.rematch",
 		SessionID: hostSession,
 		UserID:    hostUser,
-		Payload: envelopePayload(3, "nonce-rematch-host", "match_rematch", map[string]any{
+		Payload: envelopePayload(4, "nonce-rematch-host", "match_rematch", map[string]any{
 			"match_id": match.MatchID,
 		}),
 	})
@@ -1021,7 +1044,7 @@ func TestNakamaRematchRPCAndWSSRequireVerifiedSettlement(t *testing.T) {
 		Name:      "matches.rematch",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(2, "nonce-rematch-guest", "matches_rematch", map[string]any{
+		Payload: envelopePayload(3, "nonce-rematch-guest", "matches_rematch", map[string]any{
 			"match_id": match.MatchID,
 		}),
 	})
@@ -1037,7 +1060,7 @@ func TestNakamaRematchRPCAndWSSRequireVerifiedSettlement(t *testing.T) {
 		Name:      "business.contract",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload:   envelopePayload(3, "nonce-rematch-contract", "business_contract", map[string]any{}),
+		Payload:   envelopePayload(4, "nonce-rematch-contract", "business_contract", map[string]any{}),
 	})
 	if !contract.OK || contract.Status != 200 {
 		t.Fatalf("business contract WSS read failed: %+v", contract)
@@ -1087,6 +1110,28 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		t.Fatalf("room join failed: %+v", joined)
 	}
 	match := joined.Payload.(*core.QueueResponse)
+	hostReady := handler.HandleRPC(RPCRequest{
+		ID:        "match.ready",
+		SessionID: hostSession,
+		UserID:    hostUser,
+		Payload: envelopePayload(2, "nonce-replay-host-ready", "match_ready", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !hostReady.OK || hostReady.Payload.(*core.ReadyResponse).ReadyStatus != "loading" {
+		t.Fatalf("replay host ready failed: %+v", hostReady)
+	}
+	guestReady := handler.HandleWSSMessage(WSSMessage{
+		Name:      "match.ready",
+		SessionID: guestSession,
+		UserID:    guestUser,
+		Payload: envelopePayload(2, "nonce-replay-guest-ready", "match_ready", map[string]any{
+			"match_id": match.MatchID,
+		}),
+	})
+	if !guestReady.OK || guestReady.Payload.(*core.ReadyResponse).MatchStart == nil {
+		t.Fatalf("replay guest ready should start match: %+v", guestReady)
+	}
 	playerIDs := []string{}
 	for _, player := range match.BattleAllocation.Players {
 		playerIDs = append(playerIDs, player.PlayerID)
@@ -1128,7 +1173,7 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		ID:        "replay.get",
 		SessionID: hostSession,
 		UserID:    hostUser,
-		Payload:   envelopePayload(2, "nonce-replay-get-missing-id", "replay_get", map[string]any{}),
+		Payload:   envelopePayload(3, "nonce-replay-get-missing-id", "replay_get", map[string]any{}),
 	})
 	if settlement.OK || settlement.Status != 400 || settlement.ErrorCode != "invalid_request" {
 		t.Fatalf("missing replay id should be rejected after envelope validation: %+v", settlement)
@@ -1138,7 +1183,7 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		ID:        "battle.audit.status",
 		SessionID: hostSession,
 		UserID:    hostUser,
-		Payload:   envelopePayload(3, "nonce-replay-audit-status", "battle_audit_status", map[string]any{}),
+		Payload:   envelopePayload(4, "nonce-replay-audit-status", "battle_audit_status", map[string]any{}),
 	})
 	if !hostMatchEnd.OK {
 		t.Fatalf("audit status read failed: %+v", hostMatchEnd)
@@ -1156,7 +1201,7 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		ID:        "replay.get",
 		SessionID: hostSession,
 		UserID:    hostUser,
-		Payload: envelopePayload(4, "nonce-replay-owner-read", "replay_get", map[string]any{
+		Payload: envelopePayload(5, "nonce-replay-owner-read", "replay_get", map[string]any{
 			"replay_id": "replay_" + match.MatchID + "_",
 		}),
 	})
@@ -1169,7 +1214,7 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		Name:      "replay.get",
 		SessionID: guestSession,
 		UserID:    guestUser,
-		Payload: envelopePayload(2, "nonce-replay-guest-read", "replay_get", map[string]any{
+		Payload: envelopePayload(3, "nonce-replay-guest-read", "replay_get", map[string]any{
 			"replay_id": ownerReplayID,
 		}),
 	})
@@ -1181,7 +1226,7 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		ID:        "replay.get",
 		SessionID: hostSession,
 		UserID:    hostUser,
-		Payload: envelopePayload(5, "nonce-replay-owner-read-real", "replay_get", map[string]any{
+		Payload: envelopePayload(6, "nonce-replay-owner-read-real", "replay_get", map[string]any{
 			"replay_id": ownerReplayID,
 		}),
 	})

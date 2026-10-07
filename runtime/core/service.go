@@ -2294,6 +2294,11 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 		s.recordBattleResultRejectedAuditLocked(match, allocation, signed, ErrorCode(err), now)
 		return nil, err
 	}
+	if match.Status != "running" {
+		err := newError(codeMatchState, "battle result requires a running match, got %s", match.Status)
+		s.recordBattleResultRejectedAuditLocked(match, allocation, signed, ErrorCode(err), now)
+		return nil, err
+	}
 
 	match.BattleResultHash = result.ResultHash
 	match.BattleResultReplay = result.ReplayID

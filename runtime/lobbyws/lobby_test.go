@@ -127,8 +127,9 @@ func TestLobbyRoomFlowMatchStartAndResult(t *testing.T) {
 	loser := bobStart.PlayerIDs[1]
 	callback := core.BattleResultCallback{
 		MatchID:        bobStart.MatchID,
-		ModeID:         "mvp_boss_race",
-		RulesetVersion: core.RulesetVersion,
+		ModeID:         bobStart.ModeID,
+		RulesetVersion: bobStart.RulesetVersion,
+		MatchSeed:      uint64(bobStart.ServerSeed),
 		WinnerPlayerID: winner,
 		WinnerTick:     1234,
 		StateHash:      "sha256:lobby-test",
