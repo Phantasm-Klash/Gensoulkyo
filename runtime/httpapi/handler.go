@@ -120,6 +120,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.openChest(w, r)
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "shop" && segments[2] == "catalog" && r.Method == http.MethodGet {
+		h.shopCatalog(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "shop" && segments[2] == "purchase" && r.Method == http.MethodPost {
+		h.shopPurchase(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "presence" && segments[2] == "heartbeat" && r.Method == http.MethodPost {
 		h.heartbeat(w, r)
 		return
@@ -352,6 +360,28 @@ func (h *Handler) openChest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.service.OpenChest(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) shopCatalog(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.ShopCatalog(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
+	var req core.ShopPurchaseRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.PurchaseShopProduct(sessionToken(r), req)
 	if err != nil {
 		writeError(w, err)
 		return

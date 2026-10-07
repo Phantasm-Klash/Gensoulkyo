@@ -58,6 +58,15 @@ const (
 	worldBossDailyLimit  = 3
 )
 
+const (
+	codeProductNotFound      = "product_not_found"
+	codeNotPurchasable       = "not_purchasable"
+	codeInsufficientCurrency = "insufficient_currency"
+	codeDailyLimitReached    = "daily_limit_reached"
+	codeIdempotencyConflict  = "idempotency_conflict"
+	codeQuantityInvalid      = "quantity_invalid"
+)
+
 const settlementAuthorityServiceSignedBattleResult = "service_signed_battle_result_callback"
 const clientRequestAuthorityLookupOnly = "lookup_only"
 
@@ -148,6 +157,8 @@ type Service struct {
 	settlements           map[string]*MatchEndEvent
 	replays               map[string]*ReplayRecord
 	activityClaims        map[string]*ActivityClaimResult
+	shopPurchases         map[string]shopPurchaseRecord
+	shopPurchaseLimits    map[string]int
 	worldBoss             *worldBossState
 	worldBossAttempts     map[string]map[string]int
 	battleServers         map[string]*battleServerState
@@ -442,6 +453,8 @@ func NewService(config Config) *Service {
 		settlements:           map[string]*MatchEndEvent{},
 		replays:               map[string]*ReplayRecord{},
 		activityClaims:        map[string]*ActivityClaimResult{},
+		shopPurchases:         map[string]shopPurchaseRecord{},
+		shopPurchaseLimits:    map[string]int{},
 		worldBossAttempts:     map[string]map[string]int{},
 		battleServers:         map[string]*battleServerState{},
 		battleAllocations:     map[string]*BattleServerAllocation{},
@@ -494,7 +507,7 @@ func (s *Service) LoginAnonymous(req AnonymousLoginRequest) (*AuthSession, error
 		DisplayName:      displayName,
 		CreatedAt:        now,
 		LastSeenAt:       now,
-		Wallet:           map[string]int{"points": 0, "card_dust": 0, "chest_keys": 1},
+		Wallet:           defaultWallet(),
 		Inventory:        defaultInventory(now),
 		Decks:            map[string]DeckRecord{},
 		ActiveDeckID:     defaultDeckID,
@@ -549,7 +562,7 @@ func (s *Service) LoginExternal(req ExternalSessionRequest) (*AuthSession, error
 			DisplayName:      displayName,
 			CreatedAt:        now,
 			LastSeenAt:       now,
-			Wallet:           map[string]int{"points": 0, "card_dust": 0, "chest_keys": 1},
+			Wallet:           defaultWallet(),
 			Inventory:        defaultInventory(now),
 			Decks:            map[string]DeckRecord{},
 			ActiveDeckID:     defaultDeckID,
@@ -6801,6 +6814,8 @@ func contractClientOperations() []string {
 		"decks.save",
 		"chests.list",
 		"chests.open",
+		"shop.catalog",
+		"shop.purchase",
 		"presence.heartbeat",
 		"matchmaking.join",
 		"matchmaking.ticket",
@@ -6992,6 +7007,10 @@ func clientOperationRequestFields(operation string) []string {
 		return []string{"deck_id", "name", "format", "card_ids", "active", "updated_at"}
 	case "chests.open":
 		return []string{"pool_id", "count"}
+	case "shop.catalog":
+		return []string{}
+	case "shop.purchase":
+		return []string{"product_id", "quantity", "nonce"}
 	case "presence.heartbeat":
 		return []string{"ticket_id", "match_id", "client_tick", "last_event_cursor"}
 	case "matchmaking.join", "rooms.create", "rooms.join":
@@ -7036,6 +7055,10 @@ func clientOperationProjectionFields(operation string) []string {
 		return append(common, "user_id", "ruleset_version", "wallet", "owned_chests", "pools", "pity_counters", "opening_log", "last_results", "server_time")
 	case "chests.open":
 		return append(common, "user_id", "pool_id", "count", "wallet", "owned_chests", "inventory", "pity_counters", "results", "audit", "server_time")
+	case "shop.catalog":
+		return append(common, "products", "wallet", "season", "server_time")
+	case "shop.purchase":
+		return append(common, "wallet", "inventory", "granted", "receipt", "server_time")
 	case "presence.heartbeat":
 		fields := append(common, "user_id", "presence_status", "session_status", "ticket_id", "queue_status", "room_code", "room_status", "match_id", "match_status", "battle_allocation", "battle_ticket", "server_time")
 		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)

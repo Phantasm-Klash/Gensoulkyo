@@ -156,6 +156,14 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.OpenChest(request.SessionID, req) })
+	case "shop.catalog":
+		return handler.call(func() (any, error) { return handler.service.ShopCatalog(request.SessionID) })
+	case "shop.purchase":
+		var req core.ShopPurchaseRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.PurchaseShopProduct(request.SessionID, req) })
 	case "presence.heartbeat":
 		var req core.PresenceHeartbeatRequest
 		if err := decodeBody(body, &req); err != nil {
