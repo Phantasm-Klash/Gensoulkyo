@@ -64,15 +64,35 @@ func (s *Service) ApplyBattleResultCallback(req BattleResultCallback) (*BattleRe
 	if matchID == "" {
 		return nil, newError(codeInvalidRequest, "match_id is required")
 	}
+	req.MatchID = matchID
+	req.ModeID = strings.TrimSpace(req.ModeID)
+	req.RulesetVersion = strings.TrimSpace(req.RulesetVersion)
+	req.WinnerPlayerID = strings.TrimSpace(req.WinnerPlayerID)
+	req.StateHash = strings.TrimSpace(req.StateHash)
+	for index := range req.Players {
+		req.Players[index].PlayerID = strings.TrimSpace(req.Players[index].PlayerID)
+	}
 	match := s.matches[matchID]
 	if match == nil {
 		return nil, newError(codeNotFound, "match not found")
 	}
+
+	allocation := s.battleAllocations[matchID]
+	if allocation == nil {
+		allocation = match.BattleAllocation
+	}
+	if err := validateBattleResultCallback(req, match, allocation); err != nil {
+		s.recordBattleResultCallbackAuditLocked(match, allocation, req, "rejected", ErrorCode(err), now)
+		return nil, err
+	}
 	if match.Status == "ended" {
-		if req.StateHash != "" && match.BattleResultHash == req.StateHash {
+		if match.BattleResultHash == req.StateHash {
+			s.recordBattleResultCallbackAuditLocked(match, allocation, req, "duplicate", "", now)
 			return s.battleResultCallbackResponseLocked(match, req, true, now), nil
 		}
-		return nil, newError(codeMatchState, "match is already ended")
+		err := newError(codeMatchState, "match is already ended")
+		s.recordBattleResultCallbackAuditLocked(match, allocation, req, "rejected", ErrorCode(err), now)
+		return nil, err
 	}
 
 	playerToUser := s.matchPlayerIDMapLocked(match)
@@ -123,7 +143,108 @@ func (s *Service) ApplyBattleResultCallback(req BattleResultCallback) (*BattleRe
 	appendMatchEventLocked(match, MatchEvent{Type: "battle_result_verified", Tick: match.Tick, Status: "accepted"})
 
 	s.settleMatchFromWinnerLocked(match, winnerUserID)
+	s.recordBattleResultCallbackAuditLocked(match, allocation, req, "accepted", "", now)
 	return s.battleResultCallbackResponseLocked(match, req, false, now), nil
+}
+
+func validateBattleResultCallback(req BattleResultCallback, match *matchState, allocation *BattleServerAllocation) error {
+	if match == nil {
+		return newError(codeNotFound, "match not found")
+	}
+	if allocation == nil {
+		return newError(codeBattleServer, "battle allocation unavailable")
+	}
+	if allocation.MatchID != match.MatchID {
+		return newError(codeBattleServer, "battle allocation match mismatch")
+	}
+	if req.ModeID == "" {
+		return newError(codeInvalidRequest, "mode_id is required")
+	}
+	if req.ModeID != match.ModeID || req.ModeID != allocation.ModeID {
+		return newError(codeInvalidMode, "battle result mode is %q, match mode is %q", req.ModeID, match.ModeID)
+	}
+	expectedRuleset := strings.TrimSpace(match.RulesetVersion)
+	allocationRuleset := strings.TrimSpace(allocation.Version.RulesetVersion)
+	if expectedRuleset != "" && allocationRuleset != "" && expectedRuleset != allocationRuleset {
+		return newError(codeBattleServer, "battle allocation ruleset version mismatch")
+	}
+	if expectedRuleset == "" {
+		expectedRuleset = allocationRuleset
+	}
+	if expectedRuleset == "" {
+		expectedRuleset = RulesetVersion
+	}
+	if req.RulesetVersion == "" {
+		return newError(codeInvalidRequest, "ruleset_version is required")
+	}
+	if req.RulesetVersion != expectedRuleset {
+		return newError(codeInvalidRequest, "battle result ruleset version mismatch")
+	}
+	if strings.TrimSpace(req.StateHash) == "" {
+		return newError(codeInvalidRequest, "state_hash is required")
+	}
+	if match.ServerSeed < 0 || allocation.ServerSeed < 0 || match.ServerSeed != allocation.ServerSeed {
+		return newError(codeBattleServer, "battle allocation seed mismatch")
+	}
+	if req.MatchSeed != uint64(allocation.ServerSeed) {
+		return newError(codeInvalidRequest, "match_seed does not match allocation")
+	}
+	if !sameStringSet(battleResultCallbackPlayerIDs(req), allocationPlayerIDs(allocation)) {
+		return newError(codeInvalidRequest, "battle result players do not match allocation")
+	}
+	if req.WinnerPlayerID == "" || !stringSliceContains(allocationPlayerIDs(allocation), req.WinnerPlayerID) {
+		return newError(codeInvalidRequest, "winner_player_id must belong to allocation")
+	}
+	return nil
+}
+
+func battleResultCallbackPlayerIDs(req BattleResultCallback) []string {
+	playerIDs := make([]string, 0, len(req.Players))
+	for _, player := range req.Players {
+		playerIDs = append(playerIDs, strings.TrimSpace(player.PlayerID))
+	}
+	return playerIDs
+}
+
+func (s *Service) recordBattleResultCallbackAuditLocked(match *matchState, allocation *BattleServerAllocation, req BattleResultCallback, status string, reason string, verifiedAt time.Time) {
+	if s.battleAuditRepo == nil || match == nil {
+		return
+	}
+	battleServerID := s.allocationBattleServerIDLocked(match)
+	if allocation != nil && strings.TrimSpace(allocation.BattleServerID) != "" {
+		battleServerID = strings.TrimSpace(allocation.BattleServerID)
+	}
+	replayID := match.BattleResultReplay
+	if replayID == "" {
+		replayID = "replay_" + match.MatchID
+	}
+	settledAt := match.BattleResultAt
+	if settledAt.IsZero() {
+		settledAt = verifiedAt
+	}
+	err := s.battleAuditRepo.RecordBattleResultAudit(BattleResultAuditRecord{
+		MatchID:             match.MatchID,
+		ModeID:              match.ModeID,
+		BattleServerID:      battleServerID,
+		ResultHash:          strings.TrimSpace(req.StateHash),
+		ReplayID:            replayID,
+		KeyID:               battleServerID,
+		PlayerIDs:           battleResultCallbackPlayerIDs(req),
+		SettlementKey:       battleResultSettlementKey(match.MatchID),
+		Status:              status,
+		RejectReason:        reason,
+		VerifiedAt:          verifiedAt,
+		SettledAt:           settledAt,
+		ServerAuthoritative: true,
+	})
+	operation := "battle_result"
+	if status == "duplicate" {
+		operation = "battle_result_duplicate"
+	} else if status == "rejected" {
+		operation = "battle_result_rejected"
+	}
+	fingerprint := lifecycleFingerprint("battle:result:"+status, match.MatchID, match.ModeID, battleServerID, req.StateHash, replayID, req.WinnerPlayerID)
+	s.recordBattleAuditOutcomeLocked(operation, fingerprint, verifiedAt, err)
 }
 
 // settleMatchFromWinnerLocked mirrors settleMatchLocked but picks the winner
