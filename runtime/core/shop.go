@@ -72,6 +72,53 @@ type ShopPurchaseResponse struct {
 	ServerTime          int64             `json:"server_time"`
 }
 
+var forbiddenShopPurchaseFields = map[string]struct{}{
+	"price":          {},
+	"cost":           {},
+	"cost_kind":      {},
+	"cost_amount":    {},
+	"rarity":         {},
+	"payload":        {},
+	"drop":           {},
+	"drops":          {},
+	"grant":          {},
+	"granted":        {},
+	"reward":         {},
+	"rewards":        {},
+	"inventory":      {},
+	"wallet":         {},
+	"receipt":        {},
+	"server_time":    {},
+	"server_time_ms": {},
+}
+
+func ForbiddenShopPurchaseField(raw map[string]any) string {
+	return firstForbiddenShopPurchaseField(raw)
+}
+
+func firstForbiddenShopPurchaseField(raw map[string]any) string {
+	for key, value := range raw {
+		if _, forbidden := forbiddenShopPurchaseFields[strings.ToLower(strings.TrimSpace(key))]; forbidden {
+			return key
+		}
+		switch typed := value.(type) {
+		case map[string]any:
+			if nested := firstForbiddenShopPurchaseField(typed); nested != "" {
+				return nested
+			}
+		case []any:
+			for _, item := range typed {
+				if nestedMap, ok := item.(map[string]any); ok {
+					if nested := firstForbiddenShopPurchaseField(nestedMap); nested != "" {
+						return nested
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // serverShopCatalog is deliberately server-owned and deterministic. The
 // client may only select a product id; price, rarity and payload come from
 // this definition.

@@ -41,6 +41,20 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 			"cost_amount": 1,
 		}),
 	})
+	if purchase.OK || purchase.Status != 403 || purchase.ErrorCode != "forbidden_field" {
+		t.Fatalf("shop purchase should reject client-authored price: %+v", purchase)
+	}
+
+	purchase = handler.HandleRPC(RPCRequest{
+		ID:        "shop.purchase",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload: envelopePayload(3, "shop-rpc-purchase-valid", "shop_purchase", map[string]any{
+			"product_id": "card.focus_lens.single",
+			"quantity":   1,
+			"nonce":      "rpc-shop-nonce-valid",
+		}),
+	})
 	if !purchase.OK || purchase.Status != 200 {
 		t.Fatalf("shop purchase RPC failed: %+v", purchase)
 	}
