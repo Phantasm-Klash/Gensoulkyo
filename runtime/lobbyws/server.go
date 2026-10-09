@@ -31,7 +31,12 @@ type Options struct {
 	// MatchTTL is an optional safety net that kills a battle server process after
 	// the given duration.
 	MatchTTL time.Duration
-	Logger   *log.Logger
+	// PongWait / PingPeriod / WriteWait tune the WebSocket keepalive. Zero uses
+	// the Default* values. Tests shrink them to exercise the reaper quickly.
+	PongWait   time.Duration
+	PingPeriod time.Duration
+	WriteWait  time.Duration
+	Logger     *log.Logger
 }
 
 // Server hosts the WebSocket lobby, the battle relay and the internal battle
@@ -42,6 +47,9 @@ type Server struct {
 	lobbyEndpoint string
 	ruleset       string
 	matchTTL      time.Duration
+	pongWait      time.Duration
+	pingPeriod    time.Duration
+	writeWait     time.Duration
 	logger        *log.Logger
 
 	mu      sync.Mutex
@@ -70,12 +78,27 @@ func New(opts Options) *Server {
 	if matchTTL <= 0 {
 		matchTTL = battlespawn.DefaultMatchTTL
 	}
+	pongWait := opts.PongWait
+	if pongWait <= 0 {
+		pongWait = DefaultPongWait
+	}
+	pingPeriod := opts.PingPeriod
+	if pingPeriod <= 0 || pingPeriod >= pongWait {
+		pingPeriod = pongWait * 5 / 12
+	}
+	writeWait := opts.WriteWait
+	if writeWait <= 0 {
+		writeWait = DefaultWriteWait
+	}
 	return &Server{
 		service:       opts.Service,
 		spawner:       opts.Spawner,
 		lobbyEndpoint: strings.TrimSpace(opts.LobbyEndpoint),
 		ruleset:       strings.TrimSpace(opts.BattleRuleset),
 		matchTTL:      matchTTL,
+		pongWait:      pongWait,
+		pingPeriod:    pingPeriod,
+		writeWait:     writeWait,
 		logger:        logger,
 		clients:       map[*client]struct{}{},
 		rooms:         map[string]map[*client]struct{}{},
@@ -186,15 +209,36 @@ func (s *Server) logf(format string, args ...any) {
 	}
 }
 
+// Default keepalive parameters for the lobby WebSocket. A peer that vanishes
+// without a TCP FIN/RST (process killed, network drop, NAT timeout) would
+// otherwise block ReadMessage forever, leaking the client, its goroutine and its
+// room membership. The server pings every PingPeriod and drops the connection
+// when no frame has arrived for PongWait.
+const (
+	// DefaultPongWait is how long we tolerate silence before reaping a client.
+	DefaultPongWait = 60 * time.Second
+	// DefaultPingPeriod must be < DefaultPongWait so a live client answers in time.
+	DefaultPingPeriod = 25 * time.Second
+	// DefaultWriteWait bounds a single write so a stalled peer cannot block the pump.
+	DefaultWriteWait = 10 * time.Second
+)
+
 func (c *client) readLoop() {
 	defer func() {
 		c.close()
 	}()
+	// Reset the read deadline on every frame (including the pongs that answer
+	// our keepalive pings), so only a genuinely silent peer times out.
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.server.pongWait))
+	c.conn.SetPongHandler(func() {
+		_ = c.conn.SetReadDeadline(time.Now().Add(c.server.pongWait))
+	})
 	for {
 		opcode, payload, err := c.conn.ReadMessage()
 		if err != nil {
 			return
 		}
+		_ = c.conn.SetReadDeadline(time.Now().Add(c.server.pongWait))
 		switch opcode {
 		case OpClose:
 			_ = c.conn.WriteClose(1000, "")
@@ -208,12 +252,24 @@ func (c *client) readLoop() {
 }
 
 func (c *client) writePump() {
+	ping := time.NewTicker(c.server.pingPeriod)
+	defer ping.Stop()
 	for {
 		select {
 		case <-c.closed:
 			_ = c.conn.Close()
 			return
+		case <-ping.C:
+			// A failed ping means the peer is gone; stop the pump and let the
+			// read side (which is blocked on its deadline) unwind too.
+			_ = c.conn.SetWriteDeadline(time.Now().Add(c.server.writeWait))
+			if err := c.conn.WritePing(nil); err != nil {
+				c.close()
+				_ = c.conn.Close()
+				return
+			}
 		case msg := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(c.server.writeWait))
 			if err := c.conn.WriteMessage(msg.opcode, msg.payload); err != nil {
 				c.close()
 				_ = c.conn.Close()
@@ -664,11 +720,31 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Mirror the lobby keepalive: a client that disappears mid-match would
+	// otherwise pin this relay (plus its UDP socket and the reader goroutine
+	// above) until the battle server happens to write into a dead socket.
+	_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
+	wsConn.SetPongHandler(func() {
+		_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
+	})
+	go func() {
+		ticker := time.NewTicker(s.pingPeriod)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = wsConn.SetWriteDeadline(time.Now().Add(s.writeWait))
+			if err := wsConn.WritePing(nil); err != nil {
+				stop()
+				return
+			}
+		}
+	}()
+
 	for {
 		opcode, payload, err := wsConn.ReadMessage()
 		if err != nil {
 			return
 		}
+		_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
 		switch opcode {
 		case OpBinary:
 			if _, err := udpConn.Write(payload); err != nil {

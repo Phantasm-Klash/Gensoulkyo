@@ -58,6 +58,11 @@ type Conn struct {
 	writeMu sync.Mutex
 	closeMu sync.Mutex
 	closed  bool
+
+	// onPongMu guards onPong, which ReadMessage calls from the read goroutine
+	// while SetPongHandler may be called from the serving goroutine.
+	onPongMu sync.Mutex
+	onPong   func()
 }
 
 type frameHeader struct {
@@ -136,6 +141,28 @@ func (c *Conn) RemoteAddr() net.Addr { return c.conn.RemoteAddr() }
 // SetReadDeadline sets the deadline for future reads.
 func (c *Conn) SetReadDeadline(t time.Time) error { return c.conn.SetReadDeadline(t) }
 
+// SetWriteDeadline sets the deadline for future writes.
+func (c *Conn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
+
+// SetPongHandler registers a callback invoked whenever a ping or pong control
+// frame is read. ReadMessage consumes control frames internally and never
+// returns them to the caller, so this is the only way for a keepalive loop to
+// observe that a peer is still alive. It is safe to call from another goroutine.
+func (c *Conn) SetPongHandler(h func()) {
+	c.onPongMu.Lock()
+	c.onPong = h
+	c.onPongMu.Unlock()
+}
+
+func (c *Conn) firePong() {
+	c.onPongMu.Lock()
+	h := c.onPong
+	c.onPongMu.Unlock()
+	if h != nil {
+		h()
+	}
+}
+
 // ReadMessage reads the next complete data message, transparently handling
 // fragmentation and replying to ping frames. Control close frames are returned
 // to the caller with OpClose and their payload.
@@ -158,11 +185,13 @@ func (c *Conn) ReadMessage() (int, []byte, error) {
 			case OpClose:
 				return OpClose, data, nil
 			case OpPing:
+				c.firePong()
 				if err := c.writeFrame(OpPong, data, true); err != nil {
 					return 0, nil, err
 				}
 				continue
 			case OpPong:
+				c.firePong()
 				continue
 			default:
 				return 0, nil, ErrProtocol
