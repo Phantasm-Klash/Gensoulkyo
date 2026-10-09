@@ -404,6 +404,10 @@ func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(req.ProductID) != "" || strings.TrimSpace(req.Nonce) != "" || req.Quantity != 0 {
+		if status, code, message := h.requireBusinessEnvelopeHeaders(r); code != "" {
+			writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
+			return
+		}
 		resp, err := h.service.PurchaseShopProduct(sessionToken(r), core.ShopPurchaseRequest{
 			ProductID: req.ProductID,
 			Quantity:  req.Quantity,
@@ -1208,6 +1212,22 @@ func (h *Handler) validateBusinessEnvelopeHeaders(r *http.Request) (int, string,
 	})
 	if !ok {
 		return 0, "", ""
+	}
+	result := security.ValidateBusinessEnvelopeRequest(h.envelopeGuard, request)
+	if !result.OK {
+		return result.Status, result.Code, result.Message
+	}
+	return 0, "", ""
+}
+
+func (h *Handler) requireBusinessEnvelopeHeaders(r *http.Request) (int, string, string) {
+	request, ok := security.BusinessEnvelopeRequestFromHTTPHeaders(r.Header, security.BusinessEnvelopeRequestContext{
+		SessionID: sessionToken(r),
+		Transport: security.BusinessEnvelopeTransportHTTPFallback,
+		Endpoint:  strings.TrimSpace(r.URL.Path),
+	})
+	if !ok {
+		return http.StatusBadRequest, "business_envelope_required", "business envelope headers are required"
 	}
 	result := security.ValidateBusinessEnvelopeRequest(h.envelopeGuard, request)
 	if !result.OK {
