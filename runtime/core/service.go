@@ -2213,10 +2213,6 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
 		return nil, err
 	}
-	if now.After(ticket.ExpiresAt) {
-		s.recordBattleTicketExpiredAuditLocked(signed, now)
-		return nil, newError(codeMatchState, "battle ticket expired")
-	}
 	if consumedAt, ok := s.consumedBattleTickets[ticketID]; ok {
 		return &BattleTicketConsumeResponse{
 			OK:                  true,
@@ -2238,6 +2234,10 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 			ServerAuthoritative: true,
 			ServerTime:          consumedAt,
 		}, nil
+	}
+	if now.After(ticket.ExpiresAt) {
+		s.recordBattleTicketExpiredAuditLocked(signed, now)
+		return nil, newError(codeMatchState, "battle ticket expired")
 	}
 	s.consumedBattleTickets[ticketID] = now
 	s.recordBattleTicketConsumedAuditLocked(signed, now)
