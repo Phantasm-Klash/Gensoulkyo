@@ -31,11 +31,20 @@ func TestHTTPShopCatalogAndPurchaseRoutes(t *testing.T) {
 	if missingEnvelope.Code != http.StatusBadRequest || missingEnvelope.ErrorCode != "business_envelope_required" {
 		t.Fatalf("modern shop purchase should require a business envelope: %+v", missingEnvelope)
 	}
+	forbiddenPrice := postRawWithHeaders(t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{
+		"product_id":  "card.focus_lens.single",
+		"quantity":    1,
+		"nonce":       "http-shop-forbidden-price",
+		"cost_amount": 1,
+	}, businessEnvelopeHeaders(1, time.Now(), "http-shop-forbidden-price-envelope", "shop_purchase"))
+	if forbiddenPrice.Code != http.StatusForbidden || forbiddenPrice.ErrorCode != "forbidden_field" {
+		t.Fatalf("modern shop purchase should reject client-authored price: %+v", forbiddenPrice)
+	}
 	purchase := postJSONWithHeaders[core.ShopPurchaseResponse](t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{
 		"product_id": "chest.standard.pull",
 		"quantity":   1,
 		"nonce":      "http-shop-nonce",
-	}, businessEnvelopeHeaders(1, time.Now(), "http-shop-envelope", "shop_purchase"))
+	}, businessEnvelopeHeaders(2, time.Now(), "http-shop-envelope", "shop_purchase"))
 	if !purchase.OK || purchase.Receipt.ProductID != "chest.standard.pull" || purchase.Wallet["gold"] != 1200 {
 		t.Fatalf("shop purchase route invalid: %+v", purchase)
 	}
@@ -43,7 +52,7 @@ func TestHTTPShopCatalogAndPurchaseRoutes(t *testing.T) {
 		"product_id": "card.focus_lens.single",
 		"quantity":   0,
 		"nonce":      "http-shop-invalid",
-	}, businessEnvelopeHeaders(2, time.Now(), "http-shop-invalid-envelope", "shop_purchase"))
+	}, businessEnvelopeHeaders(3, time.Now(), "http-shop-invalid-envelope", "shop_purchase"))
 	if rejected.Code != http.StatusBadRequest || rejected.ErrorCode != "quantity_invalid" {
 		t.Fatalf("shop quantity error invalid: %+v", rejected)
 	}
