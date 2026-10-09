@@ -30,11 +30,24 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 		t.Fatalf("shop catalog RPC payload invalid: %+v", catalog.Payload)
 	}
 
+	legacyCatalog := handler.HandleRPC(RPCRequest{
+		ID:        "shop.get",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload:   envelopePayload(2, "shop-rpc-get", "shop.get", map[string]any{}),
+	})
+	if !legacyCatalog.OK || legacyCatalog.Status != 200 {
+		t.Fatalf("legacy shop.get RPC failed: %+v", legacyCatalog)
+	}
+	if payload, ok := legacyCatalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 6 {
+		t.Fatalf("legacy shop.get RPC payload invalid: %+v", legacyCatalog.Payload)
+	}
+
 	purchase := handler.HandleRPC(RPCRequest{
 		ID:        "shop.purchase",
 		SessionID: session.SessionToken,
 		UserID:    session.UserID,
-		Payload: envelopePayload(2, "shop-rpc-purchase", "shop_purchase", map[string]any{
+		Payload: envelopePayload(3, "shop-rpc-purchase", "shop_purchase", map[string]any{
 			"product_id":  "card.focus_lens.single",
 			"quantity":    1,
 			"nonce":       "rpc-shop-nonce",
@@ -49,7 +62,7 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 		ID:        "shop.purchase",
 		SessionID: session.SessionToken,
 		UserID:    session.UserID,
-		Payload: envelopePayload(3, "shop-rpc-purchase-valid", "shop_purchase", map[string]any{
+		Payload: envelopePayload(4, "shop-rpc-purchase-valid", "shop_purchase", map[string]any{
 			"product_id": "card.focus_lens.single",
 			"quantity":   1,
 			"nonce":      "rpc-shop-nonce-valid",

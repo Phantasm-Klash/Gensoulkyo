@@ -6838,6 +6838,7 @@ func contractClientOperations() []string {
 		"decks.save",
 		"chests.list",
 		"chests.open",
+		"shop.get",
 		"shop.catalog",
 		"shop.purchase",
 		"presence.heartbeat",
@@ -7031,7 +7032,7 @@ func clientOperationRequestFields(operation string) []string {
 		return []string{"deck_id", "name", "format", "card_ids", "active", "updated_at"}
 	case "chests.open":
 		return []string{"pool_id", "count"}
-	case "shop.catalog":
+	case "shop.get", "shop.catalog":
 		return []string{}
 	case "shop.purchase":
 		return []string{"product_id", "quantity", "nonce"}
@@ -7079,7 +7080,7 @@ func clientOperationProjectionFields(operation string) []string {
 		return append(common, "user_id", "ruleset_version", "wallet", "owned_chests", "pools", "pity_counters", "opening_log", "last_results", "server_time")
 	case "chests.open":
 		return append(common, "user_id", "pool_id", "count", "wallet", "owned_chests", "inventory", "pity_counters", "results", "audit", "server_time")
-	case "shop.catalog":
+	case "shop.get", "shop.catalog":
 		return append(common, "products", "wallet", "season", "server_time")
 	case "shop.purchase":
 		return append(common, "wallet", "inventory", "granted", "receipt", "server_time")
@@ -7171,7 +7172,7 @@ func clientOperationProjectionFields(operation string) []string {
 
 func clientOperationAuthority(operation string) string {
 	switch operation {
-	case "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
+	case "shop.get", "shop.catalog", "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
 		return clientRequestAuthorityLookupOnly
 	default:
 		return "intent_only"

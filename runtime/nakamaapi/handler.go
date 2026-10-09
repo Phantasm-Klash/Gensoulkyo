@@ -156,7 +156,7 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.OpenChest(request.SessionID, req) })
-	case "shop.catalog":
+	case "shop.catalog", "shop.get":
 		return handler.call(func() (any, error) { return handler.service.ShopCatalog(request.SessionID) })
 	case "shop.purchase":
 		if forbidden := core.ForbiddenShopPurchaseField(body); forbidden != "" {
