@@ -20,7 +20,7 @@ func TestHTTPShopCatalogAndPurchaseRoutes(t *testing.T) {
 		"display_name": "Shop HTTP",
 	})
 	catalog := getJSON[core.ShopCatalogResponse](t, server.URL+"/v1/shop/catalog", alice.SessionToken)
-	if len(catalog.Products) != 6 || catalog.Wallet["gold"] != 2000 {
+	if len(catalog.Products) != 6 || catalog.Wallet["gold"] != 2000 || catalog.ReadSource != "http_fallback" || catalog.CatalogVersion == "" {
 		t.Fatalf("shop catalog route invalid: %+v", catalog)
 	}
 	missingEnvelope := postRaw(t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{
@@ -48,11 +48,23 @@ func TestHTTPShopCatalogAndPurchaseRoutes(t *testing.T) {
 	if !purchase.OK || purchase.Receipt.ProductID != "chest.standard.pull" || purchase.Wallet["gold"] != 1200 {
 		t.Fatalf("shop purchase route invalid: %+v", purchase)
 	}
+	if purchase.LedgerID == "" || purchase.Receipt.LedgerID != purchase.LedgerID || purchase.CatalogVersion != catalog.CatalogVersion || purchase.Duplicate {
+		t.Fatalf("shop purchase receipt contract invalid: %+v", purchase)
+	}
+	duplicate := postJSONWithHeaders[core.ShopPurchaseResponse](t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{
+		"item_id":         "chest.standard.pull",
+		"count":           1,
+		"idempotency_key": "http-shop-nonce",
+		"catalog_version": catalog.CatalogVersion,
+	}, businessEnvelopeHeaders(3, time.Now(), "http-shop-envelope-alias-retry", "shop_purchase"))
+	if !duplicate.Duplicate || duplicate.Receipt != purchase.Receipt || duplicate.Wallet["gold"] != purchase.Wallet["gold"] {
+		t.Fatalf("HTTP alias retry should return the original receipt without another debit: first=%+v duplicate=%+v", purchase, duplicate)
+	}
 	rejected := postRawWithHeaders(t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{
 		"product_id": "card.focus_lens.single",
 		"quantity":   0,
 		"nonce":      "http-shop-invalid",
-	}, businessEnvelopeHeaders(3, time.Now(), "http-shop-invalid-envelope", "shop_purchase"))
+	}, businessEnvelopeHeaders(4, time.Now(), "http-shop-invalid-envelope", "shop_purchase"))
 	if rejected.Code != http.StatusBadRequest || rejected.ErrorCode != "quantity_invalid" {
 		t.Fatalf("shop quantity error invalid: %+v", rejected)
 	}

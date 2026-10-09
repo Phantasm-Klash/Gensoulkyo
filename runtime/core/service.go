@@ -63,12 +63,13 @@ const (
 )
 
 const (
-	codeProductNotFound      = "product_not_found"
-	codeNotPurchasable       = "not_purchasable"
-	codeInsufficientCurrency = "insufficient_currency"
-	codeDailyLimitReached    = "daily_limit_reached"
-	codeIdempotencyConflict  = "idempotency_conflict"
-	codeQuantityInvalid      = "quantity_invalid"
+	codeProductNotFound        = "product_not_found"
+	codeNotPurchasable         = "not_purchasable"
+	codeInsufficientCurrency   = "insufficient_currency"
+	codeDailyLimitReached      = "daily_limit_reached"
+	codeIdempotencyConflict    = "idempotency_conflict"
+	codeQuantityInvalid        = "quantity_invalid"
+	codeCatalogVersionMismatch = "catalog_version_mismatch"
 )
 
 const settlementAuthorityServiceSignedBattleResult = "service_signed_battle_result_callback"
@@ -7035,7 +7036,7 @@ func clientOperationRequestFields(operation string) []string {
 	case "shop.get", "shop.catalog":
 		return []string{}
 	case "shop.purchase":
-		return []string{"product_id", "quantity", "nonce"}
+		return []string{"product_id", "quantity", "nonce", "item_id", "count", "catalog_version", "idempotency_key"}
 	case "presence.heartbeat":
 		return []string{"ticket_id", "match_id", "client_tick", "last_event_cursor"}
 	case "matchmaking.join", "rooms.create", "rooms.join":
@@ -7081,9 +7082,9 @@ func clientOperationProjectionFields(operation string) []string {
 	case "chests.open":
 		return append(common, "user_id", "pool_id", "count", "wallet", "owned_chests", "inventory", "pity_counters", "results", "audit", "server_time")
 	case "shop.get", "shop.catalog":
-		return append(common, "products", "wallet", "season", "server_time")
+		return append(common, "products", "wallet", "season", "catalog_version", "read_source", "server_time", "server_time_ms")
 	case "shop.purchase":
-		return append(common, "wallet", "inventory", "granted", "receipt", "server_time")
+		return append(common, "product_id", "item_id", "quantity", "count", "spent", "wallet", "inventory", "granted", "receipt", "ledger_id", "catalog_version", "duplicate", "server_time", "server_time_ms")
 	case "presence.heartbeat":
 		fields := append(common, "user_id", "presence_status", "session_status", "ticket_id", "queue_status", "room_code", "room_status", "match_id", "match_status", "battle_allocation", "battle_ticket", "server_time")
 		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)

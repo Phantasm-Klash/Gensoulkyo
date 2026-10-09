@@ -157,7 +157,13 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		}
 		return handler.call(func() (any, error) { return handler.service.OpenChest(request.SessionID, req) })
 	case "shop.catalog", "shop.get":
-		return handler.call(func() (any, error) { return handler.service.ShopCatalog(request.SessionID) })
+		return handler.call(func() (any, error) {
+			response, err := handler.service.ShopCatalog(request.SessionID)
+			if response != nil {
+				response.ReadSource = "nakama"
+			}
+			return response, err
+		})
 	case "shop.purchase":
 		if forbidden := core.ForbiddenShopPurchaseField(body); forbidden != "" {
 			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
@@ -586,6 +592,10 @@ func coreErrorResponse(err error) Response {
 		status = http.StatusForbidden
 	case "battle_server_unavailable":
 		status = http.StatusServiceUnavailable
+	case "catalog_version_mismatch", "idempotency_conflict":
+		status = http.StatusConflict
+	case "product_not_found":
+		status = http.StatusNotFound
 	}
 	return errorResponse(status, code, err.Error())
 }
