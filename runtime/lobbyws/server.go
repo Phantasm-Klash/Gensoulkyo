@@ -697,8 +697,10 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var once sync.Once
+	done := make(chan struct{})
 	stop := func() {
 		once.Do(func() {
+			close(done)
 			_ = udpConn.Close()
 			_ = wsConn.Close()
 		})
@@ -730,11 +732,16 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ticker := time.NewTicker(s.pingPeriod)
 		defer ticker.Stop()
-		for range ticker.C {
-			_ = wsConn.SetWriteDeadline(time.Now().Add(s.writeWait))
-			if err := wsConn.WritePing(nil); err != nil {
-				stop()
+		for {
+			select {
+			case <-done:
 				return
+			case <-ticker.C:
+				_ = wsConn.SetWriteDeadline(time.Now().Add(s.writeWait))
+				if err := wsConn.WritePing(nil); err != nil {
+					stop()
+					return
+				}
 			}
 		}
 	}()
