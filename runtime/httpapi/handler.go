@@ -404,6 +404,10 @@ func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(req.ProductID) != "" || strings.TrimSpace(req.Nonce) != "" || req.Quantity != 0 {
+		if status, code, message := h.validateBusinessEnvelopeHeaders(r); code != "" {
+			writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
+			return
+		}
 		resp, err := h.service.PurchaseShopProduct(sessionToken(r), core.ShopPurchaseRequest{
 			ProductID: req.ProductID,
 			Quantity:  req.Quantity,
