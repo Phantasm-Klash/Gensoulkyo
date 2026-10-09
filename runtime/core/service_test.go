@@ -1183,6 +1183,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 		t.Fatalf("consumed ticket audit missing: %+v", repo.tickets)
 	}
 	afterConsumeAuditCount := len(repo.tickets)
+	now = ticket.Ticket.ExpiresAt.Add(time.Second)
 	duplicate, err := service.ConsumeBattleTicket(BattleTicketConsumeRequest{
 		Version:        ticket.Ticket.Version,
 		TicketID:       ticket.Ticket.TicketID,
@@ -1194,7 +1195,7 @@ func TestBattleTicketConsumeLifecycleAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("duplicate consume ticket: %v", err)
 	}
-	if !duplicate.Consumed || !duplicate.Duplicate || duplicate.ServerTime != now {
+	if !duplicate.Consumed || !duplicate.Duplicate || duplicate.ServerTime != consume.ConsumedAt {
 		t.Fatalf("duplicate consume response invalid: %+v", duplicate)
 	}
 	if duplicate.ConsumedAt != consume.ConsumedAt || duplicate.ConsumedAtMS != consume.ConsumedAtMS || duplicate.ExpiresAt != ticket.Ticket.ExpiresAt {
