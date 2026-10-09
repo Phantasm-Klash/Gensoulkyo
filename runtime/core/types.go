@@ -1469,8 +1469,9 @@ type ShopView struct {
 	ServerTimeMs int64          `json:"server_time_ms"`
 }
 
-// ShopPurchaseRequest 是 POST /v1/shop/purchase 的请求体。
-type ShopPurchaseRequest struct {
+// LegacyShopPurchaseRequest 是旧版 POST /v1/shop/purchase 的请求体。
+// Nakama 的 shop.purchase 使用 runtime/core/shop.go 中的 ShopPurchaseRequest。
+type LegacyShopPurchaseRequest struct {
 	ItemID string `json:"item_id"`
 	Count  int    `json:"count"`
 }
