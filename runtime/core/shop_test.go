@@ -54,6 +54,18 @@ func TestShopCatalogAndPurchaseAreServerAuthoritative(t *testing.T) {
 		t.Fatalf("shop grant invalid: %+v", purchased.Granted)
 	}
 
+	second, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
+		ProductID: "card.bomb_amplifier.single",
+		Quantity:  1,
+		Nonce:     "shop-nonce-2",
+	})
+	if err != nil {
+		t.Fatalf("second shop purchase: %v", err)
+	}
+	if second.Wallet["gold"] != 1600 {
+		t.Fatalf("second shop purchase should update current wallet: %+v", second.Wallet)
+	}
+
 	duplicate, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
 		ProductID: "card.focus_lens.single",
 		Quantity:  1,
@@ -62,8 +74,8 @@ func TestShopCatalogAndPurchaseAreServerAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("duplicate shop purchase: %v", err)
 	}
-	if duplicate.Receipt != purchased.Receipt || duplicate.Wallet["gold"] != 1800 {
-		t.Fatalf("duplicate purchase must reuse receipt and wallet: first=%+v duplicate=%+v", purchased, duplicate)
+	if duplicate.Receipt != purchased.Receipt || duplicate.Wallet["gold"] != 1600 {
+		t.Fatalf("duplicate purchase must reuse receipt and expose current wallet: first=%+v duplicate=%+v", purchased, duplicate)
 	}
 	if _, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
 		ProductID: "card.last_arc.single",

@@ -147,6 +147,8 @@ func (s *Service) PurchaseShopProduct(sessionToken string, req ShopPurchaseReque
 			return nil, newError(codeIdempotencyConflict, "nonce was already used for a different purchase")
 		}
 		response := copyShopPurchaseResponse(record.Response)
+		response.Wallet = copyWallet(user.Wallet)
+		response.Inventory = s.inventorySnapshotLocked(user)
 		response.ServerTime = s.clock().UnixMilli()
 		return &response, nil
 	}
