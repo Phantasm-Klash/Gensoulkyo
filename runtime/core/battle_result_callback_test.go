@@ -325,7 +325,11 @@ func TestApplyBattleResultCallbackUnknownMatch(t *testing.T) {
 
 func TestBindBattleServerAllocationReissuesTickets(t *testing.T) {
 	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
-	service := NewService(Config{Clock: func() time.Time { return now }})
+	repo := &captureBattleLifecycleAuditRepo{}
+	service := NewService(Config{
+		Clock:                    func() time.Time { return now },
+		BattleLifecycleAuditRepo: repo,
+	})
 	alice := mustLogin(t, service, "Alice")
 	bob := mustLogin(t, service, "Bob")
 	matchID := matchTwoPlayers(t, service, alice, bob, "certification")
@@ -350,6 +354,23 @@ func TestBindBattleServerAllocationReissuesTickets(t *testing.T) {
 	}
 	if after.Ticket.TicketID == before.Ticket.TicketID {
 		t.Fatalf("expected a freshly issued ticket after bind")
+	}
+	revokedCount := 0
+	var revoked BattleTicketAuditRecord
+	for _, record := range repo.tickets {
+		if record.Status == "revoked" {
+			revokedCount++
+			if record.TicketID == before.Ticket.TicketID {
+				revoked = record
+			}
+		}
+	}
+	if revoked.TicketID == "" || !revoked.ConsumedAt.Equal(now) || revoked.ExpiresAt != before.Ticket.ExpiresAt || !revoked.ServerAuthoritative {
+		t.Fatalf("allocation rebind must audit the old ticket as revoked: tickets=%+v", repo.tickets)
+	}
+	status := service.BattleLifecycleAuditStatus()
+	if !status.OK || revokedCount != 2 || status.TicketRevokedRecords != revokedCount {
+		t.Fatalf("allocation rebind should expose one revoked audit per old player ticket: count=%d status=%+v", revokedCount, status)
 	}
 	if _, err := service.BindBattleServerAllocation("match_missing", "x", "1.2.3.4:1"); err == nil {
 		t.Fatalf("expected not_found for unknown match")
