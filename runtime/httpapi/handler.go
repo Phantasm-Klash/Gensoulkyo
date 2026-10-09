@@ -389,6 +389,7 @@ func (h *Handler) shopCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	resp.ReadSource = "http_fallback"
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -398,11 +399,13 @@ func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ProductID string `json:"product_id"`
-		Quantity  int    `json:"quantity"`
-		Nonce     string `json:"nonce"`
-		ItemID    string `json:"item_id"`
-		Count     int    `json:"count"`
+		ProductID      string `json:"product_id"`
+		Quantity       int    `json:"quantity"`
+		Nonce          string `json:"nonce"`
+		ItemID         string `json:"item_id"`
+		Count          int    `json:"count"`
+		CatalogVersion string `json:"catalog_version"`
+		IdempotencyKey string `json:"idempotency_key"`
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
@@ -413,7 +416,12 @@ func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
 		return
 	}
-	if strings.TrimSpace(req.ProductID) != "" || strings.TrimSpace(req.Nonce) != "" || req.Quantity != 0 {
+	modernPurchase := strings.TrimSpace(req.ProductID) != "" ||
+		strings.TrimSpace(req.Nonce) != "" ||
+		strings.TrimSpace(req.CatalogVersion) != "" ||
+		strings.TrimSpace(req.IdempotencyKey) != "" ||
+		req.Quantity != 0
+	if modernPurchase {
 		if status, code, message := h.requireBusinessEnvelopeHeaders(r); code != "" {
 			writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
 			return
@@ -423,9 +431,13 @@ func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp, err := h.service.PurchaseShopProduct(sessionToken(r), core.ShopPurchaseRequest{
-			ProductID: req.ProductID,
-			Quantity:  req.Quantity,
-			Nonce:     req.Nonce,
+			ProductID:      req.ProductID,
+			Quantity:       req.Quantity,
+			Nonce:          req.Nonce,
+			ItemID:         req.ItemID,
+			Count:          req.Count,
+			CatalogVersion: req.CatalogVersion,
+			IdempotencyKey: req.IdempotencyKey,
 		})
 		if err != nil {
 			writeError(w, err)
@@ -1266,6 +1278,10 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	case "battle_server_unavailable":
 		status = http.StatusServiceUnavailable
+	case "catalog_version_mismatch", "idempotency_conflict":
+		status = http.StatusConflict
+	case "product_not_found":
+		status = http.StatusNotFound
 	}
 	writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": err.Error()})
 }

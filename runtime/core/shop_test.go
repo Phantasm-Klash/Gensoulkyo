@@ -21,7 +21,7 @@ func TestShopCatalogAndPurchaseAreServerAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shop catalog: %v", err)
 	}
-	if !catalog.OK || len(catalog.Products) != len(serverShopCatalog) || catalog.Season != shopCatalogSeason || catalog.Wallet["gold"] != 2000 || catalog.ServerTime != now.UnixMilli() {
+	if !catalog.OK || !catalog.ServerAuthoritative || catalog.ReadSource != "memory" || len(catalog.Products) != len(serverShopCatalog) || catalog.Season != shopCatalogSeason || catalog.CatalogVersion != shopCatalogVersion || catalog.Wallet["gold"] != 2000 || catalog.ServerTime != now.UnixMilli() || catalog.ServerTimeMS != now.UnixMilli() {
 		t.Fatalf("shop catalog invalid: %+v", catalog)
 	}
 	for index := 1; index < len(catalog.Products); index++ {
@@ -38,7 +38,7 @@ func TestShopCatalogAndPurchaseAreServerAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shop purchase: %v", err)
 	}
-	if !purchased.OK || !purchased.ServerAuthoritative || purchased.Wallet["gold"] != 1800 || purchased.Receipt.ReceiptID == "" {
+	if !purchased.OK || !purchased.ServerAuthoritative || purchased.Wallet["gold"] != 1800 || purchased.Receipt.ReceiptID == "" || purchased.LedgerID == "" || purchased.Receipt.LedgerID != purchased.LedgerID || purchased.CatalogVersion != shopCatalogVersion || purchased.Receipt.CatalogVersion != shopCatalogVersion || purchased.Duplicate || purchased.Spent["gold"] != 200 {
 		t.Fatalf("shop purchase invalid: %+v", purchased)
 	}
 	var focusCopies int
@@ -55,9 +55,10 @@ func TestShopCatalogAndPurchaseAreServerAuthoritative(t *testing.T) {
 	}
 
 	second, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
-		ProductID: "card.bomb_amplifier.single",
-		Quantity:  1,
-		Nonce:     "shop-nonce-2",
+		ItemID:         "card.bomb_amplifier.single",
+		Count:          1,
+		IdempotencyKey: "shop-nonce-2",
+		CatalogVersion: shopCatalogVersion,
 	})
 	if err != nil {
 		t.Fatalf("second shop purchase: %v", err)
@@ -74,8 +75,16 @@ func TestShopCatalogAndPurchaseAreServerAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("duplicate shop purchase: %v", err)
 	}
-	if duplicate.Receipt != purchased.Receipt || duplicate.Wallet["gold"] != 1600 {
+	if duplicate.Receipt != purchased.Receipt || duplicate.Wallet["gold"] != 1600 || !duplicate.Duplicate {
 		t.Fatalf("duplicate purchase must reuse receipt and expose current wallet: first=%+v duplicate=%+v", purchased, duplicate)
+	}
+	legacyShapeRetry, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
+		ProductID: "card.focus_lens.single",
+		Quantity:  1,
+		Nonce:     "shop-nonce-1",
+	})
+	if err != nil || !legacyShapeRetry.Duplicate || legacyShapeRetry.Receipt != purchased.Receipt {
+		t.Fatalf("legacy request shape should retry the same normalized versioned purchase: receipt=%+v err=%v", legacyShapeRetry, err)
 	}
 	if _, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
 		ProductID: "card.last_arc.single",
@@ -115,6 +124,22 @@ func TestShopPurchaseRejectsWithoutMutation(t *testing.T) {
 		Nonce:     "shop-quantity",
 	}); ErrorCode(err) != codeQuantityInvalid {
 		t.Fatalf("expected quantity invalid, got %v", err)
+	}
+	if _, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
+		ProductID:      "card.focus_lens.single",
+		Quantity:       1,
+		IdempotencyKey: "shop-stale-catalog",
+		CatalogVersion: "shop-old-s0",
+	}); ErrorCode(err) != codeCatalogVersionMismatch {
+		t.Fatalf("expected catalog version mismatch, got %v", err)
+	}
+	if _, err := service.PurchaseShopProduct(alice.SessionToken, ShopPurchaseRequest{
+		ProductID: "card.focus_lens.single",
+		ItemID:    "card.bomb_amplifier.single",
+		Quantity:  1,
+		Nonce:     "shop-conflicting-product-alias",
+	}); ErrorCode(err) != "invalid_request" {
+		t.Fatalf("expected conflicting product aliases to be rejected, got %v", err)
 	}
 
 	service.mu.Lock()

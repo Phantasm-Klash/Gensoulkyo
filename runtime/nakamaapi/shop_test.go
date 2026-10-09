@@ -26,7 +26,7 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 	if !catalog.OK || catalog.Status != 200 {
 		t.Fatalf("shop catalog RPC failed: %+v", catalog)
 	}
-	if payload, ok := catalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 6 {
+	if payload, ok := catalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 6 || payload.ReadSource != "nakama" || payload.CatalogVersion == "" {
 		t.Fatalf("shop catalog RPC payload invalid: %+v", catalog.Payload)
 	}
 
@@ -39,7 +39,7 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 	if !legacyCatalog.OK || legacyCatalog.Status != 200 {
 		t.Fatalf("legacy shop.get RPC failed: %+v", legacyCatalog)
 	}
-	if payload, ok := legacyCatalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 6 {
+	if payload, ok := legacyCatalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 6 || payload.ReadSource != "nakama" {
 		t.Fatalf("legacy shop.get RPC payload invalid: %+v", legacyCatalog.Payload)
 	}
 
@@ -71,7 +71,25 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 	if !purchase.OK || purchase.Status != 200 {
 		t.Fatalf("shop purchase RPC failed: %+v", purchase)
 	}
-	if payload, ok := purchase.Payload.(*core.ShopPurchaseResponse); !ok || !payload.ServerAuthoritative || payload.Receipt.CostAmount != 200 {
+	if payload, ok := purchase.Payload.(*core.ShopPurchaseResponse); !ok || !payload.ServerAuthoritative || payload.Receipt.CostAmount != 200 || payload.LedgerID == "" || payload.CatalogVersion == "" || payload.Duplicate {
 		t.Fatalf("shop purchase RPC payload invalid: %+v", purchase.Payload)
+	}
+
+	duplicatePurchase := handler.HandleRPC(RPCRequest{
+		ID:        "shop.purchase",
+		SessionID: session.SessionToken,
+		UserID:    session.UserID,
+		Payload: envelopePayload(5, "shop-rpc-purchase-alias", "shop_purchase", map[string]any{
+			"item_id":         "card.focus_lens.single",
+			"count":           1,
+			"idempotency_key": "rpc-shop-nonce-valid",
+			"catalog_version": "shop-local-s0",
+		}),
+	})
+	if !duplicatePurchase.OK {
+		t.Fatalf("shop purchase idempotent alias retry failed: %+v", duplicatePurchase)
+	}
+	if payload, ok := duplicatePurchase.Payload.(*core.ShopPurchaseResponse); !ok || !payload.Duplicate || payload.Receipt.LedgerID == "" {
+		t.Fatalf("shop purchase alias retry should return duplicate receipt: %+v", duplicatePurchase.Payload)
 	}
 }
