@@ -884,6 +884,44 @@ func TestBattleResultSubmitRejectsLoadingMatch(t *testing.T) {
 	}
 }
 
+func TestBattleResultSubmitRejectsMissingAllocationWithoutCreatingOne(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Missing Allocation Alice")
+	bob := mustLogin(t, service, "Missing Allocation Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	if _, err := service.ReadyMatch(alice.SessionToken, matchID); err != nil {
+		t.Fatalf("ready alice: %v", err)
+	}
+	if _, err := service.ReadyMatch(bob.SessionToken, matchID); err != nil {
+		t.Fatalf("ready bob: %v", err)
+	}
+	signed := signedBattleResultForAllocation(allocation)
+
+	service.mu.Lock()
+	delete(service.battleAllocations, matchID)
+	match := service.matches[matchID]
+	match.BattleAllocation = nil
+	service.mu.Unlock()
+
+	if _, err := service.SubmitBattleResult(BattleResultSubmitRequest{SignedResult: signed}); ErrorCode(err) != codeBattleServer {
+		t.Fatalf("missing allocation callback should be rejected, got %v", err)
+	}
+	service.mu.Lock()
+	_, recreated := service.battleAllocations[matchID]
+	match = service.matches[matchID]
+	service.mu.Unlock()
+	if recreated {
+		t.Fatalf("result callback must not recreate a battle allocation")
+	}
+	if match == nil || match.BattleResultHash != "" || match.Status != "running" {
+		t.Fatalf("rejected callback must not settle or mutate match: %+v", match)
+	}
+}
+
 func TestBattleLifecycleAuditRepositoryReceivesAllocationTicketResultAndReplayRecords(t *testing.T) {
 	now := time.Date(2026, 6, 28, 9, 0, 0, 0, time.UTC)
 	repo := &captureBattleLifecycleAuditRepo{}

@@ -2282,7 +2282,13 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	if !ok {
 		return nil, newError(codeNotFound, "match not found")
 	}
-	allocation := s.ensureBattleAllocationLocked(match)
+	// A signed result is a callback for an allocation that already exists. Do
+	// not allocate a battle server from the callback path: a malformed or
+	// replayed callback must not create scheduling state as a side effect.
+	allocation := s.battleAllocations[result.MatchID]
+	if allocation == nil {
+		allocation = match.BattleAllocation
+	}
 	if allocation == nil {
 		err := newError(codeBattleServer, "battle allocation unavailable")
 		s.recordBattleResultRejectedAuditLocked(match, nil, signed, ErrorCode(err), now)
