@@ -23,6 +23,14 @@ func TestHTTPShopCatalogAndPurchaseRoutes(t *testing.T) {
 	if len(catalog.Products) != 6 || catalog.Wallet["gold"] != 2000 {
 		t.Fatalf("shop catalog route invalid: %+v", catalog)
 	}
+	missingEnvelope := postRaw(t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{
+		"product_id": "chest.standard.pull",
+		"quantity":   1,
+		"nonce":      "http-shop-missing-envelope",
+	})
+	if missingEnvelope.Code != http.StatusBadRequest || missingEnvelope.ErrorCode != "business_envelope_required" {
+		t.Fatalf("modern shop purchase should require a business envelope: %+v", missingEnvelope)
+	}
 	purchase := postJSONWithHeaders[core.ShopPurchaseResponse](t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{
 		"product_id": "chest.standard.pull",
 		"quantity":   1,
