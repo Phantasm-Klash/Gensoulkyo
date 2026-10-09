@@ -36,6 +36,11 @@ const (
 	// may bind. When either is unset the OS picks an ephemeral port (--port 0).
 	EnvPortMin = "GENSOULKYO_BATTLE_PORT_MIN"
 	EnvPortMax = "GENSOULKYO_BATTLE_PORT_MAX"
+	// EnvMaxTicks is the hard tick budget handed to every spawned battle server
+	// (`--max-ticks`). It is the battle server's own self-termination bound: with
+	// `--max-ticks 0` (the C++ default) the process only exits when the match
+	// settles, so a match that never settles runs forever and leaks.
+	EnvMaxTicks = "GENSOULKYO_BATTLE_MAX_TICKS"
 	// DefaultBinaryPath is used when EnvBinary is unset.
 	DefaultBinaryPath = "../PhK-BattleServer/build-linux/phk_battle_server"
 	// DefaultAdvertiseHost is used when EnvAdvertiseHost is unset.
@@ -49,6 +54,17 @@ const (
 	// DefaultPortPickAttempts bounds how many candidate ports we probe before
 	// falling back to an ephemeral port.
 	DefaultPortPickAttempts = 12
+	// DefaultMaxTicks bounds every spawned battle server's lifetime in ticks.
+	// 7200 ticks at the 60 Hz simulation rate is a two-minute match — the same
+	// budget the production battle agent uses (GENSOULKYO_BATTLE_MAX_TICKS=7200).
+	// Passing this is what keeps an abandoned match from pinning a process (and
+	// its KCP session + simulation state) forever.
+	DefaultMaxTicks = 7200
+	// DefaultMatchTTL is the wall-clock backstop applied to a spawned battle
+	// server when neither the caller nor the environment supplies one. It is
+	// deliberately generous (well past the two-minute tick budget) so it only
+	// ever fires for a genuinely wedged match.
+	DefaultMatchTTL = 15 * time.Minute
 )
 
 // SpawnRequest describes a per-match battle server process.
@@ -84,6 +100,16 @@ type Config struct {
 	PortPickAttempts int
 	// ExtraEnv is appended to the inherited environment for spawned processes.
 	ExtraEnv []string
+	// MaxTicks is the `--max-ticks` value applied to every spawned battle server
+	// that does not carry its own (see SpawnRequest.MaxTicks). Zero falls back to
+	// EnvMaxTicks / DefaultMaxTicks. Never leave this at zero for a long-lived
+	// lobby: without a tick budget the battle server never self-terminates.
+	MaxTicks uint64
+	// MatchTTL is the hard kill deadline applied to a spawned battle server that
+	// does not carry its own TTL (see SpawnRequest.TTL). Zero falls back to
+	// DefaultMatchTTL. It is the last line of defence: even if the match never
+	// settles and the tick budget never trips, the process is reaped.
+	MatchTTL time.Duration
 	// OnLine, when set, receives every stdout line emitted by the process.
 	OnLine func(matchID string, line string)
 }
@@ -121,6 +147,19 @@ func (c Config) withDefaults() Config {
 	}
 	if !validPortRange(c.PortMin, c.PortMax) {
 		c.PortMin, c.PortMax = 0, 0
+	}
+	if c.MaxTicks == 0 {
+		if raw := strings.TrimSpace(os.Getenv(EnvMaxTicks)); raw != "" {
+			if parsed, err := strconv.ParseUint(raw, 10, 64); err == nil && parsed > 0 {
+				c.MaxTicks = parsed
+			}
+		}
+	}
+	if c.MaxTicks == 0 {
+		c.MaxTicks = DefaultMaxTicks
+	}
+	if c.MatchTTL <= 0 {
+		c.MatchTTL = DefaultMatchTTL
 	}
 	return c
 }
@@ -272,8 +311,16 @@ func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) (*Process, error)
 	if req.BossMaxHP > 0 {
 		args = append(args, "--boss-hp", strconv.FormatUint(req.BossMaxHP, 10))
 	}
-	if req.MaxTicks > 0 {
-		args = append(args, "--max-ticks", strconv.FormatUint(req.MaxTicks, 10))
+	// Always hand the battle server a tick budget. A battle server started
+	// without `--max-ticks` (its own default is 0 = unbounded) only exits when
+	// the match settles, so a match nobody ever finishes would pin the process
+	// forever — the exact leak that exhausted the gateway host's memory.
+	maxTicks := req.MaxTicks
+	if maxTicks == 0 {
+		maxTicks = cfg.MaxTicks
+	}
+	if maxTicks > 0 {
+		args = append(args, "--max-ticks", strconv.FormatUint(maxTicks, 10))
 	}
 
 	cmd := exec.Command(cfg.BinaryPath, args...)
@@ -330,8 +377,12 @@ func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) (*Process, error)
 	case port := <-readyCh:
 		p.Port = port
 		p.Endpoint = net.JoinHostPort(cfg.AdvertiseHost, strconv.Itoa(port))
-		if req.TTL > 0 {
-			p.killTTL = time.AfterFunc(req.TTL, func() { _ = p.Kill() })
+		ttl := req.TTL
+		if ttl <= 0 {
+			ttl = cfg.MatchTTL
+		}
+		if ttl > 0 {
+			p.killTTL = time.AfterFunc(ttl, func() { _ = p.Kill() })
 		}
 		s.track(p)
 		return p, nil
@@ -344,10 +395,19 @@ func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) (*Process, error)
 	}
 }
 
+// track records the process for a match. If a process is already tracked for
+// the same match it is replaced **and killed** — overwriting the map entry
+// alone would orphan the previous process: it would keep running (and keep its
+// KCP session and simulation state) but no longer be reachable by Kill/KillAll,
+// so nothing could ever reap it.
 func (s *Spawner) track(p *Process) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	previous := s.procs[p.MatchID]
 	s.procs[p.MatchID] = p
+	s.mu.Unlock()
+	if previous != nil && previous != p {
+		_ = previous.Kill()
+	}
 }
 
 // Get returns the tracked process for a match, if any.

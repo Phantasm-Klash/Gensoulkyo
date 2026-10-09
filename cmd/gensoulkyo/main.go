@@ -65,11 +65,16 @@ func main() {
 		LobbyEndpoint: lobbyEndpoint,
 		Ruleset:       battleRuleset,
 	})
+	// Every spawned battle server must have both a tick budget and a wall-clock
+	// deadline, otherwise an abandoned match leaks a process (and its KCP session
+	// and simulation state) until the host runs out of memory. The spawner
+	// defaults both, so the lobby only needs to pass through explicit overrides.
 	lobby := lobbyws.New(lobbyws.Options{
 		Service:       service,
 		Spawner:       spawner,
 		LobbyEndpoint: lobbyEndpoint,
 		BattleRuleset: battleRuleset,
+		MatchTTL:      envDuration("GENSOULKYO_MATCH_TTL"),
 	})
 
 	mux := http.NewServeMux()
@@ -86,6 +91,25 @@ func main() {
 		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	log.Printf("Gensoulkyo %s listening on http://%s (lobby ws %s, battle bin %s)", core.ServerVersion, *addr, lobbyEndpoint, spawner.Config().BinaryPath)
+	log.Printf(
+		"Gensoulkyo %s listening on http://%s (lobby ws %s, battle bin %s, max-ticks %d, match-ttl %s)",
+		core.ServerVersion, *addr, lobbyEndpoint, spawner.Config().BinaryPath,
+		spawner.Config().MaxTicks, spawner.Config().MatchTTL,
+	)
 	log.Fatal(server.ListenAndServe())
+}
+
+// envDuration parses a Go duration string (e.g. "15m", "90s") from the
+// environment. An unset or malformed value yields 0 so the caller's default
+// applies.
+func envDuration(key string) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
 }

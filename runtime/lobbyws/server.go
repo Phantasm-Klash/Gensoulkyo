@@ -62,12 +62,20 @@ func New(opts Options) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
+	// A zero MatchTTL used to mean "no TTL at all": every spawned battle server
+	// then relied solely on its own `--max-ticks` budget to exit. Defaulting it
+	// here (and again in the spawner) makes the wall-clock backstop impossible to
+	// forget, so a wedged match can never pin a process indefinitely.
+	matchTTL := opts.MatchTTL
+	if matchTTL <= 0 {
+		matchTTL = battlespawn.DefaultMatchTTL
+	}
 	return &Server{
 		service:       opts.Service,
 		spawner:       opts.Spawner,
 		lobbyEndpoint: strings.TrimSpace(opts.LobbyEndpoint),
 		ruleset:       strings.TrimSpace(opts.BattleRuleset),
-		matchTTL:      opts.MatchTTL,
+		matchTTL:      matchTTL,
 		logger:        logger,
 		clients:       map[*client]struct{}{},
 		rooms:         map[string]map[*client]struct{}{},
