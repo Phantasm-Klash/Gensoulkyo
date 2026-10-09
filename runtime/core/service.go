@@ -5434,6 +5434,40 @@ func (s *Service) recordBattleTicketExpiredAuditLocked(signed *SignedBattleTicke
 	s.recordBattleAuditOutcomeLocked("battle_ticket_expired", fingerprint, expiredAt, err)
 }
 
+func (s *Service) recordBattleTicketRevokedAuditLocked(signed *SignedBattleTicket, revokedAt time.Time) {
+	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
+		return
+	}
+	ticket := signed.Ticket
+	if revokedAt.IsZero() {
+		revokedAt = s.clock()
+	}
+	err := s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Endpoint:            ticket.Endpoint,
+		KeyID:               signed.KeyID,
+		RulesetVersion:      ticket.RulesetVersion,
+		ProtocolVersion:     fmt.Sprintf("%d", ticket.Version.ProtocolVersion),
+		BusinessAPIVersion:  ticket.Version.BusinessAPIVersion,
+		BattleAPIVersion:    ticket.Version.BattleAPIVersion,
+		DeckSnapshotHash:    ticket.DeckSnapshotHash,
+		ModeConfigHash:      ticket.ModeConfigHash,
+		Nonce:               ticket.TicketNonceHex,
+		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
+		Status:              "revoked",
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ConsumedAt:          revokedAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:ticket:revoked", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.ModeConfigHash, ticket.TicketNonceHex)
+	s.recordBattleAuditOutcomeLocked("battle_ticket_revoked", fingerprint, revokedAt, err)
+}
+
 func (s *Service) recordBattleTicketConsumedAuditLocked(signed *SignedBattleTicket, consumedAt time.Time) {
 	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
 		return
@@ -5839,6 +5873,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		s.battleAuditStatus.TicketRecords++
 	case "battle_ticket_expired":
 		s.battleAuditStatus.TicketExpiredRecords++
+	case "battle_ticket_revoked":
+		s.battleAuditStatus.TicketRevokedRecords++
 	case "battle_ticket_consumed":
 		s.battleAuditStatus.TicketConsumedRecords++
 	case "battle_ticket_rejected":

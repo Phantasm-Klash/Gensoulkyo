@@ -109,6 +109,7 @@ type BattleLifecycleAuditStatus struct {
 	AllocationRecords      int       `json:"allocation_records"`
 	TicketRecords          int       `json:"ticket_records"`
 	TicketExpiredRecords   int       `json:"ticket_expired_records"`
+	TicketRevokedRecords   int       `json:"ticket_revoked_records"`
 	TicketConsumedRecords  int       `json:"ticket_consumed_records"`
 	TicketRejectedRecords  int       `json:"ticket_rejected_records"`
 	ResultRecords          int       `json:"result_records"`
