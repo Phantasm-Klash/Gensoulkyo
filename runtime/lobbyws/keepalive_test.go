@@ -14,9 +14,8 @@ import (
 // TestLobbyReapsSilentClient pins the WebSocket keepalive. A client that
 // vanishes without a TCP FIN/RST (process killed, network drop, NAT timeout)
 // used to block ReadMessage forever, leaking the client, its goroutine and its
-// room membership — the same class of leak that exhausted the gateway host's
-// memory. The server now pings every PingPeriod and drops a peer that has been
-// silent for PongWait.
+// room membership. The server now pings every PingPeriod and drops a peer that
+// has been silent for PongWait.
 func TestLobbyReapsSilentClient(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := New(Options{
@@ -43,8 +42,8 @@ func TestLobbyReapsSilentClient(t *testing.T) {
 	waitForClientCount(t, server, 0, 5*time.Second)
 }
 
-// TestLobbyKeepsRespondingClient checks the other half of the contract: a client
-// that answers pings (or simply keeps sending frames) is not reaped.
+// TestLobbyKeepsRespondingClient checks the other half of the contract: a
+// client that answers pings (or simply keeps sending frames) is not reaped.
 func TestLobbyKeepsRespondingClient(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := New(Options{

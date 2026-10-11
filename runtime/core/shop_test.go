@@ -146,18 +146,18 @@ func copyShopInventory(source map[string]CardInventoryEntry) map[string]CardInve
 }
 
 func TestShopOperationsAreRPCOnlyClientContracts(t *testing.T) {
-	if !stringSliceContains(ContractClientOperations(), "shop.catalog") || !stringSliceContains(ContractClientOperations(), "shop.purchase") {
+	if !stringSliceContains(ContractClientOperations(), "shop.get") || !stringSliceContains(ContractClientOperations(), "shop.catalog") || !stringSliceContains(ContractClientOperations(), "shop.purchase") {
 		t.Fatalf("shop operations missing from client contract: %+v", ContractClientOperations())
 	}
-	if !stringSliceContains(ContractClientRPCOperations(), "shop.catalog") || !stringSliceContains(ContractClientRPCOperations(), "shop.purchase") {
+	if !stringSliceContains(ContractClientRPCOperations(), "shop.get") || !stringSliceContains(ContractClientRPCOperations(), "shop.catalog") || !stringSliceContains(ContractClientRPCOperations(), "shop.purchase") {
 		t.Fatalf("shop operations missing from RPC contract: %+v", ContractClientRPCOperations())
 	}
-	if stringSliceContains(ContractClientWSSOperations(), "shop.catalog") || stringSliceContains(ContractClientWSSOperations(), "shop.purchase") {
+	if stringSliceContains(ContractClientWSSOperations(), "shop.get") || stringSliceContains(ContractClientWSSOperations(), "shop.catalog") || stringSliceContains(ContractClientWSSOperations(), "shop.purchase") {
 		t.Fatalf("shop purchase/catalog must not be advertised as WSS: %+v", ContractClientWSSOperations())
 	}
 	contracts := ContractClientOperationContracts()
 	for _, contract := range contracts {
-		if contract.Operation == "shop.catalog" && len(contract.ClientRequestFields) != 0 {
+		if (contract.Operation == "shop.get" || contract.Operation == "shop.catalog") && (len(contract.ClientRequestFields) != 0 || contract.Authority != clientRequestAuthorityLookupOnly) {
 			t.Fatalf("shop catalog should be bodyless: %+v", contract)
 		}
 		if contract.Operation == "shop.purchase" {

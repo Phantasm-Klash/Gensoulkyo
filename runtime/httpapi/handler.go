@@ -483,6 +483,10 @@ func (h *Handler) shopCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
+	var raw map[string]any
+	if !decodeJSON(w, r, &raw) {
+		return
+	}
 	var req struct {
 		ProductID string `json:"product_id"`
 		Quantity  int    `json:"quantity"`
@@ -490,10 +494,24 @@ func (h *Handler) shopPurchase(w http.ResponseWriter, r *http.Request) {
 		ItemID    string `json:"item_id"`
 		Count     int    `json:"count"`
 	}
-	if !decodeJSON(w, r, &req) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return
+	}
+	if err := json.Unmarshal(encoded, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
 		return
 	}
 	if strings.TrimSpace(req.ProductID) != "" || strings.TrimSpace(req.Nonce) != "" || req.Quantity != 0 {
+		if status, code, message := h.requireBusinessEnvelopeHeaders(r); code != "" {
+			writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
+			return
+		}
+		if forbidden := core.ForbiddenShopPurchaseField(raw); forbidden != "" {
+			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error_code": "forbidden_field", "message": fmt.Sprintf("client cannot submit %s", forbidden)})
+			return
+		}
 		resp, err := h.service.PurchaseShopProduct(sessionToken(r), core.ShopPurchaseRequest{
 			ProductID: req.ProductID,
 			Quantity:  req.Quantity,
@@ -1311,6 +1329,22 @@ func (h *Handler) validateBusinessEnvelopeHeaders(r *http.Request) (int, string,
 	})
 	if !ok {
 		return 0, "", ""
+	}
+	result := security.ValidateBusinessEnvelopeRequest(h.envelopeGuard, request)
+	if !result.OK {
+		return result.Status, result.Code, result.Message
+	}
+	return 0, "", ""
+}
+
+func (h *Handler) requireBusinessEnvelopeHeaders(r *http.Request) (int, string, string) {
+	request, ok := security.BusinessEnvelopeRequestFromHTTPHeaders(r.Header, security.BusinessEnvelopeRequestContext{
+		SessionID: sessionToken(r),
+		Transport: security.BusinessEnvelopeTransportHTTPFallback,
+		Endpoint:  strings.TrimSpace(r.URL.Path),
+	})
+	if !ok {
+		return http.StatusBadRequest, "business_envelope_required", "business envelope headers are required"
 	}
 	result := security.ValidateBusinessEnvelopeRequest(h.envelopeGuard, request)
 	if !result.OK {

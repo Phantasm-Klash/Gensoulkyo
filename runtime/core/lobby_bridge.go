@@ -64,9 +64,13 @@ func (s *Service) BindBattleServerAllocation(matchID string, battleServerID stri
 }
 
 func (s *Service) invalidateBattleTicketsLocked(matchID string) {
+	revokedAt := s.clock()
 	for key, signed := range s.battleTickets {
 		if signed == nil || signed.Ticket.MatchID != matchID {
 			continue
+		}
+		if _, consumed := s.consumedBattleTickets[signed.Ticket.TicketID]; !consumed {
+			s.recordBattleTicketRevokedAuditLocked(signed, revokedAt)
 		}
 		delete(s.battleTickets, key)
 		delete(s.battleTicketsByID, signed.Ticket.TicketID)

@@ -2281,10 +2281,6 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 		s.recordBattleTicketRejectedAuditLocked(signed, now, err.Code)
 		return nil, err
 	}
-	if now.After(ticket.ExpiresAt) {
-		s.recordBattleTicketExpiredAuditLocked(signed, now)
-		return nil, newError(codeMatchState, "battle ticket expired")
-	}
 	if consumedAt, ok := s.consumedBattleTickets[ticketID]; ok {
 		return &BattleTicketConsumeResponse{
 			OK:                  true,
@@ -2306,6 +2302,10 @@ func (s *Service) ConsumeBattleTicket(req BattleTicketConsumeRequest) (*BattleTi
 			ServerAuthoritative: true,
 			ServerTime:          consumedAt,
 		}, nil
+	}
+	if now.After(ticket.ExpiresAt) {
+		s.recordBattleTicketExpiredAuditLocked(signed, now)
+		return nil, newError(codeMatchState, "battle ticket expired")
 	}
 	s.consumedBattleTickets[ticketID] = now
 	s.recordBattleTicketConsumedAuditLocked(signed, now)
@@ -2350,7 +2350,13 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 	if !ok {
 		return nil, newError(codeNotFound, "match not found")
 	}
-	allocation := s.ensureBattleAllocationLocked(match)
+	// A signed result is a callback for an allocation that already exists. Do
+	// not allocate a battle server from the callback path: a malformed or
+	// replayed callback must not create scheduling state as a side effect.
+	allocation := s.battleAllocations[result.MatchID]
+	if allocation == nil {
+		allocation = match.BattleAllocation
+	}
 	if allocation == nil {
 		err := newError(codeBattleServer, "battle allocation unavailable")
 		s.recordBattleResultRejectedAuditLocked(match, nil, signed, ErrorCode(err), now)
@@ -5496,6 +5502,40 @@ func (s *Service) recordBattleTicketExpiredAuditLocked(signed *SignedBattleTicke
 	s.recordBattleAuditOutcomeLocked("battle_ticket_expired", fingerprint, expiredAt, err)
 }
 
+func (s *Service) recordBattleTicketRevokedAuditLocked(signed *SignedBattleTicket, revokedAt time.Time) {
+	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
+		return
+	}
+	ticket := signed.Ticket
+	if revokedAt.IsZero() {
+		revokedAt = s.clock()
+	}
+	err := s.battleAuditRepo.RecordBattleTicketAudit(BattleTicketAuditRecord{
+		TicketID:            ticket.TicketID,
+		MatchID:             ticket.MatchID,
+		UserID:              ticket.UserID,
+		PlayerID:            ticket.PlayerID,
+		BattleServerID:      ticket.BattleServerID,
+		Endpoint:            ticket.Endpoint,
+		KeyID:               signed.KeyID,
+		RulesetVersion:      ticket.RulesetVersion,
+		ProtocolVersion:     fmt.Sprintf("%d", ticket.Version.ProtocolVersion),
+		BusinessAPIVersion:  ticket.Version.BusinessAPIVersion,
+		BattleAPIVersion:    ticket.Version.BattleAPIVersion,
+		DeckSnapshotHash:    ticket.DeckSnapshotHash,
+		ModeConfigHash:      ticket.ModeConfigHash,
+		Nonce:               ticket.TicketNonceHex,
+		SignaturePrefix:     prefixString(signed.SignatureHex, 16),
+		Status:              "revoked",
+		IssuedAt:            ticket.IssuedAt,
+		ExpiresAt:           ticket.ExpiresAt,
+		ConsumedAt:          revokedAt,
+		ServerAuthoritative: true,
+	})
+	fingerprint := lifecycleFingerprint("battle:ticket:revoked", ticket.TicketID, ticket.MatchID, ticket.UserID, ticket.PlayerID, ticket.DeckSnapshotHash, ticket.ModeConfigHash, ticket.TicketNonceHex)
+	s.recordBattleAuditOutcomeLocked("battle_ticket_revoked", fingerprint, revokedAt, err)
+}
+
 func (s *Service) recordBattleTicketConsumedAuditLocked(signed *SignedBattleTicket, consumedAt time.Time) {
 	if s.battleAuditRepo == nil || signed == nil || signed.Ticket.TicketID == "" {
 		return
@@ -5901,6 +5941,8 @@ func (s *Service) recordBattleAuditOutcomeLocked(operation string, fingerprint s
 		s.battleAuditStatus.TicketRecords++
 	case "battle_ticket_expired":
 		s.battleAuditStatus.TicketExpiredRecords++
+	case "battle_ticket_revoked":
+		s.battleAuditStatus.TicketRevokedRecords++
 	case "battle_ticket_consumed":
 		s.battleAuditStatus.TicketConsumedRecords++
 	case "battle_ticket_rejected":
@@ -6900,6 +6942,7 @@ func contractClientOperations() []string {
 		"decks.save",
 		"chests.list",
 		"chests.open",
+		"shop.get",
 		"shop.catalog",
 		"shop.purchase",
 		"presence.heartbeat",
@@ -7093,7 +7136,7 @@ func clientOperationRequestFields(operation string) []string {
 		return []string{"deck_id", "name", "format", "card_ids", "active", "updated_at"}
 	case "chests.open":
 		return []string{"pool_id", "count"}
-	case "shop.catalog":
+	case "shop.get", "shop.catalog":
 		return []string{}
 	case "shop.purchase":
 		return []string{"product_id", "quantity", "nonce"}
@@ -7141,7 +7184,7 @@ func clientOperationProjectionFields(operation string) []string {
 		return append(common, "user_id", "ruleset_version", "wallet", "owned_chests", "pools", "pity_counters", "opening_log", "last_results", "server_time")
 	case "chests.open":
 		return append(common, "user_id", "pool_id", "count", "wallet", "owned_chests", "inventory", "pity_counters", "results", "audit", "server_time")
-	case "shop.catalog":
+	case "shop.get", "shop.catalog":
 		return append(common, "products", "wallet", "season", "server_time")
 	case "shop.purchase":
 		return append(common, "wallet", "inventory", "granted", "receipt", "server_time")
@@ -7233,7 +7276,7 @@ func clientOperationProjectionFields(operation string) []string {
 
 func clientOperationAuthority(operation string) string {
 	switch operation {
-	case "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
+	case "shop.get", "shop.catalog", "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
 		return clientRequestAuthorityLookupOnly
 	default:
 		return "intent_only"
