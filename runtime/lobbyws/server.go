@@ -31,7 +31,12 @@ type Options struct {
 	// MatchTTL is an optional safety net that kills a battle server process after
 	// the given duration.
 	MatchTTL time.Duration
-	Logger   *log.Logger
+	// PongWait / PingPeriod / WriteWait tune the WebSocket keepalive. Zero uses
+	// the Default* values. Tests shrink them to exercise the reaper quickly.
+	PongWait   time.Duration
+	PingPeriod time.Duration
+	WriteWait  time.Duration
+	Logger     *log.Logger
 }
 
 // Server hosts the WebSocket lobby, the battle relay and the internal battle
@@ -42,12 +47,23 @@ type Server struct {
 	lobbyEndpoint string
 	ruleset       string
 	matchTTL      time.Duration
+	pongWait      time.Duration
+	pingPeriod    time.Duration
+	writeWait     time.Duration
 	logger        *log.Logger
 
 	mu      sync.Mutex
 	clients map[*client]struct{}
 	rooms   map[string]map[*client]struct{}
 	matches map[string]*matchEntry
+
+	// sessionsMu is a leaf lock guarding sessionClients. It is deliberately
+	// independent of mu: the core session-revocation hook runs on the login
+	// path (where Service.mu is held and then released) and must never contend
+	// with mu, which the WebSocket handlers take before calling into core.
+	// Lock order when both are needed: mu then sessionsMu (never the reverse).
+	sessionsMu     sync.Mutex
+	sessionClients map[string]*client
 }
 
 type matchEntry struct {
@@ -70,22 +86,43 @@ func New(opts Options) *Server {
 	if matchTTL <= 0 {
 		matchTTL = battlespawn.DefaultMatchTTL
 	}
+	pongWait := opts.PongWait
+	if pongWait <= 0 {
+		pongWait = DefaultPongWait
+	}
+	pingPeriod := opts.PingPeriod
+	if pingPeriod <= 0 || pingPeriod >= pongWait {
+		pingPeriod = pongWait * 5 / 12
+	}
+	writeWait := opts.WriteWait
+	if writeWait <= 0 {
+		writeWait = DefaultWriteWait
+	}
 	return &Server{
-		service:       opts.Service,
-		spawner:       opts.Spawner,
-		lobbyEndpoint: strings.TrimSpace(opts.LobbyEndpoint),
-		ruleset:       strings.TrimSpace(opts.BattleRuleset),
-		matchTTL:      matchTTL,
-		logger:        logger,
-		clients:       map[*client]struct{}{},
-		rooms:         map[string]map[*client]struct{}{},
-		matches:       map[string]*matchEntry{},
+		service:        opts.Service,
+		spawner:        opts.Spawner,
+		lobbyEndpoint:  strings.TrimSpace(opts.LobbyEndpoint),
+		ruleset:        strings.TrimSpace(opts.BattleRuleset),
+		matchTTL:       matchTTL,
+		pongWait:       pongWait,
+		pingPeriod:     pingPeriod,
+		writeWait:      writeWait,
+		logger:         logger,
+		clients:        map[*client]struct{}{},
+		rooms:          map[string]map[*client]struct{}{},
+		matches:        map[string]*matchEntry{},
+		sessionClients: map[string]*client{},
 	}
 }
 
 type outbound struct {
 	opcode  int
 	payload []byte
+	// closeAfter makes writePump close the connection right after this frame
+	// is written. It is used to deliver a terminal error (for example
+	// session_replaced) and then hang up, so a superseded client is not left
+	// with a silent zombie socket.
+	closeAfter bool
 }
 
 type client struct {
@@ -147,6 +184,64 @@ func (s *Server) unregister(c *client) {
 		}
 	}
 	s.mu.Unlock()
+
+	// Drop the session index entry only if it still points at this connection:
+	// a newer connection may already have taken the token over, and it must not
+	// be evicted by the superseded one tearing down.
+	s.sessionsMu.Lock()
+	if c.token != "" && s.sessionClients[c.token] == c {
+		delete(s.sessionClients, c.token)
+	}
+	s.sessionsMu.Unlock()
+}
+
+// registerSession records the live connection for an authenticated session
+// token. It is called from the read goroutine only after authentication
+// succeeds, because c.token is unknown until then. If another live connection
+// already holds the same token it is superseded (single sign-on): the older
+// socket receives session_replaced and is then closed. The close is dispatched
+// outside sessionsMu so the leaf lock is never held while taking Server.mu.
+func (s *Server) registerSession(c *client, token string) {
+	token = strings.TrimSpace(token)
+
+	s.sessionsMu.Lock()
+	c.token = token
+	var superseded *client
+	if token != "" {
+		if existing := s.sessionClients[token]; existing != nil && existing != c {
+			superseded = existing
+		}
+		s.sessionClients[token] = c
+	}
+	s.sessionsMu.Unlock()
+
+	if superseded != nil {
+		superseded.replacedByNewSession()
+	}
+}
+
+// OnSessionRevoked is the core.Config.OnSessionRevoked hook. It disconnects the
+// live lobby connection bound to a superseded session token so the old client
+// receives an explicit session_replaced error instead of silently failing on
+// its next request.
+//
+// Contract: core calls this with Service.mu released, so taking sessionsMu here
+// cannot deadlock against a concurrent login. The method does not take Server.mu
+// and does not call back into core; it only looks up the connection and enqueues
+// a terminal frame. The socket close itself is performed by that connection's
+// writePump.
+func (s *Server) OnSessionRevoked(userID string, sessionToken string) {
+	token := strings.TrimSpace(sessionToken)
+	if token == "" {
+		return
+	}
+	s.sessionsMu.Lock()
+	c := s.sessionClients[token]
+	s.sessionsMu.Unlock()
+	if c == nil {
+		return
+	}
+	c.replacedByNewSession()
 }
 
 func (s *Server) setRoom(c *client, roomCode string) {
@@ -186,15 +281,36 @@ func (s *Server) logf(format string, args ...any) {
 	}
 }
 
+// Default keepalive parameters for the lobby WebSocket. A peer that vanishes
+// without a TCP FIN/RST (process killed, network drop, NAT timeout) would
+// otherwise block ReadMessage forever, leaking the client, its goroutine and its
+// room membership. The server pings every PingPeriod and drops the connection
+// when no frame has arrived for PongWait.
+const (
+	// DefaultPongWait is how long we tolerate silence before reaping a client.
+	DefaultPongWait = 60 * time.Second
+	// DefaultPingPeriod must be < DefaultPongWait so a live client answers in time.
+	DefaultPingPeriod = 25 * time.Second
+	// DefaultWriteWait bounds a single write so a stalled peer cannot block the pump.
+	DefaultWriteWait = 10 * time.Second
+)
+
 func (c *client) readLoop() {
 	defer func() {
 		c.close()
 	}()
+	// Reset the read deadline on every frame (including the pongs that answer
+	// our keepalive pings), so only a genuinely silent peer times out.
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.server.pongWait))
+	c.conn.SetPongHandler(func() {
+		_ = c.conn.SetReadDeadline(time.Now().Add(c.server.pongWait))
+	})
 	for {
 		opcode, payload, err := c.conn.ReadMessage()
 		if err != nil {
 			return
 		}
+		_ = c.conn.SetReadDeadline(time.Now().Add(c.server.pongWait))
 		switch opcode {
 		case OpClose:
 			_ = c.conn.WriteClose(1000, "")
@@ -208,13 +324,34 @@ func (c *client) readLoop() {
 }
 
 func (c *client) writePump() {
+	ping := time.NewTicker(c.server.pingPeriod)
+	defer ping.Stop()
 	for {
 		select {
 		case <-c.closed:
 			_ = c.conn.Close()
 			return
+		case <-ping.C:
+			// A failed ping means the peer is gone; stop the pump and let the
+			// read side (which is blocked on its deadline) unwind too.
+			_ = c.conn.SetWriteDeadline(time.Now().Add(c.server.writeWait))
+			if err := c.conn.WritePing(nil); err != nil {
+				c.close()
+				_ = c.conn.Close()
+				return
+			}
 		case msg := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(c.server.writeWait))
 			if err := c.conn.WriteMessage(msg.opcode, msg.payload); err != nil {
+				c.close()
+				_ = c.conn.Close()
+				return
+			}
+			if msg.closeAfter {
+				// Terminal frame delivered (for example session_replaced):
+				// tear the connection down so the peer cannot linger as a
+				// zombie. close() unregisters under Server.mu; writePump holds
+				// no lock here, so that is safe.
 				c.close()
 				_ = c.conn.Close()
 				return
@@ -253,6 +390,39 @@ func (c *client) sendEnvelope(msgType int, payload any) {
 
 func (c *client) sendError(code string, message string) {
 	c.sendEnvelope(TypeError, ErrorStatus{Code: code, Message: message})
+}
+
+// replacedByNewSession tells a superseded client that its session was replaced
+// and then disconnects it. Delivery is preferred so the peer learns the reason;
+// if the send buffer is full (a stalled consumer) the frame cannot be delivered,
+// so the connection is closed directly — a superseded socket must never survive
+// as a zombie.
+//
+// This takes no lock itself. The caller has already released Service.mu (core's
+// contract) and sessionsMu, so the close() -> unregister Server.mu acquisition
+// below cannot form a lock cycle.
+func (c *client) replacedByNewSession() {
+	raw, err := json.Marshal(ErrorStatus{Code: core.CodeSessionReplaced, Message: "session replaced by a newer sign-in"})
+	if err != nil {
+		c.forceClose()
+		return
+	}
+	data, err := json.Marshal(envelope{Type: TypeError, Payload: raw})
+	if err != nil {
+		c.forceClose()
+		return
+	}
+	select {
+	case <-c.closed:
+	case c.send <- outbound{opcode: OpText, payload: data, closeAfter: true}:
+	default:
+		c.forceClose()
+	}
+}
+
+func (c *client) forceClose() {
+	c.close()
+	_ = c.conn.Close()
 }
 
 func (c *client) authenticated() bool { return c.token != "" }
@@ -326,9 +496,11 @@ func (c *client) handleAuth(raw json.RawMessage) {
 		snapshot = bootstrapped
 	}
 
-	c.token = snapshot.SessionToken
 	c.userID = snapshot.UserID
 	c.name = snapshot.DisplayName
+	// Index the connection now that its session token is known, so a later
+	// sign-in for the same identity can find and replace it.
+	c.server.registerSession(c, snapshot.SessionToken)
 	now := time.Now().UTC()
 	c.sendEnvelope(TypeAuthResponse, LobbyAuthResponse{
 		Version:      coreVersionStamp(snapshot.Ruleset),
@@ -479,12 +651,21 @@ func (s *Server) startMatch(roomCode string, matchID string) {
 				playerIDs = append(playerIDs, player.PlayerID)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			// The battle server and the client must run the *same* danmaku model, so the
+			// ruleset has to be the one the lobby advertised to the players in this match,
+			// not the deployment-wide default. `s.ruleset` stays as the fallback for an
+			// allocation that carries none; this mirrors the non-WS allocation path in
+			// `runtime/core/service.go`.
+			ruleset := strings.TrimSpace(allocation.Version.RulesetVersion)
+			if ruleset == "" {
+				ruleset = s.ruleset
+			}
 			proc, err := s.spawner.Spawn(ctx, battlespawn.SpawnRequest{
 				MatchID:       matchID,
 				Seed:          uint64(allocation.ServerSeed),
 				PlayerIDs:     playerIDs,
 				LobbyEndpoint: s.lobbyEndpoint,
-				Ruleset:       s.ruleset,
+				Ruleset:       ruleset,
 				TTL:           s.matchTTL,
 			})
 			cancel()
@@ -664,11 +845,31 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Mirror the lobby keepalive: a client that disappears mid-match would
+	// otherwise pin this relay (plus its UDP socket and the reader goroutine
+	// above) until the battle server happens to write into a dead socket.
+	_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
+	wsConn.SetPongHandler(func() {
+		_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
+	})
+	go func() {
+		ticker := time.NewTicker(s.pingPeriod)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = wsConn.SetWriteDeadline(time.Now().Add(s.writeWait))
+			if err := wsConn.WritePing(nil); err != nil {
+				stop()
+				return
+			}
+		}
+	}()
+
 	for {
 		opcode, payload, err := wsConn.ReadMessage()
 		if err != nil {
 			return
 		}
+		_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
 		switch opcode {
 		case OpBinary:
 			if _, err := udpConn.Write(payload); err != nil {

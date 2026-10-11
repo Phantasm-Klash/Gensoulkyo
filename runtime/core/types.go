@@ -4,6 +4,8 @@ import (
 	"time"
 
 	phkv1 "github.com/phantasm-klash/phk-protocol/gen/go/phk/v1"
+
+	"gensoulkyo/runtime/account"
 )
 
 const (
@@ -100,6 +102,18 @@ type Config struct {
 	MatchDurationTicks       int
 	BattleLifecycleAuditRepo BattleLifecycleAuditRepository
 	LobbyLifecycleAuditRepo  LobbyLifecycleAuditRepository
+	// OnSessionRevoked is invoked when a sign-in supersedes an existing session
+	// token for the same identity (single sign-on). The second argument is the
+	// *superseded* token, not the freshly issued one.
+	//
+	// Contract: it is called with Service.mu released, it may block, and the
+	// implementation may take its own locks and call back into the Service (for
+	// example to look up state). It must not assume any Service lock is held.
+	OnSessionRevoked func(userID string, sessionToken string)
+	// Accounts is the e-mail/password account subsystem. When nil the account
+	// routes answer `accounts_unavailable` instead of panicking, which keeps the
+	// anonymous/external sign-in paths usable without a database.
+	Accounts *account.Service
 }
 
 type BattleLifecycleAuditStatus struct {
@@ -517,6 +531,44 @@ type AuthSession struct {
 	SessionToken string    `json:"session_token"`
 	DisplayName  string    `json:"display_name"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+// AccountEmailCodeRequest asks the lobby to mail a verification code to an
+// address that is about to be registered.
+type AccountEmailCodeRequest struct {
+	Email string `json:"email"`
+}
+
+// AccountEmailCodeResponse reports when the code expires and when the same
+// address may request another one, so the client can run its countdown without
+// guessing the server's policy.
+type AccountEmailCodeResponse struct {
+	Email           string    `json:"email"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	ResendAfter     time.Time `json:"resend_after"`
+	ExpiresInSecond int       `json:"expires_in_seconds"`
+	ResendInSecond  int       `json:"resend_in_seconds"`
+	ServerTime      time.Time `json:"server_time"`
+}
+
+// AccountRegisterRequest is a self-service sign-up. `Code` is the e-mail
+// verification code; registration is refused without a valid one.
+type AccountRegisterRequest struct {
+	Username    string `json:"username"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	DisplayName string `json:"display_name"`
+	Code        string `json:"code"`
+	Platform    string `json:"platform"`
+	ClientBuild string `json:"client_build"`
+}
+
+// AccountLoginRequest signs an existing account in with its e-mail + password.
+type AccountLoginRequest struct {
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	Platform    string `json:"platform"`
+	ClientBuild string `json:"client_build"`
 }
 
 type BootstrapSnapshot struct {

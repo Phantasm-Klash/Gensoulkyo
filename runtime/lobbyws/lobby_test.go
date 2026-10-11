@@ -19,6 +19,9 @@ func newLobbyTestServer(t *testing.T) (*httptest.Server, *core.Service, *Server)
 	t.Helper()
 	service := core.NewService(core.Config{})
 	server := New(Options{Service: service, Logger: log.New(io.Discard, "", 0)})
+	// Mirror production wiring (cmd/gensoulkyo): let core notify the lobby when a
+	// sign-in supersedes an existing session, so the old socket is dropped.
+	service.SetSessionRevokedHook(server.OnSessionRevoked)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/lobby/ws", server.HandleLobby)
 	mux.HandleFunc("/v1/battle/relay", server.HandleRelay)

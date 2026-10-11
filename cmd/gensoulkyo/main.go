@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"gensoulkyo/runtime/account"
 	"gensoulkyo/runtime/battlespawn"
 	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/httpapi"
@@ -43,10 +44,35 @@ func main() {
 		}
 	}
 
-	service := core.NewService(core.Config{})
+	// E-mail + password accounts. Credentials live in Postgres so they survive a
+	// restart; verification codes stay in memory because they are short-lived by
+	// design. Without a database the lobby still starts, but accounts are
+	// process-local (documented on the log line below).
+	mailer := account.NewSMTPMailer(account.SMTPConfigFromEnv())
+	var accounts *account.Service
+	if db != nil {
+		store, err := account.NewSQLStore(db)
+		if err != nil {
+			log.Fatal(err)
+		}
+		accounts = account.NewService(account.Config{Store: store, Mailer: mailer})
+	} else {
+		log.Printf("account: no database configured; accounts are in-memory and will not survive a restart")
+		accounts = account.NewService(account.Config{Mailer: mailer})
+	}
+	if mailer.Enabled() {
+		config := mailer.Config()
+		// Host/port only: never log the relay password.
+		log.Printf("account: SMTP relay %s:%d (ssl=%t starttls=%t) as %s",
+			config.Host, config.Port, config.UseSSL, config.UseSTARTTLS, config.From)
+	} else {
+		log.Printf("account: SMTP relay is not configured; registration e-mail cannot be sent")
+	}
+
+	service := core.NewService(core.Config{Accounts: accounts})
 	handler := httpapi.New(service)
 	if db != nil {
-		wired, err := httpapi.NewWithDatabase(db)
+		wired, err := httpapi.NewWithDatabase(db, httpapi.WithAccountService(accounts))
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -76,6 +102,11 @@ func main() {
 		BattleRuleset: battleRuleset,
 		MatchTTL:      envDuration("GENSOULKYO_MATCH_TTL"),
 	})
+	// Wire single sign-on: when a sign-in supersedes an existing session token,
+	// core notifies the lobby so it can disconnect the superseded connection.
+	// This must happen after both objects exist; the setter avoids a
+	// construction cycle between Service and Server.
+	service.SetSessionRevokedHook(lobby.OnSessionRevoked)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/lobby/ws", lobby.HandleLobby)

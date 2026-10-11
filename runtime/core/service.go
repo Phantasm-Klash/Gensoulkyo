@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gensoulkyo/runtime/account"
 )
 
 const (
@@ -32,34 +34,39 @@ const (
 	codeAlreadyClaimed    = "already_claimed"
 	codeOutOfWindow       = "out_of_window"
 	codeOutOfStock        = "out_of_stock"
-	startX                = 480.0
-	startY                = 600.0
-	playfieldMinX         = 160.0
-	playfieldMaxX         = 800.0
-	playfieldMinY         = 48.0
-	playfieldMaxY         = 672.0
-	cardHandLimit         = 4
-	cardStartingEnergy    = 2.0
-	cardMaxEnergy         = 10.0
-	cardEnergyPerTick     = 0.0025
-	deckSize              = 20
-	maxCopiesPerCard      = 2
-	maxHighRareCards      = 6
-	maxInterferenceCards  = 4
-	defaultDeckID         = "local_default"
-	defaultDeckName       = "Local Practice"
-	defaultDeckFormat     = "local_practice"
-	defaultChestPoolID    = "local_basic"
-	maxChestOpenCount     = 10
-	maxCardLevel          = 5
-	maxEventLogEntries    = 256
-	defaultSeasonID       = "local_s0"
-	defaultRatingCode     = "copper"
-	defaultRankScore      = 1000
-	top30Threshold        = 0.30
-	worldBossInstanceID   = "world_boss_local_s0_001"
-	worldBossMaxHP        = 100000
-	worldBossDailyLimit   = 3
+	// CodeSessionReplaced is the error code returned to a client whose session
+	// token was superseded by a newer sign-in for the same identity. It is also
+	// the code the lobby WebSocket pushes (as TypeError) to the superseded live
+	// connection before disconnecting it.
+	CodeSessionReplaced  = "session_replaced"
+	startX               = 480.0
+	startY               = 600.0
+	playfieldMinX        = 160.0
+	playfieldMaxX        = 800.0
+	playfieldMinY        = 48.0
+	playfieldMaxY        = 672.0
+	cardHandLimit        = 4
+	cardStartingEnergy   = 2.0
+	cardMaxEnergy        = 10.0
+	cardEnergyPerTick    = 0.0025
+	deckSize             = 20
+	maxCopiesPerCard     = 2
+	maxHighRareCards     = 6
+	maxInterferenceCards = 4
+	defaultDeckID        = "local_default"
+	defaultDeckName      = "Local Practice"
+	defaultDeckFormat    = "local_practice"
+	defaultChestPoolID   = "local_basic"
+	maxChestOpenCount    = 10
+	maxCardLevel         = 5
+	maxEventLogEntries   = 256
+	defaultSeasonID      = "local_s0"
+	defaultRatingCode    = "copper"
+	defaultRankScore     = 1000
+	top30Threshold       = 0.30
+	worldBossInstanceID  = "world_boss_local_s0_001"
+	worldBossMaxHP       = 100000
+	worldBossDailyLimit  = 3
 )
 
 const (
@@ -142,6 +149,8 @@ func NewForbiddenClientFieldError(field string) *Error {
 type Service struct {
 	mu                    sync.Mutex
 	clock                 Clock
+	sessionRevokedHook    func(userID string, sessionToken string)
+	accountService        *account.Service
 	matchDurationTicks    int
 	battleAuditRepo       BattleLifecycleAuditRepository
 	battleAuditStatus     BattleLifecycleAuditStatus
@@ -170,6 +179,15 @@ type Service struct {
 	battleTickets         map[string]*SignedBattleTicket
 	battleTicketsByID     map[string]*SignedBattleTicket
 	consumedBattleTickets map[string]time.Time
+}
+
+// revokedSession describes a session token that was invalidated because the
+// same identity signed in again. It is collected while Service.mu is held and
+// only dispatched to Config.OnSessionRevoked after the lock is released, so the
+// callback can safely call back into methods that take Service.mu.
+type revokedSession struct {
+	userID       string
+	sessionToken string
 }
 
 type userState struct {
@@ -437,6 +455,8 @@ func NewService(config Config) *Service {
 	publicKey, privateKey, _ := ed25519.GenerateKey(nil)
 	service := &Service{
 		clock:              clock,
+		sessionRevokedHook: config.OnSessionRevoked,
+		accountService:     config.Accounts,
 		matchDurationTicks: matchTicks,
 		battleAuditRepo:    config.BattleLifecycleAuditRepo,
 		battleAuditStatus: BattleLifecycleAuditStatus{
@@ -499,6 +519,36 @@ func (s *Service) LobbyLifecycleAuditStatus() LobbyLifecycleAuditStatus {
 	return status
 }
 
+// SetSessionRevokedHook installs the callback invoked whenever a sign-in
+// supersedes an existing session token for the same identity. It lets the lobby
+// WebSocket server register itself after both it and the Service have been
+// constructed (avoiding a construction cycle). Passing nil disables the hook.
+func (s *Service) SetSessionRevokedHook(hook func(userID string, sessionToken string)) {
+	s.mu.Lock()
+	s.sessionRevokedHook = hook
+	s.mu.Unlock()
+}
+
+// notifyRevokedSessions dispatches superseded sessions to the configured hook.
+// It MUST be called with Service.mu released: the hook contract (see
+// Config.OnSessionRevoked) allows the implementation to take its own locks and
+// even call back into the Service. The hook is read under the lock but invoked
+// outside it.
+func (s *Service) notifyRevokedSessions(revoked []revokedSession) {
+	if len(revoked) == 0 {
+		return
+	}
+	s.mu.Lock()
+	hook := s.sessionRevokedHook
+	s.mu.Unlock()
+	if hook == nil {
+		return
+	}
+	for _, session := range revoked {
+		hook(session.userID, session.sessionToken)
+	}
+}
+
 func (s *Service) LoginAnonymous(req AnonymousLoginRequest) (*AuthSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -542,17 +592,30 @@ func (s *Service) LoginAnonymous(req AnonymousLoginRequest) (*AuthSession, error
 	return &AuthSession{UserID: userID, SessionToken: token, DisplayName: displayName, CreatedAt: now}, nil
 }
 
+// LoginExternal signs in an externally authenticated identity. A repeat sign-in
+// for the same user id replaces the previous session token; the superseded
+// token is reported to Config.OnSessionRevoked *after* Service.mu is released so
+// the lobby can tear down the old live connection without risking a lock cycle.
 func (s *Service) LoginExternal(req ExternalSessionRequest) (*AuthSession, error) {
+	session, revoked, err := s.loginExternal(req)
+	s.notifyRevokedSessions(revoked)
+	return session, err
+}
+
+// loginExternal is the lock-holding half of LoginExternal. It returns the
+// superseded sessions rather than notifying them so the caller can dispatch the
+// hook once Service.mu has been released.
+func (s *Service) loginExternal(req ExternalSessionRequest) (*AuthSession, []revokedSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	userID := strings.TrimSpace(req.UserID)
 	sessionToken := strings.TrimSpace(req.SessionToken)
 	if userID == "" {
-		return nil, newError(codeInvalidRequest, "external user id is required")
+		return nil, nil, newError(codeInvalidRequest, "external user id is required")
 	}
 	if sessionToken == "" {
-		return nil, newError(codeUnauthorized, "external session token is required")
+		return nil, nil, newError(codeUnauthorized, "external session token is required")
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
 	if displayName == "" {
@@ -563,6 +626,7 @@ func (s *Service) LoginExternal(req ExternalSessionRequest) (*AuthSession, error
 		}
 	}
 	now := s.clock()
+	var revoked []revokedSession
 	user := s.users[userID]
 	if user == nil {
 		deviceID := strings.TrimSpace(req.Provider)
@@ -598,13 +662,17 @@ func (s *Service) LoginExternal(req ExternalSessionRequest) (*AuthSession, error
 		user.Decks[defaultDeck.DeckID] = defaultDeck
 		s.users[userID] = user
 	} else {
-		delete(s.sessionToUser, user.SessionToken)
+		previousToken := user.SessionToken
+		if previousToken != "" && previousToken != sessionToken {
+			revoked = append(revoked, revokedSession{userID: user.UserID, sessionToken: previousToken})
+		}
+		delete(s.sessionToUser, previousToken)
 		user.SessionToken = sessionToken
 		user.DisplayName = displayName
 		user.LastSeenAt = now
 	}
 	s.sessionToUser[sessionToken] = userID
-	return &AuthSession{UserID: user.UserID, SessionToken: user.SessionToken, DisplayName: user.DisplayName, CreatedAt: user.CreatedAt}, nil
+	return &AuthSession{UserID: user.UserID, SessionToken: user.SessionToken, DisplayName: user.DisplayName, CreatedAt: user.CreatedAt}, revoked, nil
 }
 
 func (s *Service) Bootstrap(sessionToken string) (*BootstrapSnapshot, error) {

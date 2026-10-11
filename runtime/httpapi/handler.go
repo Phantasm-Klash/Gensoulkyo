@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"gensoulkyo/runtime/account"
 	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/security"
 )
@@ -19,8 +20,9 @@ const (
 )
 
 type Handler struct {
-	service       *core.Service
-	envelopeGuard *security.BusinessEnvelopeGuard
+	service         *core.Service
+	envelopeGuard   *security.BusinessEnvelopeGuard
+	serviceAccounts *account.Service
 }
 
 type Option func(*Handler)
@@ -55,6 +57,15 @@ func WithBusinessEnvelopeGuard(guard *security.BusinessEnvelopeGuard) Option {
 	}
 }
 
+// WithAccountService installs the e-mail/password account subsystem. It is
+// consumed by NewWithDatabase, which folds it into the core.Service it builds.
+// Without it the account routes answer `accounts_unavailable`.
+func WithAccountService(accounts *account.Service) Option {
+	return func(handler *Handler) {
+		handler.serviceAccounts = accounts
+	}
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	path := strings.Trim(r.URL.Path, "/")
@@ -66,8 +77,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "server_version": core.ServerVersion})
 		return
 	}
-	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "auth" && segments[2] == "anonymous" && r.Method == http.MethodPost {
-		h.loginAnonymous(w, r)
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "auth" && r.Method == http.MethodPost {
+		switch segments[2] {
+		case "anonymous":
+			h.loginAnonymous(w, r)
+			return
+		case "register":
+			h.registerAccount(w, r)
+			return
+		case "login":
+			h.loginAccount(w, r)
+			return
+		case "logout":
+			h.logoutAccount(w, r)
+			return
+		}
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "auth" && segments[2] == "email" && segments[3] == "code" && r.Method == http.MethodPost {
+		h.requestEmailCode(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "auth" && segments[2] == "config" && r.Method == http.MethodGet {
+		h.authConfig(w, r)
 		return
 	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "security" && segments[2] == "business-envelope" && r.Method == http.MethodGet {
@@ -306,6 +337,65 @@ func (h *Handler) loginAnonymous(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// registerAccount creates a username/email/password account and signs it in.
+// The e-mail verification code must already have been requested through
+// `POST /v1/auth/email/code`.
+func (h *Handler) registerAccount(w http.ResponseWriter, r *http.Request) {
+	var req core.AccountRegisterRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.RegisterAccount(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// loginAccount signs an existing account in with its e-mail and password.
+func (h *Handler) loginAccount(w http.ResponseWriter, r *http.Request) {
+	var req core.AccountLoginRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.LoginAccount(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// logoutAccount invalidates the session token carried by the request.
+func (h *Handler) logoutAccount(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.LogoutAccount(sessionToken(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// requestEmailCode mails a registration verification code to an address.
+func (h *Handler) requestEmailCode(w http.ResponseWriter, r *http.Request) {
+	var req core.AccountEmailCodeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.RequestEmailCode(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// authConfig exposes whether registration and mail delivery are available, so
+// the login screen can disable the sign-up tab instead of failing at submit.
+func (h *Handler) authConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.service.AccountStatus())
 }
 
 func (h *Handler) bootstrap(w http.ResponseWriter, r *http.Request) {
@@ -1068,8 +1158,21 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 	if isServiceCallbackRoute(method, segments) {
 		return false
 	}
-	if len(segments) == 3 && segments[1] == "auth" && segments[2] == "anonymous" && method == http.MethodPost {
-		return false
+	// Sign-in and sign-up run before a session exists, so they cannot carry a
+	// business envelope. This mirrors the long-standing `/v1/auth/anonymous`
+	// exemption and extends it to the e-mail/password routes.
+	if segments[1] == "auth" {
+		if len(segments) == 3 {
+			switch {
+			case method == http.MethodPost && (segments[2] == "anonymous" || segments[2] == "register" || segments[2] == "login" || segments[2] == "logout"):
+				return false
+			case method == http.MethodGet && segments[2] == "config":
+				return false
+			}
+		}
+		if len(segments) == 4 && segments[2] == "email" && segments[3] == "code" && method == http.MethodPost {
+			return false
+		}
 	}
 	if len(segments) == 3 && segments[1] == "security" && (segments[2] == "business-envelope" || segments[2] == "service-callback") && method == http.MethodGet {
 		return false
@@ -1231,6 +1334,12 @@ func writeError(w http.ResponseWriter, err error) {
 	case "room_unavailable":
 		status = http.StatusConflict
 	case "battle_server_unavailable":
+		status = http.StatusServiceUnavailable
+	case "account_email_not_verified":
+		status = http.StatusForbidden
+	case "verification_rate_limited":
+		status = http.StatusTooManyRequests
+	case "mail_unavailable", "accounts_unavailable":
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": err.Error()})
