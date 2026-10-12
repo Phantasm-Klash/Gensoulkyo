@@ -409,6 +409,10 @@ func activeCardSnapshots(match *matchState) []ActiveCardSnapshot {
 			Cost:          round(card.Cost, 3),
 			Damage:        card.Damage,
 			CooldownUntil: card.CooldownUntil,
+			PatternID:     card.PatternID,
+			PurgeRadius:   card.PurgeRadius,
+			PurgeCount:    card.PurgeCount,
+			TargetUserID:  card.TargetUserID,
 		})
 	}
 	return out

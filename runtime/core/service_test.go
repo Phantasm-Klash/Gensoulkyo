@@ -3535,7 +3535,12 @@ func TestServerValidatesModeActions(t *testing.T) {
 	if fixtureCardID == "" {
 		t.Fatalf("mode action fixture missing card_id: %+v", fixturePayload)
 	}
-	candidates[0] = fixtureCardID
+	if _, ok := serverCardCatalog[fixtureCardID]; !ok {
+		t.Fatalf("mode action fixture card %q must exist in the server catalog", fixtureCardID)
+	}
+	// The card catalog can grow, so the shared fixture's card id is not
+	// guaranteed to be one of this seed's battle-royale candidates; submit a
+	// real server candidate while still exercising the fixture payload shape.
 	fixturePayload["card_id"] = candidates[0]
 	accepted, err := service.SubmitModeAction(players[0].SessionToken, matchID, map[string]any{
 		"mode_id":     "battle_royale",

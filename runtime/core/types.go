@@ -1306,28 +1306,33 @@ type ActiveCardSnapshot struct {
 	Cost          float64 `json:"cost"`
 	Damage        int     `json:"damage,omitempty"`
 	CooldownUntil int     `json:"cooldown_until,omitempty"`
+	PatternID     string  `json:"pattern_id,omitempty"`
+	PurgeRadius   float64 `json:"purge_radius,omitempty"`
+	PurgeCount    int     `json:"purge_count,omitempty"`
+	TargetUserID  string  `json:"target_user_id,omitempty"`
 }
 
 type MatchEvent struct {
-	Seq         int     `json:"seq,omitempty"`
-	Type        string  `json:"type"`
-	Tick        int     `json:"tick"`
-	UserID      string  `json:"user_id,omitempty"`
-	ActionID    string  `json:"action_id,omitempty"`
-	ActionType  string  `json:"action_type,omitempty"`
-	BulletID    string  `json:"bullet_id,omitempty"`
-	CardID      string  `json:"card_id,omitempty"`
-	NewMatchID  string  `json:"new_match_id,omitempty"`
-	FromUserID  string  `json:"from_user_id,omitempty"`
-	ToUserID    string  `json:"to_user_id,omitempty"`
-	Slot        int     `json:"slot,omitempty"`
-	Reason      string  `json:"reason,omitempty"`
-	Status      string  `json:"status,omitempty"`
-	RoundIndex  int     `json:"round_index,omitempty"`
-	ExpiresTick int     `json:"expires_tick,omitempty"`
-	Value       int     `json:"value,omitempty"`
-	X           float64 `json:"x,omitempty"`
-	Y           float64 `json:"y,omitempty"`
+	Seq          int     `json:"seq,omitempty"`
+	Type         string  `json:"type"`
+	Tick         int     `json:"tick"`
+	UserID       string  `json:"user_id,omitempty"`
+	ActionID     string  `json:"action_id,omitempty"`
+	ActionType   string  `json:"action_type,omitempty"`
+	BulletID     string  `json:"bullet_id,omitempty"`
+	CardID       string  `json:"card_id,omitempty"`
+	NewMatchID   string  `json:"new_match_id,omitempty"`
+	FromUserID   string  `json:"from_user_id,omitempty"`
+	ToUserID     string  `json:"to_user_id,omitempty"`
+	Slot         int     `json:"slot,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	RoundIndex   int     `json:"round_index,omitempty"`
+	ExpiresTick  int     `json:"expires_tick,omitempty"`
+	Value        int     `json:"value,omitempty"`
+	X            float64 `json:"x,omitempty"`
+	Y            float64 `json:"y,omitempty"`
+	TargetUserID string  `json:"target_user_id,omitempty"`
 }
 
 type MatchEndEvent struct {

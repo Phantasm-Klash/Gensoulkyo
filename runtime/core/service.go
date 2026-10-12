@@ -363,6 +363,10 @@ type activeCardState struct {
 	Cost          float64
 	Damage        int
 	CooldownUntil int
+	PatternID     string
+	PurgeRadius   float64
+	PurgeCount    int
+	TargetUserID  string
 }
 
 type serverCardDefinition struct {
@@ -375,6 +379,9 @@ type serverCardDefinition struct {
 	ScoreBonus    int
 	EnergyGain    float64
 	DrawCards     int
+	PatternID     string
+	PurgeRadius   float64
+	PurgeCount    int
 }
 
 type serverCardActivation struct {
@@ -388,6 +395,9 @@ type serverCardActivation struct {
 	Cost          float64
 	EnergyGain    float64
 	DrawCards     int
+	PatternID     string
+	PurgeRadius   float64
+	PurgeCount    int
 }
 
 var serverCardCatalog = map[string]serverCardDefinition{
@@ -403,6 +413,10 @@ var serverCardCatalog = map[string]serverCardDefinition{
 	"purge_charm":    {CardID: "purge_charm", EffectKind: "self", Cost: 3, CooldownTicks: 540, DurationTicks: 480, Damage: 18, ScoreBonus: 24},
 	"curve_prism":    {CardID: "curve_prism", EffectKind: "pattern", Cost: 3, CooldownTicks: 500, DurationTicks: 360, Damage: 24, ScoreBonus: 28},
 	"last_arc":       {CardID: "last_arc", EffectKind: "finisher", Cost: 6, CooldownTicks: 900, DurationTicks: 420, Damage: 48, ScoreBonus: 60},
+	"mirror_lance":   {CardID: "mirror_lance", EffectKind: "opponent_pattern", Cost: 4, CooldownTicks: 540, DurationTicks: 360, Damage: 26, ScoreBonus: 30, PatternID: "mirror_lance"},
+	"purge_bell":     {CardID: "purge_bell", EffectKind: "bullet_purge", Cost: 3, CooldownTicks: 480, DurationTicks: 1, Damage: 0, ScoreBonus: 22, PurgeRadius: 120, PurgeCount: 24},
+	"aegis_ward":     {CardID: "aegis_ward", EffectKind: "invulnerable", Cost: 5, CooldownTicks: 720, DurationTicks: 180, Damage: 0, ScoreBonus: 20},
+	"finale_arc":     {CardID: "finale_arc", EffectKind: "finisher", Cost: 6, CooldownTicks: 900, DurationTicks: 1, Damage: 60, ScoreBonus: 80},
 }
 
 var serverCardRarities = map[string]string{
@@ -418,15 +432,21 @@ var serverCardRarities = map[string]string{
 	"purge_charm":    "uncommon",
 	"curve_prism":    "uncommon",
 	"last_arc":       "epic",
+	"mirror_lance":   "rare",
+	"purge_bell":     "uncommon",
+	"aegis_ward":     "rare",
+	"finale_arc":     "epic",
 }
 
 var serverStrongInterferenceCards = map[string]struct{}{
 	"density_surge": {},
 	"aim_baffle":    {},
+	"mirror_lance":  {},
 }
 
 var serverRankedBannedCards = map[string]struct{}{
-	"last_arc": {},
+	"last_arc":   {},
+	"finale_arc": {},
 }
 
 var allowedStageIDs = map[string]struct{}{
@@ -3157,6 +3177,9 @@ func (s *Service) applyCardRequestLocked(match *matchState, player *playerState,
 		Cost:          activation.Cost,
 		Damage:        activation.Damage,
 		CooldownUntil: activation.CooldownUntil,
+		PatternID:     activation.PatternID,
+		PurgeRadius:   activation.PurgeRadius,
+		PurgeCount:    activation.PurgeCount,
 	}
 	if activation.Damage > 0 && match.BossHP > 0 {
 		player.DamageDealt += activation.Damage
@@ -3171,6 +3194,7 @@ func (s *Service) applyCardRequestLocked(match *matchState, player *playerState,
 		Value:       activation.Damage,
 		ExpiresTick: activation.ExpiresTick,
 	})
+	s.applyCardEffectLocked(match, player, activation, packet.Tick)
 	for i := 0; i < activation.DrawCards; i++ {
 		drawServerCard(player)
 	}
@@ -3259,6 +3283,9 @@ func (s *Service) validateAndActivateCardLocked(match *matchState, player *playe
 		Cost:          definition.Cost,
 		EnergyGain:    definition.EnergyGain,
 		DrawCards:     definition.DrawCards,
+		PatternID:     definition.PatternID,
+		PurgeRadius:   definition.PurgeRadius,
+		PurgeCount:    definition.PurgeCount,
 	}, nil
 }
 
