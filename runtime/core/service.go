@@ -3439,7 +3439,7 @@ func (s *Service) settleMatchLocked(match *matchState) {
 			StageID:       match.StageID,
 			Result:        result,
 			Score:         player.Score,
-			RankDelta:     user.Certification.LastRankScoreDelta,
+			RankDelta:     intFromAnyValue(settlement.ModeResult["rank_score_delta"]),
 			OpponentID:    opponentID,
 			GrazeCount:    player.GrazeCount,
 			HitCount:      player.HitCount,
