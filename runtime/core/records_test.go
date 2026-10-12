@@ -97,6 +97,39 @@ func TestRecordsAggregateAfterSettledMatch(t *testing.T) {
 	}
 }
 
+// TestRecordsRankDeltaDoesNotLeakAcrossModes 固定回归：非排位对局不得继承上一场排位赛遗留的 rank delta。
+func TestRecordsRankDeltaDoesNotLeakAcrossModes(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Records Rank Alice")
+	bob := mustLogin(t, service, "Records Rank Bob")
+
+	certMatch := matchTwoPlayers(t, service, alice, bob, "certification")
+	if _, err := service.SettleMatch(alice.SessionToken, certMatch, map[string]any{}); err != nil {
+		t.Fatalf("settle certification: %v", err)
+	}
+	unrankedMatch := matchTwoPlayers(t, service, alice, bob, "mvp_boss_race")
+	if _, err := service.SettleMatch(alice.SessionToken, unrankedMatch, map[string]any{}); err != nil {
+		t.Fatalf("settle mvp_boss_race: %v", err)
+	}
+
+	view, err := service.Records(alice.SessionToken)
+	if err != nil {
+		t.Fatalf("records alice: %v", err)
+	}
+	if len(view.Recent) != 2 {
+		t.Fatalf("expected two recent entries, got %+v", view.Recent)
+	}
+	if view.Recent[0].ModeID != "mvp_boss_race" || view.Recent[1].ModeID != "certification" {
+		t.Fatalf("recent ordering invalid: %+v", view.Recent)
+	}
+	if view.Recent[1].RankDelta <= 0 {
+		t.Fatalf("certification record should carry its rank delta: %+v", view.Recent[1])
+	}
+	if view.Recent[0].RankDelta != 0 {
+		t.Fatalf("unranked record must not inherit a stale rank delta: %+v", view.Recent[0])
+	}
+}
+
 // TestRecordsRecentIsBoundedAndNewestFirst 覆盖 Recent 上限 20：打 21 局后长度为 20 且最新在前。
 func TestRecordsRecentIsBoundedAndNewestFirst(t *testing.T) {
 	service := NewService(Config{})
