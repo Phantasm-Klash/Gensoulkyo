@@ -159,6 +159,8 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 		return handler.call(func() (any, error) { return handler.service.Checkin(request.SessionID) })
 	case "checkin.claim":
 		return handler.call(func() (any, error) { return handler.service.ClaimCheckin(request.SessionID) })
+	case "records.get":
+		return handler.call(func() (any, error) { return handler.service.Records(request.SessionID) })
 	case "bootstrap":
 		return handler.call(func() (any, error) { return handler.service.Bootstrap(request.SessionID) })
 	case "inventory.get", "inventory":

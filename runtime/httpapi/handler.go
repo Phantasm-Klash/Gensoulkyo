@@ -131,6 +131,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.inventory(w, r)
 		return
 	}
+	if len(segments) == 2 && segments[0] == "v1" && segments[1] == "records" && r.Method == http.MethodGet {
+		h.records(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "cards" && segments[2] == "upgrade" && r.Method == http.MethodPost {
 		h.upgradeCard(w, r)
 		return
@@ -889,6 +893,15 @@ func (h *Handler) claimActivity(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) checkin(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.service.Checkin(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) records(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.Records(sessionToken(r))
 	if err != nil {
 		writeError(w, err)
 		return

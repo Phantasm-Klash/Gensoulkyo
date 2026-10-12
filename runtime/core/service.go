@@ -215,6 +215,7 @@ type userState struct {
 	CheckinClaimedDays map[string]int
 	ShopPurchased      map[string]int
 	ShopInventory      map[string]int
+	Records            *PlayerRecords
 }
 
 type queueTicket struct {
@@ -1279,6 +1280,54 @@ func (s *Service) RoomRules(sessionToken string, roomCode string) (*RoomRulesSna
 	}
 	s.recordLobbyRoomAuditLocked(room, nil, user.UserID, "rules_read", now)
 	return rules, nil
+}
+
+// Records 汇总玩家的金币 / 积分 / 战绩 / 卡组 / 卡牌数据，返回 records.get 视图。
+func (s *Service) Records(sessionToken string) (*RecordsView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	records := user.Records.ensure()
+	certification := normalizedCertificationProfile(user.Certification)
+	winRate := 0.0
+	averageScore := 0.0
+	if records.MatchesPlayed > 0 {
+		winRate = round(float64(records.Wins)/float64(records.MatchesPlayed), 4)
+		averageScore = round(float64(records.TotalScore)/float64(records.MatchesPlayed), 2)
+	}
+	recent := make([]MatchHistoryEntry, len(records.Recent))
+	copy(recent, records.Recent)
+	return &RecordsView{
+		OK:                        true,
+		UserID:                    user.UserID,
+		DisplayName:               user.DisplayName,
+		Gold:                      user.Wallet[shopCurrencyGold],
+		Tickets:                   user.Wallet[shopCurrencyTicket],
+		Points:                    certification.RankScore,
+		RatingCode:                certification.RatingCode,
+		SeasonID:                  certification.SeasonID,
+		MatchesPlayed:             records.MatchesPlayed,
+		Wins:                      records.Wins,
+		Losses:                    records.Losses,
+		Draws:                     records.Draws,
+		WinRate:                   winRate,
+		BestScore:                 records.BestScore,
+		AverageScore:              averageScore,
+		TotalGraze:                records.TotalGraze,
+		TotalHits:                 records.TotalHits,
+		TotalDamageDealt:          records.TotalDamageDealt,
+		TotalCardPlays:            records.TotalCardPlays,
+		DeckCount:                 len(user.Decks),
+		CardCount:                 len(user.Inventory),
+		Recent:                    recent,
+		ServerTime:                s.clock(),
+		ServerAuthoritative:       true,
+		ClientResultAuthoritative: false,
+	}, nil
 }
 
 func (s *Service) BusinessContract(sessionToken string) (*BusinessContractSnapshot, error) {
@@ -3349,6 +3398,29 @@ func (s *Service) settleMatchLocked(match *matchState) {
 		s.recordReplayAuditLocked(replay)
 		s.applyRewardsLocked(user, match.MatchID, settlement.RewardJSON)
 		s.applyProgressLocked(user, settlement)
+		opponentID := ""
+		for _, otherID := range match.PlayerIDs {
+			if otherID != userID {
+				opponentID = otherID
+				break
+			}
+		}
+		user.Records = user.Records.ensure()
+		user.Records.record(MatchHistoryEntry{
+			MatchID:       match.MatchID,
+			ModeID:        match.ModeID,
+			StageID:       match.StageID,
+			Result:        result,
+			Score:         player.Score,
+			RankDelta:     user.Certification.LastRankScoreDelta,
+			OpponentID:    opponentID,
+			GrazeCount:    player.GrazeCount,
+			HitCount:      player.HitCount,
+			DamageDealt:   player.DamageDealt,
+			CardPlays:     player.CardPlays,
+			DurationTicks: match.Tick,
+			EndedAt:       match.EndedAt,
+		})
 	}
 }
 
@@ -6976,6 +7048,7 @@ func contractClientOperations() []string {
 		"auth.logout",
 		"checkin.get",
 		"checkin.claim",
+		"records.get",
 	}
 }
 
@@ -7131,7 +7204,7 @@ func disallowedClientOperationUsesBattleTransport(operation string) bool {
 
 func clientOperationRequestFields(operation string) []string {
 	switch operation {
-	case "bootstrap", "inventory.get", "decks.list", "chests.list", "battle.servers", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
+	case "bootstrap", "inventory.get", "decks.list", "chests.list", "battle.servers", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status", "records.get":
 		return []string{}
 	case "cards.upgrade":
 		return []string{"card_id", "target_level"}
@@ -7270,6 +7343,8 @@ func clientOperationProjectionFields(operation string) []string {
 		return appendUniqueStrings(common, battleAllocationProjectionFields("")...)
 	case "battle.ticket":
 		return appendUniqueStrings(common, signedBattleTicketProjectionFields("")...)
+	case "records.get":
+		return append(common, "user_id", "display_name", "gold", "tickets", "points", "rating_code", "season_id", "matches_played", "wins", "losses", "draws", "win_rate", "best_score", "average_score", "total_graze", "total_hits", "total_damage_dealt", "total_card_plays", "deck_count", "card_count", "recent", "server_time")
 	case "replay.get":
 		return append(common, "replay_id", "match_id", "user_id", "mode_id", "ruleset_version", "mode_ruleset_version", "state_hash", "input_count", "event_count", "settlement")
 	default:
@@ -7279,7 +7354,7 @@ func clientOperationProjectionFields(operation string) []string {
 
 func clientOperationAuthority(operation string) string {
 	switch operation {
-	case "shop.get", "shop.catalog", "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
+	case "shop.get", "shop.catalog", "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "records.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
 		return clientRequestAuthorityLookupOnly
 	default:
 		return "intent_only"
