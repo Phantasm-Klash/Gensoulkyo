@@ -72,35 +72,46 @@ func (s *Service) applyOpponentPatternLocked(match *matchState, player *playerSt
 }
 
 // applyBulletPurgeLocked removes up to PurgeCount bullets inside PurgeRadius of
-// the caster. The picks are deterministic (deterministicUnit keyed on the
-// server seed, tick, card id and index) so replays and clients stay in sync.
+// the caster. Every bullet is scored once with deterministicUnit keyed on the
+// server seed, tick, card id and the bullet's index in the canonical (bullet-id
+// sorted) field order; the lowest scores are purged, ties broken by bullet id.
+// This stateless pick is what the client mirror reproduces for local prediction.
 func (s *Service) applyBulletPurgeLocked(match *matchState, player *playerState, activation serverCardActivation, tick int) {
 	radius := activation.PurgeRadius
 	count := activation.PurgeCount
 	removed := 0
 	if radius > 0 && count > 0 {
-		candidates := make([]string, 0, len(match.Bullets))
-		for _, id := range sortedBulletIDs(match) {
+		type purgeCandidate struct {
+			bulletID string
+			unit     float64
+		}
+		candidates := make([]purgeCandidate, 0, len(match.Bullets))
+		for index, id := range sortedBulletIDs(match) {
 			bullet := match.Bullets[id]
 			if bullet == nil {
 				continue
 			}
-			if math.Hypot(bullet.X-player.X, bullet.Y-player.Y) <= radius {
-				candidates = append(candidates, id)
+			if math.Hypot(bullet.X-player.X, bullet.Y-player.Y) > radius {
+				continue
 			}
+			candidates = append(candidates, purgeCandidate{bulletID: id, unit: deterministicUnit(match.ServerSeed, tick, activation.CardID, index)})
 		}
-		for i := 0; i < count && len(candidates) > 0; i++ {
-			index := int(deterministicUnit(match.ServerSeed, tick, activation.CardID, i) * float64(len(candidates)))
-			if index >= len(candidates) {
-				index = len(candidates) - 1
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].unit != candidates[j].unit {
+				return candidates[i].unit < candidates[j].unit
 			}
-			bulletID := candidates[index]
-			if bullet := match.Bullets[bulletID]; bullet != nil {
+			return candidates[i].bulletID < candidates[j].bulletID
+		})
+		limit := count
+		if limit > len(candidates) {
+			limit = len(candidates)
+		}
+		for _, pick := range candidates[:limit] {
+			if bullet := match.Bullets[pick.bulletID]; bullet != nil {
 				match.LastBulletDeltas = append(match.LastBulletDeltas, bulletDelta("despawn", bullet, tick))
-				delete(match.Bullets, bulletID)
+				delete(match.Bullets, pick.bulletID)
 				removed++
 			}
-			candidates = append(candidates[:index], candidates[index+1:]...)
 		}
 	}
 	appendMatchEventLocked(match, MatchEvent{Type: "card_effect_applied", Tick: tick, UserID: player.UserID, CardID: activation.CardID, Value: removed})

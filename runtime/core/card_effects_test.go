@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"math"
+	"sort"
 	"testing"
 )
 
@@ -189,6 +190,50 @@ func TestCardEffectBulletPurgeRemovesDeterministicSelection(t *testing.T) {
 	if card.PurgeRadius != 120 || card.PurgeCount != 24 {
 		t.Fatalf("purge_bell snapshot missing purge tuning: %+v", card)
 	}
+
+	// Pin the deterministic contract the client mirror reproduces: every bullet
+	// in the canonical (bullet-id sorted) field order is scored once with
+	// deterministicUnit(seed, tick, "purge_bell", index) and the lowest
+	// PurgeCount scores are purged, ties broken by bullet id.
+	service.mu.Lock()
+	seed := service.matches[matchID].ServerSeed
+	service.mu.Unlock()
+	canonical := append([]string{}, seeded...)
+	sort.Strings(canonical)
+	type purgeScore struct {
+		bulletID string
+		unit     float64
+	}
+	scores := make([]purgeScore, 0, len(canonical))
+	for index, id := range canonical {
+		scores = append(scores, purgeScore{bulletID: id, unit: deterministicUnit(seed, 1, "purge_bell", index)})
+	}
+	sort.Slice(scores, func(i, j int) bool {
+		if scores[i].unit != scores[j].unit {
+			return scores[i].unit < scores[j].unit
+		}
+		return scores[i].bulletID < scores[j].bulletID
+	})
+	expectedPurged := map[string]struct{}{}
+	for _, pick := range scores[:24] {
+		expectedPurged[pick.bulletID] = struct{}{}
+	}
+	service.mu.Lock()
+	match = service.matches[matchID]
+	for id := range expectedPurged {
+		if _, ok := match.Bullets[id]; ok {
+			t.Fatalf("expected bullet %s to be purged", id)
+		}
+	}
+	for _, id := range seeded {
+		if _, ok := expectedPurged[id]; ok {
+			continue
+		}
+		if _, ok := match.Bullets[id]; !ok {
+			t.Fatalf("expected bullet %s to survive the purge", id)
+		}
+	}
+	service.mu.Unlock()
 }
 
 func TestCardEffectInvulnerableGrantsDamageImmunity(t *testing.T) {
