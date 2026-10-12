@@ -6973,6 +6973,9 @@ func contractClientOperations() []string {
 		"battle.allocation",
 		"battle.ticket",
 		"replay.get",
+		"auth.logout",
+		"checkin.get",
+		"checkin.claim",
 	}
 }
 

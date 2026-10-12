@@ -219,8 +219,29 @@ func serviceOriginRPCIDSet() map[string]struct{} {
 	return out
 }
 
+// rpcPreAuthIDs are client operations that run before the caller owns a
+// session. They cannot present a signed business envelope, so they are
+// deliberately kept out of the business operation contract (whose published
+// guard fields require BusinessEnvelopeRequired) and registered here instead.
+var rpcPreAuthIDs = []string{
+	"auth.anonymous",
+	"auth.emailCode",
+	"auth.register",
+	"auth.login",
+}
+
+// rpcAliasIDs are alternate spellings of contract operations that the client's
+// REST route table also publishes. Registering them keeps the two transports
+// interchangeable instead of answering a 404 on the RPC one.
+var rpcAliasIDs = []string{
+	"chests.get",
+	"rooms.messages",
+}
+
 func runtimeRPCIDs() []string {
 	ids := append([]string{}, core.ContractClientRPCOperations()...)
+	ids = append(ids, rpcPreAuthIDs...)
+	ids = append(ids, rpcAliasIDs...)
 	seen := map[string]struct{}{}
 	for _, id := range ids {
 		seen[id] = struct{}{}
@@ -311,4 +332,3 @@ func runtimeCtxStringMap(ctx context.Context, key string) map[string]string {
 		return map[string]string{}
 	}
 }
-

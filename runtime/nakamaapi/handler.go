@@ -130,6 +130,35 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.LoginAnonymous(req) })
+	case "auth.emailcode":
+		var req core.AccountEmailCodeRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.RequestEmailCode(req) })
+	case "auth.register":
+		var req core.AccountRegisterRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.RegisterAccount(req) })
+	case "auth.login":
+		var req core.AccountLoginRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.LoginAccount(req) })
+	case "auth.logout":
+		return handler.call(func() (any, error) {
+			if err := handler.service.LogoutAccount(request.SessionID); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		})
+	case "checkin.get":
+		return handler.call(func() (any, error) { return handler.service.Checkin(request.SessionID) })
+	case "checkin.claim":
+		return handler.call(func() (any, error) { return handler.service.ClaimCheckin(request.SessionID) })
 	case "bootstrap":
 		return handler.call(func() (any, error) { return handler.service.Bootstrap(request.SessionID) })
 	case "inventory.get", "inventory":
@@ -148,7 +177,7 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.SaveDeck(request.SessionID, req) })
-	case "chests.list", "chests":
+	case "chests.list", "chests", "chests.get":
 		return handler.call(func() (any, error) { return handler.service.Chests(request.SessionID) })
 	case "chests.open":
 		var req core.ChestOpenRequest
@@ -220,7 +249,7 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(request.SessionID, roomCode) })
-	case "rooms.message", "rooms.chat", "rooms.announcement":
+	case "rooms.message", "rooms.messages", "rooms.chat", "rooms.announcement":
 		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
 			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
 		}
@@ -373,7 +402,7 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(message.SessionID, roomCode) })
-	case "rooms.message", "rooms.chat", "rooms.announcement":
+	case "rooms.message", "rooms.messages", "rooms.chat", "rooms.announcement":
 		if forbidden := core.ForbiddenClientField(body); forbidden != "" {
 			return errorResponse(http.StatusForbidden, "forbidden_field", fmt.Sprintf("client cannot submit %s", forbidden))
 		}
@@ -590,8 +619,20 @@ func coreErrorResponse(err error) Response {
 	return errorResponse(status, code, err.Error())
 }
 
+// rpcSkipsEnvelope reports whether an RPC may be called without the signed
+// business envelope. Only the pre-authentication operations qualify: the caller
+// has no session yet, so it cannot mint an envelope. Every other client
+// operation must present one.
+//
+// rpcID has already been through normalizeName, which lower-cases it, so these
+// case labels are lower-case: "auth.emailcode", not "auth.emailCode".
 func rpcSkipsEnvelope(rpcID string) bool {
-	return rpcID == "auth.anonymous"
+	switch rpcID {
+	case "auth.anonymous", "auth.emailcode", "auth.register", "auth.login":
+		return true
+	default:
+		return false
+	}
 }
 
 func rpcRequiresServiceOrigin(rpcID string) bool {
