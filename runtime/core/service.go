@@ -5306,29 +5306,15 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 	if len(s.battleServers) == 0 {
 		s.registerDefaultBattleServerLocked()
 	}
-	ids := make([]string, 0, len(s.battleServers))
-	for id := range s.battleServers {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	var best *battleServerState
-	bestScore := math.MaxFloat64
-	bestModeBreadth := math.MaxInt
-	for _, id := range ids {
-		server := s.battleServers[id]
-		if server == nil || !s.battleServerEligibleForAllocationLocked(server, modeID) {
-			continue
-		}
-		if server.Capacity > 0 && server.ActiveMatches >= server.Capacity {
-			continue
-		}
-		score := server.Load + float64(server.ActiveMatches)/float64(max(1, server.Capacity))
-		modeBreadth := battleServerModeBreadth(server)
-		if best == nil || score < bestScore || (score == bestScore && modeBreadth < bestModeBreadth) {
-			best = server
-			bestScore = score
-			bestModeBreadth = modeBreadth
-		}
+	// Registered servers are considered first. The local placeholder is
+	// registered on demand by this very allocator and nothing keeps it alive,
+	// so its synthetic near-zero load used to win every head-to-head balance and
+	// matches silently went to 127.0.0.1:7901 instead of the remote host. It is
+	// now only a last resort: if no registered server can serve the mode, it is
+	// still picked so single-machine development keeps working.
+	best := s.bestAllocatableBattleServerLocked(modeID, false)
+	if best == nil {
+		best = s.bestAllocatableBattleServerLocked(modeID, true)
 	}
 	if best != nil {
 		s.accountBattleServerAllocationLocked(best)
@@ -5343,13 +5329,46 @@ func (s *Service) selectBattleServerLocked(modeID string) *battleServerState {
 	return fallback
 }
 
+// bestAllocatableBattleServerLocked returns the cheapest eligible server.
+// `includePlaceholder` is false on the first pass so the on-demand local
+// placeholder never competes with a server that actually heartbeat.
+func (s *Service) bestAllocatableBattleServerLocked(modeID string, includePlaceholder bool) *battleServerState {
+	ids := make([]string, 0, len(s.battleServers))
+	for id := range s.battleServers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var best *battleServerState
+	bestScore := math.MaxFloat64
+	bestModeBreadth := math.MaxInt
+	for _, id := range ids {
+		server := s.battleServers[id]
+		if server == nil || !s.battleServerEligibleForAllocationLocked(server, modeID) {
+			continue
+		}
+		if !includePlaceholder && server.BattleServerID == DefaultBattleServerID {
+			continue
+		}
+		if server.Capacity > 0 && server.ActiveMatches >= server.Capacity {
+			continue
+		}
+		score := server.Load + float64(server.ActiveMatches)/float64(max(1, server.Capacity))
+		modeBreadth := battleServerModeBreadth(server)
+		if best == nil || score < bestScore || (score == bestScore && modeBreadth < bestModeBreadth) {
+			best = server
+			bestScore = score
+			bestModeBreadth = modeBreadth
+		}
+	}
+	return best
+}
+
 func (s *Service) battleServerEligibleForAllocationLocked(server *battleServerState, modeID string) bool {
 	if server == nil || server.Status != "online" || !serverSupportsMode(server, modeID) {
 		return false
 	}
-	if server.BattleServerID == DefaultBattleServerID {
-		return true
-	}
+	// No exemption for the placeholder: nothing heartbeats it, so it must age
+	// out like any other server instead of looking alive forever.
 	lastSeen := server.LastSeenAt
 	if lastSeen.IsZero() {
 		return false

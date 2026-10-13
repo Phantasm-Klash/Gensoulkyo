@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"log"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/httpapi"
 	"gensoulkyo/runtime/lobbyws"
+	"gensoulkyo/runtime/nakamaapi"
+	"gensoulkyo/runtime/security"
 	"gensoulkyo/runtime/storage"
 )
 
@@ -44,6 +47,15 @@ func main() {
 		}
 	}
 
+	// --- shared business state -------------------------------------------------
+	// Both HTTP faces (`/v1/...` for the client and battle callbacks, `/v2/rpc/...`
+	// for the Nakama protocol) MUST be served by one core.Service. Two Services
+	// would each own their own in-memory registries, so a battle server
+	// registered over `/v2/rpc` would be invisible to the match allocation
+	// performed over `/v1`, and every match would silently fall back to the
+	// local spawner.
+	battleRepo, lobbyRepo, guard := sharedBusinessState(db)
+
 	// E-mail + password accounts. Credentials live in Postgres so they survive a
 	// restart; verification codes stay in memory because they are short-lived by
 	// design. Without a database the lobby still starts, but accounts are
@@ -69,28 +81,46 @@ func main() {
 		log.Printf("account: SMTP relay is not configured; registration e-mail cannot be sent")
 	}
 
-	service := core.NewService(core.Config{Accounts: accounts})
-	handler := httpapi.New(service)
-	if db != nil {
-		wired, err := httpapi.NewWithDatabase(db, httpapi.WithAccountService(accounts))
-		if err != nil {
-			log.Fatal(err)
-		}
-		service = wired.Service
-		handler = wired.Handler
-	}
+	service := core.NewService(core.Config{
+		BattleLifecycleAuditRepo: battleRepo,
+		LobbyLifecycleAuditRepo:  lobbyRepo,
+		Accounts:                 accounts,
+	})
+	handler := httpapi.NewWithOptions(service, httpapi.WithBusinessEnvelopeGuard(guard))
+
+	// The Nakama-compatible RPC face. Out-of-process battle agents speak only
+	// this protocol, so without it a remote agent cannot register, heartbeat or
+	// poll for assignments.
+	rpcHandler := nakamaapi.NewHTTPRPCHandler(
+		nakamaapi.New(service, nakamaapi.WithBusinessEnvelopeGuard(guard)),
+		nakamaapi.HTTPRPCOptions{
+			ServiceCallbackKey: envOr("GENSOULKYO_SERVICE_CALLBACK_KEY", "defaulthttpkey"),
+			RuntimeHTTPKey:     envOr("GENSOULKYO_RUNTIME_HTTP_KEY", "defaulthttpkey"),
+		},
+	)
 
 	lobbyEndpoint := strings.TrimSpace(os.Getenv("GENSOULKYO_LOBBY_ENDPOINT"))
 	if lobbyEndpoint == "" {
 		lobbyEndpoint = *addr
 	}
 	battleRuleset := strings.TrimSpace(os.Getenv("GENSOULKYO_BATTLE_RULESET"))
-	spawner := battlespawn.NewSpawner(battlespawn.Config{
-		BinaryPath:    strings.TrimSpace(os.Getenv(battlespawn.EnvBinary)),
-		AdvertiseHost: strings.TrimSpace(os.Getenv(battlespawn.EnvAdvertiseHost)),
-		LobbyEndpoint: lobbyEndpoint,
-		Ruleset:       battleRuleset,
-	})
+
+	// The local spawner is opt-in: it only exists when a battle binary is
+	// configured. Leaving it unset is how a deployment delegates matches to
+	// registered remote battle servers (the RAKsmart agent), because
+	// `lobbyws.startMatch` otherwise spawns a local process and rebinds the
+	// allocation to it, so a remote server would never receive an assignment.
+	var spawner *battlespawn.Spawner
+	battleBin := strings.TrimSpace(os.Getenv(battlespawn.EnvBinary))
+	if battleBin != "" {
+		spawner = battlespawn.NewSpawner(battlespawn.Config{
+			BinaryPath:    battleBin,
+			AdvertiseHost: strings.TrimSpace(os.Getenv(battlespawn.EnvAdvertiseHost)),
+			LobbyEndpoint: lobbyEndpoint,
+			Ruleset:       battleRuleset,
+		})
+	}
+
 	// Every spawned battle server must have both a tick budget and a wall-clock
 	// deadline, otherwise an abandoned match leaks a process (and its KCP session
 	// and simulation state) until the host runs out of memory. The spawner
@@ -112,6 +142,7 @@ func main() {
 	mux.HandleFunc("/v1/lobby/ws", lobby.HandleLobby)
 	mux.HandleFunc("/v1/battle/relay", lobby.HandleRelay)
 	mux.HandleFunc("/internal/battle/result", lobby.HandleBattleResult)
+	mux.Handle(rpcHandler.PathPrefix(), rpcHandler)
 	mux.Handle("/", handler)
 
 	cors := httpapi.CORSConfigFromEnv()
@@ -123,11 +154,49 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf(
-		"Gensoulkyo %s listening on http://%s (lobby ws %s, battle bin %s, max-ticks %d, match-ttl %s)",
-		core.ServerVersion, *addr, lobbyEndpoint, spawner.Config().BinaryPath,
-		spawner.Config().MaxTicks, spawner.Config().MatchTTL,
+		"Gensoulkyo %s listening on http://%s (lobby ws %s, battle spawner %s, match-ttl %s)",
+		core.ServerVersion, *addr, lobbyEndpoint, spawnerMode(spawner),
+		envDuration("GENSOULKYO_MATCH_TTL"),
 	)
 	log.Fatal(server.ListenAndServe())
+}
+
+// sharedBusinessState builds the audit repositories and the business-envelope
+// guard that both HTTP faces share. A nil database leaves the repositories nil,
+// which core treats as "auditing disabled".
+func sharedBusinessState(db *sql.DB) (core.BattleLifecycleAuditRepository, core.LobbyLifecycleAuditRepository, *security.BusinessEnvelopeGuard) {
+	if db == nil {
+		return nil, nil, security.NewBusinessEnvelopeGuard()
+	}
+	sink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	battleRepo, err := core.NewSQLBattleLifecycleAuditRepository(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	lobbyRepo, err := core.NewSQLLobbyLifecycleAuditRepository(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return battleRepo, lobbyRepo, security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
+}
+
+// spawnerMode describes where matches will run, for the startup log line.
+func spawnerMode(spawner *battlespawn.Spawner) string {
+	if spawner == nil {
+		return "disabled (matches go to registered battle servers)"
+	}
+	return "local (" + spawner.Config().BinaryPath + ")"
+}
+
+// envOr returns the trimmed environment value, or fallback when it is unset.
+func envOr(key string, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // envDuration parses a Go duration string (e.g. "15m", "90s") from the
