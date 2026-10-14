@@ -48,6 +48,9 @@ func (s *Service) advanceSimulationLocked(match *matchState, targetTick int) {
 	}
 	match.LastSimulatedTick = targetTick
 	updateModeStateLocked(match)
+	// T9: a mixed-pool draft round must never hang; close it once its
+	// choice deadline is reached.
+	resolveDraftTimeoutLocked(match)
 }
 
 func emitTickBulletsLocked(match *matchState, tick int) {

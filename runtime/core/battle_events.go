@@ -29,6 +29,10 @@ var allowedBattleEventTypes = map[string]bool{
 	"card_accepted":       true,
 	"card_effect_applied": true,
 	"card_rejected":       true,
+	// T9: the mixed-pool draft trigger. The lobby accepts a boss-defeat row
+	// and routes it to the draft engine; the battle server does not emit this
+	// row yet (see task-queue/out/T9_impl_notes.md for the wiring gap).
+	"boss_defeated": true,
 }
 
 // BattleEventRow is one battle-simulated card event row.
@@ -112,6 +116,14 @@ func (s *Service) SubmitBattleEvents(req BattleEventsSubmitRequest) (*BattleEven
 			Reason:       row.Reason,
 		})
 	}
+	// T9: route boss-defeat rows to the mixed-pool draft engine. The row's
+	// Reason carries the boss id. This is the lobby half of the wiring; the
+	// battle server does not emit boss_defeated rows yet.
+	for _, row := range req.Events {
+		if row.Type == "boss_defeated" {
+			_, _ = s.reportBossDefeatLocked(match, row.UserID, strings.TrimSpace(row.Reason), row.Tick)
+		}
+	}
 	return &BattleEventsSubmitResponse{
 		OK:                  true,
 		Version:             currentVersionStamp(),
@@ -135,6 +147,16 @@ func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
 	if _, ok := match.Players[row.UserID]; !ok {
 		return newError(codeInvalidRequest, "battle event user %q is not a player of match %q", row.UserID, match.MatchID)
 	}
+	if len(row.Reason) > maxBattleEventReasonLen {
+		return newError(codeInvalidRequest, "battle event reason exceeds %d bytes", maxBattleEventReasonLen)
+	}
+	if row.Type == "boss_defeated" {
+		// T9: a boss-defeat row carries the boss id in reason and has no card.
+		if strings.TrimSpace(row.Reason) == "" {
+			return newError(codeInvalidRequest, "boss_defeated reason must carry the boss id")
+		}
+		return nil
+	}
 	cardID := strings.TrimSpace(row.CardID)
 	if cardID == "" {
 		return newError(codeInvalidRequest, "battle event card id is empty")
@@ -144,9 +166,6 @@ func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
 	}
 	if row.Value < 0 {
 		return newError(codeInvalidRequest, "battle event value must not be negative")
-	}
-	if len(row.Reason) > maxBattleEventReasonLen {
-		return newError(codeInvalidRequest, "battle event reason exceeds %d bytes", maxBattleEventReasonLen)
 	}
 	return nil
 }

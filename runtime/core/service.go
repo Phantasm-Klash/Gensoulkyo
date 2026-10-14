@@ -298,6 +298,8 @@ type matchState struct {
 	BattleResultReplay string
 	BattleResultKeyID  string
 	BattleResultAt     time.Time
+	Draft              *draftRound
+	DraftRoundSeq      int
 }
 
 type battleServerState struct {
@@ -352,6 +354,7 @@ type playerState struct {
 	Loadout           PlayerLoadout
 	Inputs            []InputPacket
 	GrazedBullets     map[string]struct{}
+	PendingGrants     []string
 }
 
 type activeCardState struct {
@@ -3294,6 +3297,9 @@ func (s *Service) applyModeActionLocked(match *matchState, player *playerState, 
 	response.Reason = "none"
 	appendMatchEventLocked(match, event)
 	response.Event = lastMatchEvent(match)
+	// T9: grant the draft round only after the pick event is in the log, so
+	// the pick always precedes the grant on the event stream.
+	maybeGrantDraftLocked(match)
 	response.ModeState = copyAnyMap(match.ModeState)
 	match.ModeActions[actionID] = response
 	return response
@@ -3320,6 +3326,8 @@ func (s *Service) validateAndActivateCardLocked(match *matchState, player *playe
 	player.Energy = math.Max(0, player.Energy-definition.Cost)
 	player.Cooldowns[cardID] = tick + definition.CooldownTicks
 	player.Hand = append(player.Hand[:slot], player.Hand[slot+1:]...)
+	// T9: a played card frees a slot, so promote any deferred draft grant first.
+	promotePendingGrants(player)
 	drawServerCard(player)
 	match.NextCardSeq++
 	return serverCardActivation{
@@ -4786,6 +4794,11 @@ func applyBattleRoyaleSelectionLocked(match *matchState, player *playerState, ac
 	if match.ModeID != "battle_royale" {
 		return MatchEvent{}, newError(codeModeAction, "select_round_card requires battle_royale")
 	}
+	// T9: while a mixed-pool draft round is open, selection is the strict
+	// two-phase pick (designated pickers only, no grant until both picked).
+	if match.Draft != nil && !match.Draft.Granted {
+		return applyMixedPoolDraftPickLocked(match, player, actionID, payload)
+	}
 	roundIndex, ok := asInt(payload["round_index"])
 	if !ok {
 		roundIndex = max(0, match.Tick/(TickRate*30))
@@ -5154,21 +5167,9 @@ func modeConfigList() []ModeConfig {
 }
 
 func battleRoyaleCandidates(match *matchState, roundIndex int) []string {
-	catalog := sortedCardCatalogIDs()
-	if len(catalog) == 0 {
-		return []string{}
-	}
-	candidates := []string{}
-	offset := int(deterministicUnit(match.ServerSeed, roundIndex+1, "br_candidates", 0) * float64(len(catalog)))
-	step := 3
-	for len(candidates) < 3 && len(candidates) < len(catalog) {
-		cardID := catalog[(offset+len(candidates)*step)%len(catalog)]
-		if !stringSliceContains(candidates, cardID) {
-			candidates = append(candidates, cardID)
-		}
-		step += 2
-	}
-	return candidates
+	// T9: the pool is the deduped, sorted union of every player's deck
+	// ("双方混池"), not the global card catalog.
+	return drawMixedPoolCandidates(match, roundIndex, 0)
 }
 
 func sortedCardCatalogIDs() []string {
