@@ -823,27 +823,53 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 
 	var once sync.Once
 	done := make(chan struct{})
+	up, down := int64(0), int64(0)
+	upDatagrams, downDatagrams := int64(0), int64(0)
 	stop := func() {
 		once.Do(func() {
 			close(done)
 			_ = udpConn.Close()
 			_ = wsConn.Close()
+			// The battle channel is opaque to the client: a player who sees
+			// "LINK predicted / snaps 0" has no way to tell a missing relay
+			// from a dead battle server. This line is the only evidence of
+			// which side broke, so it names the match and both counters.
+			log.Printf(
+				"battle relay closed match=%s endpoint=%s remote=%s up=%dB/%d down=%dB/%d",
+				matchID, endpoint, wsConn.RemoteAddr(), up, upDatagrams, down, downDatagrams,
+			)
 		})
 	}
 	defer stop()
+	log.Printf("battle relay open match=%s endpoint=%s remote=%s", matchID, endpoint, wsConn.RemoteAddr())
 
 	go func() {
 		buffer := make([]byte, 65536)
 		for {
 			n, err := udpConn.Read(buffer)
 			if err != nil {
-				stop()
-				return
+				// The battle server is spawned ~1s after this relay opens, so
+				// early KCP handshakes can land on a not-yet-bound UDP port:
+				// the peer kernel answers with ICMP port unreachable and the
+				// connected UDP socket surfaces a one-shot ECONNREFUSED on the
+				// next read. The socket stays usable and the client retransmits
+				// the handshake, so a transient error must not tear the relay
+				// down — only a closed relay ends this loop.
+				select {
+				case <-done:
+					return
+				default:
+				}
+				log.Printf("battle relay udp read transient error match=%s endpoint=%s err=%v", matchID, endpoint, err)
+				time.Sleep(50 * time.Millisecond)
+				continue
 			}
 			if err := wsConn.WriteBinary(buffer[:n]); err != nil {
 				stop()
 				return
 			}
+			down += int64(n)
+			downDatagrams++
 		}
 	}()
 
@@ -880,8 +906,21 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 		switch opcode {
 		case OpBinary:
 			if _, err := udpConn.Write(payload); err != nil {
-				return
+				// Same ICMP port-unreachable race as the read goroutine: while
+				// the battle server is still binding, writes to the connected
+				// UDP socket can fail once with ECONNREFUSED. Tolerate it and
+				// let the client's KCP retransmission through; only a closed
+				// relay ends the loop.
+				select {
+				case <-done:
+					return
+				default:
+				}
+				log.Printf("battle relay udp write transient error match=%s endpoint=%s err=%v", matchID, endpoint, err)
+				continue
 			}
+			up += int64(len(payload))
+			upDatagrams++
 		case OpText:
 			_ = wsConn.WriteText(`{"type":100,"payload":{"code":"unsupported_frame","message":"text frames are not part of the battle relay"}}`)
 		case OpClose:
