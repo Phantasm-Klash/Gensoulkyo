@@ -399,24 +399,31 @@ type BattleAgentAssignmentsResponse struct {
 }
 
 type BattleTicket struct {
-	Version             VersionStamp `json:"version"`
-	TicketID            string       `json:"ticket_id"`
-	MatchID             string       `json:"match_id"`
-	UserID              string       `json:"user_id"`
-	PlayerID            string       `json:"player_id"`
-	ModeID              string       `json:"mode_id"`
-	BattleServerID      string       `json:"battle_server_id"`
-	Endpoint            string       `json:"endpoint"`
-	DeckSnapshotHash    string       `json:"deck_snapshot_hash"`
-	ModeConfigHash      string       `json:"mode_config_hash"`
-	RulesetVersion      string       `json:"ruleset_version"`
-	TicketNonceHex      string       `json:"ticket_nonce_hex"`
-	IssuedAt            time.Time    `json:"issued_at"`
-	ExpiresAt           time.Time    `json:"expires_at"`
-	IssuedAtMS          int64        `json:"issued_at_ms"`
-	ExpiresAtMS         int64        `json:"expires_at_ms"`
-	BusinessSessionID   string       `json:"business_session_id"`
-	ServerAuthoritative bool         `json:"server_authoritative"`
+	Version           VersionStamp `json:"version"`
+	TicketID          string       `json:"ticket_id"`
+	MatchID           string       `json:"match_id"`
+	UserID            string       `json:"user_id"`
+	PlayerID          string       `json:"player_id"`
+	ModeID            string       `json:"mode_id"`
+	BattleServerID    string       `json:"battle_server_id"`
+	Endpoint          string       `json:"endpoint"`
+	DeckSnapshotHash  string       `json:"deck_snapshot_hash"`
+	ModeConfigHash    string       `json:"mode_config_hash"`
+	RulesetVersion    string       `json:"ruleset_version"`
+	TicketNonceHex    string       `json:"ticket_nonce_hex"`
+	IssuedAt          time.Time    `json:"issued_at"`
+	ExpiresAt         time.Time    `json:"expires_at"`
+	IssuedAtMS        int64        `json:"issued_at_ms"`
+	ExpiresAtMS       int64        `json:"expires_at_ms"`
+	BusinessSessionID string       `json:"business_session_id"`
+	// W-1 opening loadout: hand_card_ids carries 0..cardHandLimit catalog card
+	// ids drawn from the player's deck; initial_energy is the opening energy;
+	// server_seed is the authoritative lobby seed (seedFrom) as DECIMAL TEXT so
+	// seeds above 2^53 survive the JS client pass-through without narrowing.
+	HandCardIDs         []string `json:"hand_card_ids"`
+	InitialEnergy       float64  `json:"initial_energy"`
+	ServerSeedDecimal   string   `json:"server_seed"`
+	ServerAuthoritative bool     `json:"server_authoritative"`
 }
 
 type SignedBattleTicket struct {

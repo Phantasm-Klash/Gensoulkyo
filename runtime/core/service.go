@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -4226,6 +4227,20 @@ func initialHand(deck DeckSnapshot) ([]string, int) {
 	return hand, drawCursor
 }
 
+// initialHandCardIDs draws the opening hand for the battle ticket loadout and
+// re-checks every card against the server catalog at the issuance hop, so a
+// hand reaching the wire can never contain an unknown card id.
+func initialHandCardIDs(deck DeckSnapshot) []string {
+	hand, _ := initialHand(deck)
+	filtered := make([]string, 0, len(hand))
+	for _, cardID := range hand {
+		if _, ok := serverCardCatalog[strings.TrimSpace(cardID)]; ok {
+			filtered = append(filtered, cardID)
+		}
+	}
+	return filtered
+}
+
 func drawServerCard(player *playerState) bool {
 	if player == nil || len(player.Hand) >= cardHandLimit || len(player.DeckSnapshot.CardIDs) == 0 {
 		return false
@@ -5434,6 +5449,7 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 	ticketID := s.nextIDLocked("battle_ticket")
 	issuedAt := now
 	expiresAt := issuedAt.Add(time.Duration(BattleTicketTTLSeconds) * time.Second)
+	handCardIDs := initialHandCardIDs(player.DeckSnapshot)
 	ticket := BattleTicket{
 		Version:             currentVersionStamp(),
 		TicketID:            ticketID,
@@ -5452,6 +5468,9 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 		IssuedAtMS:          issuedAt.UnixMilli(),
 		ExpiresAtMS:         expiresAt.UnixMilli(),
 		BusinessSessionID:   businessSessionRef(user.SessionToken),
+		HandCardIDs:         handCardIDs,
+		InitialEnergy:       cardStartingEnergy,
+		ServerSeedDecimal:   strconv.FormatInt(match.ServerSeed, 10),
 		ServerAuthoritative: true,
 	}
 	payload, _ := json.Marshal(ticket)
