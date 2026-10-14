@@ -4061,8 +4061,25 @@ func TestBattleAgentAssignmentsReportsLiveMatches(t *testing.T) {
 	if item.ModeConfigHash == "" || item.ServerSeedHex == "" {
 		t.Fatalf("assignment must carry seed hash and config hash: %+v", item)
 	}
-	if len(item.PlayerIDs) != 2 {
-		t.Fatalf("assignment must carry the player roster: %+v", item.PlayerIDs)
+	if len(item.PlayerIDs) != 2 || len(item.Players) != 2 {
+		t.Fatalf("assignment must carry the player roster: ids=%+v players=%+v", item.PlayerIDs, item.Players)
+	}
+	// player_ids must report roster ids (the "p-" prefixed ids derived from the
+	// signed ticket and embedded by clients in their inputs), in the same order
+	// as Players. battle-agent forwards this list verbatim as the battle
+	// process --players flag, so reporting account ids here would make the
+	// battle server drop every client input and never emit snapshots.
+	for i, player := range item.Players {
+		wantRosterID := playerIDForUser(item.MatchID, player.UserID)
+		if player.PlayerID != wantRosterID {
+			t.Fatalf("player %d PlayerID must be the roster id: got %q want %q", i, player.PlayerID, wantRosterID)
+		}
+		if item.PlayerIDs[i] != wantRosterID {
+			t.Fatalf("assignment player_ids[%d] must equal the roster id %q, got %q", i, wantRosterID, item.PlayerIDs[i])
+		}
+		if item.PlayerIDs[i] == player.UserID {
+			t.Fatalf("assignment player_ids[%d] must not be the account id %q", i, player.UserID)
+		}
 	}
 }
 

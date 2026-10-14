@@ -2274,6 +2274,19 @@ func (s *Service) BattleAgentAssignments(battleServerID string) (*BattleAgentAss
 				DisplayName: player.DisplayName,
 			})
 		}
+		// PlayerIDs must report the roster ids (the same ids clients embed in
+		// their inputs, sourced from the signed ticket), not account ids.
+		// battle-agent passes this list verbatim as the battle process
+		// --players flag; a mismatched id space would make the battle server
+		// drop every client input and never emit snapshots.
+		playerIDs := make([]string, 0, len(players))
+		for _, player := range players {
+			rosterID := player.PlayerID
+			if rosterID == "" {
+				rosterID = player.UserID
+			}
+			playerIDs = append(playerIDs, rosterID)
+		}
 		assignments = append(assignments, BattleAgentAssignment{
 			MatchID:        alloc.MatchID,
 			ModeID:         alloc.ModeID,
@@ -2281,7 +2294,7 @@ func (s *Service) BattleAgentAssignments(battleServerID string) (*BattleAgentAss
 			Endpoint:       alloc.Endpoint,
 			ServerSeedHex:  alloc.ServerSeedHex,
 			ModeConfigHash: alloc.ModeConfigHash,
-			PlayerIDs:      append([]string{}, match.PlayerIDs...),
+			PlayerIDs:      playerIDs,
 			Players:        players,
 			AllocatedAt:    alloc.AllocatedAt,
 		})
