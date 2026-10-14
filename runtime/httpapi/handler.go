@@ -263,6 +263,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.submitBattleResult(w, r)
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "events" && r.Method == http.MethodPost {
+		h.battleEvents(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "replays" && r.Method == http.MethodGet {
 		h.replay(w, r, segments[2])
 		return
@@ -1057,6 +1061,33 @@ func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// battleEvents is the H-1 callback route: the battle server posts the card
+// events it simulated (card_accepted / card_effect_applied / card_rejected) and
+// the lobby appends them to the match event log. The guard sequence mirrors
+// submitBattleResult: no player session, no business envelope, service-callback
+// headers required.
+func (h *Handler) battleEvents(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
+	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
+		return
+	}
+	var req core.BattleEventsSubmitRequest
+	if !decodeServiceJSON(w, r, &req) {
+		return
+	}
+	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
+	resp, err := h.service.SubmitBattleEvents(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) battleAllocation(w http.ResponseWriter, r *http.Request, matchID string) {
 	resp, err := h.service.BattleAllocation(sessionToken(r), matchID)
 	if err != nil {
@@ -1221,8 +1252,11 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 }
 
 func isServiceCallbackRoute(method string, segments []string) bool {
-	if method != http.MethodPost || len(segments) < 4 || segments[0] != "v1" {
+	if method != http.MethodPost || len(segments) < 3 || segments[0] != "v1" {
 		return false
+	}
+	if len(segments) == 3 && segments[1] == "battle" && segments[2] == "events" {
+		return true
 	}
 	if len(segments) == 4 && segments[1] == "battle" && segments[2] == "servers" {
 		return segments[3] == "register" || segments[3] == "heartbeat" || segments[3] == "offline"
