@@ -821,6 +821,46 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The agent binds the match's UDP port only after this relay opens, and it
+	// may bind a port other than the registry one (the first free port at or
+	// above its floor) and report the real endpoint a second later. A relay
+	// that dialed the registry port inside that window would forward every
+	// datagram into the wrong battle process - or a dead port - for its whole
+	// lifetime, which is exactly what a concurrent second match hits. connMu
+	// guards the dialed socket so both directions can follow the allocation to
+	// the port the agent actually bound.
+	var connMu sync.Mutex
+	dialedEndpoint := endpoint
+	lastRedialAttempt := time.Now().Add(-time.Second)
+	redial := func() {
+		if time.Since(lastRedialAttempt) < 250*time.Millisecond {
+			return
+		}
+		lastRedialAttempt = time.Now()
+		connMu.Lock()
+		defer connMu.Unlock()
+		latest := ""
+		if allocation, ok := s.service.BattleAllocationForMatch(matchID); ok {
+			latest = strings.TrimSpace(allocation.Endpoint)
+		}
+		if latest == "" || latest == dialedEndpoint {
+			return
+		}
+		addr, resolveErr := net.ResolveUDPAddr("udp", latest)
+		if resolveErr != nil {
+			return
+		}
+		next, dialErr := net.DialUDP("udp", nil, addr)
+		if dialErr != nil {
+			return
+		}
+		previous := dialedEndpoint
+		_ = udpConn.Close()
+		udpConn = next
+		dialedEndpoint = latest
+		log.Printf("battle relay redial match=%s endpoint=%s previous=%s", matchID, latest, previous)
+	}
+
 	var once sync.Once
 	done := make(chan struct{})
 	up, down := int64(0), int64(0)
@@ -828,7 +868,10 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 	stop := func() {
 		once.Do(func() {
 			close(done)
+			connMu.Lock()
 			_ = udpConn.Close()
+			finalEndpoint := dialedEndpoint
+			connMu.Unlock()
 			_ = wsConn.Close()
 			// The battle channel is opaque to the client: a player who sees
 			// "LINK predicted / snaps 0" has no way to tell a missing relay
@@ -836,7 +879,7 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 			// which side broke, so it names the match and both counters.
 			log.Printf(
 				"battle relay closed match=%s endpoint=%s remote=%s up=%dB/%d down=%dB/%d",
-				matchID, endpoint, wsConn.RemoteAddr(), up, upDatagrams, down, downDatagrams,
+				matchID, finalEndpoint, wsConn.RemoteAddr(), up, upDatagrams, down, downDatagrams,
 			)
 		})
 	}
@@ -846,7 +889,15 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		buffer := make([]byte, 65536)
 		for {
-			n, err := udpConn.Read(buffer)
+			select {
+			case <-done:
+				return
+			default:
+			}
+			connMu.Lock()
+			conn := udpConn
+			connMu.Unlock()
+			n, err := conn.Read(buffer)
 			if err != nil {
 				// The battle server is spawned ~1s after this relay opens, so
 				// early KCP handshakes can land on a not-yet-bound UDP port:
@@ -854,13 +905,19 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 				// connected UDP socket surfaces a one-shot ECONNREFUSED on the
 				// next read. The socket stays usable and the client retransmits
 				// the handshake, so a transient error must not tear the relay
-				// down — only a closed relay ends this loop.
+				// down - only a closed relay ends this loop. The same signal
+				// also fires when the dialed port is simply not this match's
+				// port, so follow the allocation before tolerating it.
 				select {
 				case <-done:
 					return
 				default:
 				}
-				log.Printf("battle relay udp read transient error match=%s endpoint=%s err=%v", matchID, endpoint, err)
+				redial()
+				connMu.Lock()
+				current := dialedEndpoint
+				connMu.Unlock()
+				log.Printf("battle relay udp read transient error match=%s endpoint=%s err=%v", matchID, current, err)
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
@@ -905,18 +962,26 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 		_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
 		switch opcode {
 		case OpBinary:
-			if _, err := udpConn.Write(payload); err != nil {
+			connMu.Lock()
+			conn := udpConn
+			connMu.Unlock()
+			if _, err := conn.Write(payload); err != nil {
 				// Same ICMP port-unreachable race as the read goroutine: while
 				// the battle server is still binding, writes to the connected
 				// UDP socket can fail once with ECONNREFUSED. Tolerate it and
 				// let the client's KCP retransmission through; only a closed
-				// relay ends the loop.
+				// relay ends the loop. A persistent failure means the dialed
+				// port is not the match's real port, so follow the allocation.
 				select {
 				case <-done:
 					return
 				default:
 				}
-				log.Printf("battle relay udp write transient error match=%s endpoint=%s err=%v", matchID, endpoint, err)
+				redial()
+				connMu.Lock()
+				current := dialedEndpoint
+				connMu.Unlock()
+				log.Printf("battle relay udp write transient error match=%s endpoint=%s err=%v", matchID, current, err)
 				continue
 			}
 			up += int64(len(payload))
