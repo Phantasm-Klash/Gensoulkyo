@@ -516,6 +516,12 @@ func NewService(config Config) *Service {
 		battleTickets:         map[string]*SignedBattleTicket{},
 		battleTicketsByID:     map[string]*SignedBattleTicket{},
 		consumedBattleTickets: map[string]time.Time{},
+		// Seed the id counter with the process start time so identifiers stay
+		// monotonic across restarts. A pure in-memory counter starting at zero
+		// reissued ids the previous process had already burned once the lobby
+		// restarted (e.g. match_000008 twice), which collided with per-match
+		// state held by battle-agent processes. See nextIDLocked.
+		nextSeq: time.Now().Unix(),
 	}
 	service.registerDefaultBattleServerLocked()
 	return service
@@ -4057,6 +4063,17 @@ func (s *Service) userBySessionLocked(sessionToken string) (*userState, error) {
 	return s.users[userID], nil
 }
 
+// nextIDLocked mints the next identifier for prefix. It must be called with
+// s.mu held.
+//
+// nextSeq is seeded in NewService with the process start time (unix seconds),
+// so ids never go backwards across lobby restarts: without that floor a
+// restart reset the counter to zero and reissued ids the previous process had
+// already used (a recycled match id then collided with battle-agent per-match
+// bookkeeping keyed by that id). %06d widens naturally past six digits — unix
+// timestamps are ten — and within one process every id shares the same digit
+// width, so lexicographic ordering of ids (e.g. the MatchID sort in
+// BattleAgentAssignments) still matches numeric order.
 func (s *Service) nextIDLocked(prefix string) string {
 	s.nextSeq++
 	return fmt.Sprintf("%s_%06d", prefix, s.nextSeq)

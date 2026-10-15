@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -4265,5 +4266,56 @@ func TestBattleAgentEndpointReportPinsRealPort(t *testing.T) {
 		Endpoint:       realEndpoint,
 	}); ErrorCode(err) != codeNotFound {
 		t.Fatalf("unknown match must be reported as not found, got %v", err)
+	}
+}
+
+// TestServiceIDCounterSurvivesRestartFloor pins the restart-safety contract of
+// the shared id counter: NewService seeds nextSeq with the process start time
+// so a recycled match id can never collide with battle-agent per-match state
+// left over from a previous lobby process.
+func TestServiceIDCounterSurvivesRestartFloor(t *testing.T) {
+	// Captured before construction: any id minted by the new process must sit
+	// above this wall-clock floor, which dominates every id the old
+	// reset-to-zero counter could ever have produced across restarts.
+	startFloor := time.Now().Unix()
+	service := NewService(Config{})
+
+	service.mu.Lock()
+	first := service.nextIDLocked("match")
+	second := service.nextIDLocked("match")
+	service.mu.Unlock()
+
+	firstSeq, err := strconv.ParseInt(strings.TrimPrefix(first, "match_"), 10, 64)
+	if err != nil {
+		t.Fatalf("first match id %q must carry a numeric suffix: %v", first, err)
+	}
+	secondSeq, err := strconv.ParseInt(strings.TrimPrefix(second, "match_"), 10, 64)
+	if err != nil {
+		t.Fatalf("second match id %q must carry a numeric suffix: %v", second, err)
+	}
+
+	// (a) The first id of a fresh process is above any value a previous
+	// process could have reached, so ids never recycle across restarts.
+	if firstSeq < startFloor {
+		t.Fatalf("first match id %q (seq %d) must be >= the start-time floor %d", first, firstSeq, startFloor)
+	}
+	// (b) Within one run ids strictly increase, and being zero-padded to a
+	// common width their lexicographic order matches numeric order (relied on
+	// by the MatchID sort in BattleAgentAssignments).
+	if secondSeq <= firstSeq {
+		t.Fatalf("ids must strictly increase within a run: %q then %q", first, second)
+	}
+	if !(first < second) {
+		t.Fatalf("lexicographic id order must match numeric order: %q then %q", first, second)
+	}
+
+	// (c) The counter stays directly seedable so tests that need a predictable
+	// id space can pin it; the format only widens past six digits.
+	service.mu.Lock()
+	service.nextSeq = 41
+	pinned := service.nextIDLocked("match")
+	service.mu.Unlock()
+	if pinned != "match_000042" {
+		t.Fatalf("seeded counter must mint a predictable id, got %q", pinned)
 	}
 }

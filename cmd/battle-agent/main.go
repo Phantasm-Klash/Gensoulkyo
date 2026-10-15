@@ -385,6 +385,11 @@ func (a *agent) reconcile(ctx context.Context) error {
 		want[item.MatchID] = item
 	}
 
+	// Drop spawn bookkeeping for matches the lobby no longer routes here
+	// before looking at new work, so a recycled match id starts with a clean
+	// attempt count instead of inheriting one from a dead match.
+	a.forgetStaleAttempts(want)
+
 	a.reapFinished()
 
 	// Retry reports that a previous tick could not deliver before looking at new
@@ -421,6 +426,26 @@ func (a *agent) reserveAttempt(matchID string) bool {
 	}
 	a.attempts[matchID]++
 	return true
+}
+
+// forgetStaleAttempts drops the spawn-attempt bookkeeping (and the one-shot
+// "exceeded" log marker) for every match id absent from want, i.e. no longer
+// routed to this agent by the lobby. Those matches are dead as far as the
+// lobby is concerned, so their counts have no value; without this cleanup the
+// map only ever grew and a recycled match id — e.g. after a lobby restart that
+// re-issues small counters — would inherit a stale count and be refused spawn
+// forever. Matches still present in want keep their counts so the
+// maxSpawnAttempts cap keeps protecting the allocation TTL.
+func (a *agent) forgetStaleAttempts(want map[string]assignment) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for matchID := range a.attempts {
+		if _, live := want[matchID]; live {
+			continue
+		}
+		delete(a.attempts, matchID)
+		delete(a.exhausted, matchID)
+	}
 }
 
 // reportEndpoint tells the lobby which UDP endpoint this agent actually bound
