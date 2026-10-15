@@ -937,6 +937,24 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 	wsConn.SetPongHandler(func() {
 		_ = wsConn.SetReadDeadline(time.Now().Add(s.pongWait))
 	})
+	// Follow the allocation proactively. The agent reports the real port up to
+	// a second after this relay opens, and while the registry port happens to
+	// be alive - occupied by another match's battle server - no read/write
+	// error ever surfaces: the relay would silently forward every datagram
+	// into the wrong process for the whole match. Polling catches the report
+	// without needing a symptom; redial is a no-op while the endpoint holds.
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				redial()
+			}
+		}
+	}()
 	go func() {
 		ticker := time.NewTicker(s.pingPeriod)
 		defer ticker.Stop()
