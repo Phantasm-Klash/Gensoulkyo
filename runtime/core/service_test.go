@@ -4269,6 +4269,85 @@ func TestBattleAgentEndpointReportPinsRealPort(t *testing.T) {
 	}
 }
 
+// TestBattleAgentEndpointReportMarksConfirmed pins the flag the battle relay
+// waits on: an allocation is "unconfirmed" (registry endpoint only) until the
+// agent reports, and every accepted report - including an idempotent repeat -
+// marks it confirmed. The relay dials only a confirmed endpoint, otherwise a
+// concurrent match can leave the client's KCP stream half-acked by the wrong
+// battle server.
+func TestBattleAgentEndpointReportMarksConfirmed(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	const registryEndpoint = "203.0.113.40:7400"
+	const realEndpoint = "203.0.113.40:7401"
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "agent-confirmed-1",
+		Endpoint:       registryEndpoint,
+		Region:         "raksmart",
+		BuildID:        "battle-agent-confirmed",
+		Capacity:       4,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register battle server: %v", err)
+	}
+
+	alice := mustLogin(t, service, "Confirmed Alice")
+	bob := mustLogin(t, service, "Confirmed Bob")
+	if _, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "confirmed_alice_deck",
+		DeckSnapshot: validDeck("confirmed_alice_deck"),
+	}); err != nil {
+		t.Fatalf("join alice: %v", err)
+	}
+	queued, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "confirmed_bob_deck",
+		DeckSnapshot: validDeck("confirmed_bob_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join bob: %v", err)
+	}
+	if queued.MatchID == "" {
+		t.Fatalf("expected a matched queue: %+v", queued)
+	}
+
+	allocation, ok := service.BattleAllocationForMatch(queued.MatchID)
+	if !ok {
+		t.Fatalf("allocation for %s missing", queued.MatchID)
+	}
+	if allocation.EndpointReported {
+		t.Fatalf("a fresh allocation must not be confirmed yet: %+v", allocation)
+	}
+
+	if _, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{
+		BattleServerID: "agent-confirmed-1",
+		MatchID:        queued.MatchID,
+		Endpoint:       realEndpoint,
+	}); err != nil {
+		t.Fatalf("report endpoint: %v", err)
+	}
+	allocation, ok = service.BattleAllocationForMatch(queued.MatchID)
+	if !ok || !allocation.EndpointReported || allocation.Endpoint != realEndpoint {
+		t.Fatalf("allocation must be confirmed with the reported endpoint: %+v ok=%v", allocation, ok)
+	}
+
+	// The idempotent repeat must keep the confirmation: the agent retries
+	// until acknowledged, and losing the flag would re-open the dial race.
+	if _, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{
+		BattleServerID: "agent-confirmed-1",
+		MatchID:        queued.MatchID,
+		Endpoint:       realEndpoint,
+	}); err != nil {
+		t.Fatalf("duplicate endpoint report: %v", err)
+	}
+	allocation, ok = service.BattleAllocationForMatch(queued.MatchID)
+	if !ok || !allocation.EndpointReported {
+		t.Fatalf("duplicate report must keep the allocation confirmed: %+v ok=%v", allocation, ok)
+	}
+}
+
 // TestServiceIDCounterSurvivesRestartFloor pins the restart-safety contract of
 // the shared id counter: NewService seeds nextSeq with the process start time
 // so a recycled match id can never collide with battle-agent per-match state

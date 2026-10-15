@@ -105,6 +105,15 @@ func (s *Service) ReportBattleAgentEndpoint(req BattleAgentEndpointReport) (*Bat
 	}
 
 	updated := allocation.Endpoint != endpoint
+	// The report - even a repeat of the endpoint we already have - is the
+	// agent's confirmation that this port is really bound. Client-facing
+	// consumers wait on exactly this flag before dialing, so it must be
+	// persisted on the idempotent path too.
+	allocation.EndpointReported = true
+	s.battleAllocations[matchID] = allocation
+	if match := s.matches[matchID]; match != nil {
+		match.BattleAllocation = allocation
+	}
 	if updated {
 		allocation.Endpoint = endpoint
 		s.battleAllocations[matchID] = allocation

@@ -352,6 +352,11 @@ type BattleServerAllocation struct {
 	ModeID              string                   `json:"mode_id"`
 	BattleServerID      string                   `json:"battle_server_id"`
 	Endpoint            string                   `json:"endpoint"`
+	// EndpointReported marks an endpoint the out-of-process battle agent has
+	// confirmed it actually bound. Until it is set the endpoint is only the
+	// registry handle, and a client-facing consumer (the battle relay) must not
+	// dial it yet: see HandleRelay's bounded wait.
+	EndpointReported    bool                     `json:"endpoint_reported"`
 	Players             []BattleAllocationPlayer `json:"players"`
 	ServerSeed          int64                    `json:"server_seed"`
 	ServerSeedHex       string                   `json:"server_seed_hex"`

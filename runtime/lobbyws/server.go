@@ -779,6 +779,12 @@ func (s *Server) broadcast(roomCode string, msgType int, payload any) {
 	}
 }
 
+// battleEndpointReportWait bounds how long the battle relay waits for the
+// out-of-process agent's endpoint report before falling back to the registry
+// endpoint. The agent notices the assignment within about a second of the
+// match starting, so a healthy agent always reports well inside this budget.
+const battleEndpointReportWait = 3 * time.Second
+
 // HandleRelay upgrades a WebSocket and relays raw KCP datagrams (binary frames)
 // between the client and the match's battle server UDP socket. Text frames are
 // not part of the relay transport.
@@ -791,10 +797,35 @@ func (s *Server) HandleRelay(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	entry := s.matches[matchID]
 	endpoint := ""
-	if entry != nil {
+	localBind := entry != nil && entry.endpoint != ""
+	if localBind {
 		endpoint = entry.endpoint
 	}
 	s.mu.Unlock()
+	if !localBind {
+		// Dialing the registry endpoint before the agent reports the port it
+		// actually bound is not merely useless, it is harmful: when the
+		// registry port is alive but belongs to another match (a concurrent
+		// first match still holding it), that server ACKs the client's KCP
+		// stream at the transport layer and drops it at the application layer
+		// ("player not in roster"). The client then considers the data
+		// delivered and never retransmits, so once this relay follows the
+		// allocation the correct server only ever sees mid-stream segments and
+		// can never assemble an input frame - the match shows zero snapshots
+		// for its whole life. Wait for the report so the very first datagram
+		// already goes to the bound port. A locally spawned match binds its
+		// endpoint synchronously (localBind above) and needs no wait, and a
+		// match whose agent never reports falls back to the registry endpoint
+		// once the budget expires - the pre-fix behaviour.
+		deadline := time.Now().Add(battleEndpointReportWait)
+		for time.Now().Before(deadline) {
+			if allocation, ok := s.service.BattleAllocationForMatch(matchID); ok && allocation.EndpointReported {
+				endpoint = strings.TrimSpace(allocation.Endpoint)
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	if endpoint == "" {
 		if allocation, ok := s.service.BattleAllocationForMatch(matchID); ok {
 			endpoint = allocation.Endpoint
