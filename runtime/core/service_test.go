@@ -3601,6 +3601,111 @@ func TestServerValidatesModeActions(t *testing.T) {
 	}
 }
 
+// TestModeActionStateRetentionCaps pins the per-match retention bounds of the
+// mode-action channel: a normal action is accepted, an oversized payload and a
+// far-future round_index are refused, a flood of rejected actions cannot grow
+// ModeActions past the cap, and the cap policy never evicts the current
+// round's round_selections entries.
+func TestModeActionStateRetentionCaps(t *testing.T) {
+	// A 64-round match so accepted selections can exceed the retention cap.
+	service := NewService(Config{MatchDurationTicks: maxModeActionRounds * TickRate * 30})
+	players := []*AuthSession{
+		mustLogin(t, service, "Cap 1"),
+		mustLogin(t, service, "Cap 2"),
+		mustLogin(t, service, "Cap 3"),
+		mustLogin(t, service, "Cap 4"),
+		mustLogin(t, service, "Cap 5"),
+	}
+	matchID := matchPlayers(t, service, players, "battle_royale")
+	match := service.matches[matchID]
+	candidates := battleRoyaleCandidates(match, 0)
+
+	// A normal action is still accepted.
+	accepted, err := service.SubmitModeAction(players[0].SessionToken, matchID, map[string]any{
+		"mode_id":     "battle_royale",
+		"action_type": "select_round_card",
+		"payload":     map[string]any{"card_id": candidates[0], "round_index": 0},
+	})
+	if err != nil {
+		t.Fatalf("normal mode action: %v", err)
+	}
+	if !accepted.Accepted {
+		t.Fatalf("normal mode action rejected: %+v", accepted)
+	}
+
+	// An oversized payload is refused before any state is touched.
+	if _, err := service.SubmitModeAction(players[2].SessionToken, matchID, map[string]any{
+		"mode_id":     "battle_royale",
+		"action_type": "select_round_card",
+		"payload": map[string]any{
+			"card_id":     candidates[0],
+			"round_index": 0,
+			"padding":     strings.Repeat("x", maxModeActionPayloadBytes+1024),
+		},
+	}); ErrorCode(err) != codeModeAction {
+		t.Fatalf("expected oversized payload rejection, got %v", err)
+	}
+
+	// A round_index far in the future is a domain rejection.
+	future, err := service.SubmitModeAction(players[1].SessionToken, matchID, map[string]any{
+		"mode_id":     "battle_royale",
+		"action_type": "select_round_card",
+		"payload":     map[string]any{"card_id": candidates[0], "round_index": 100000},
+	})
+	if err != nil {
+		t.Fatalf("future round should be a domain rejection: %v", err)
+	}
+	if future.Accepted || future.Reason != codeModeAction {
+		t.Fatalf("expected future round rejection, got %+v", future)
+	}
+
+	// A flood of rejected actions cannot grow ModeActions past the cap, and
+	// the newest action is always retained.
+	var last *ModeActionResponse
+	for i := 0; i < maxRetainedModeActions+50; i++ {
+		rejected, err := service.SubmitModeAction(players[1].SessionToken, matchID, map[string]any{
+			"mode_id":     "battle_royale",
+			"action_type": "bogus_action",
+		})
+		if err != nil {
+			t.Fatalf("bogus action flood: %v", err)
+		}
+		last = rejected
+	}
+	if len(match.ModeActions) > maxRetainedModeActions {
+		t.Fatalf("ModeActions grew past cap: %d", len(match.ModeActions))
+	}
+	if _, ok := match.ModeActions[last.ActionID]; !ok {
+		t.Fatalf("newest mode action was evicted: %s", last.ActionID)
+	}
+
+	// Fill selections past the cap across rounds (319 entries after the one
+	// duplicate rejection at round 0): eviction must hold the cap and never
+	// drop the current round's (round 0, no simulation) entries.
+	for round := 0; round < maxModeActionRounds; round++ {
+		roundCandidates := battleRoyaleCandidates(match, round)
+		for _, player := range players {
+			if _, err := service.SubmitModeAction(player.SessionToken, matchID, map[string]any{
+				"mode_id":     "battle_royale",
+				"action_type": "select_round_card",
+				"payload":     map[string]any{"card_id": roundCandidates[0], "round_index": round},
+			}); err != nil {
+				t.Fatalf("round %d selection: %v", round, err)
+			}
+		}
+	}
+	selections := anyMapFrom(match.ModeState["round_selections"])
+	if len(selections) != maxRetainedRoundSelections {
+		t.Fatalf("round_selections should sit exactly at the cap after eviction, got %d", len(selections))
+	}
+	for _, player := range players {
+		key := fmt.Sprintf("0:%s", player.UserID)
+		if _, ok := selections[key]; !ok {
+			t.Fatalf("current round entry evicted: %s", key)
+		}
+	}
+}
+
 func TestServerValidatesBossTransferModeAction(t *testing.T) {
 	service := NewService(Config{})
 	players := []*AuthSession{

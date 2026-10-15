@@ -1400,6 +1400,79 @@ func TestHTTPModeActionFlow(t *testing.T) {
 	}
 }
 
+// TestHTTPModeActionRequestLimits pins the hardening bounds of the mode-action
+// channel: an oversized body is rejected with 413 before any decoding, a
+// round_index far in the future is a domain rejection, and a normal action is
+// still accepted.
+func TestHTTPModeActionRequestLimits(t *testing.T) {
+	service := core.NewService(core.Config{})
+	server := httptest.NewServer(New(service))
+	defer server.Close()
+
+	sessions := []core.AuthSession{}
+	for i := 0; i < 5; i++ {
+		session := postJSON[core.AuthSession](t, server.URL+"/v1/auth/anonymous", "", map[string]any{"device_id": fmt.Sprintf("cap-%d", i), "display_name": fmt.Sprintf("Cap %d", i)})
+		sessions = append(sessions, session)
+	}
+	matchID := ""
+	for i, session := range sessions {
+		queue := postJSON[core.QueueResponse](t, server.URL+"/v1/matchmaking/join", session.SessionToken, map[string]any{
+			"mode_id":        "battle_royale",
+			"active_deck_id": fmt.Sprintf("cap_deck_%d", i),
+			"deck_snapshot":  validDeck(fmt.Sprintf("cap_deck_%d", i)),
+		})
+		if queue.MatchID != "" {
+			matchID = queue.MatchID
+		}
+	}
+	if matchID == "" {
+		t.Fatalf("expected battle royale match")
+	}
+	candidate := ""
+	for _, session := range sessions {
+		ready := postJSON[core.ReadyResponse](t, server.URL+"/v1/matches/"+matchID+"/ready", session.SessionToken, map[string]any{})
+		if ready.MatchStart != nil {
+			if candidates, ok := ready.MatchStart.ModeState["candidate_cards"].([]any); ok && len(candidates) > 0 {
+				candidate = fmt.Sprint(candidates[0])
+			}
+			if candidates, ok := ready.MatchStart.ModeState["candidate_cards"].([]string); ok && len(candidates) > 0 {
+				candidate = candidates[0]
+			}
+		}
+	}
+	if candidate == "" {
+		t.Fatalf("expected battle royale candidate cards")
+	}
+	// A normal action is still accepted.
+	normal := postJSON[core.ModeActionResponse](t, server.URL+"/v1/matches/"+matchID+"/mode-action", sessions[0].SessionToken, map[string]any{
+		"mode_id":     "battle_royale",
+		"action_type": "select_round_card",
+		"payload":     map[string]any{"card_id": candidate, "round_index": 0},
+	})
+	if !normal.OK || !normal.Accepted || normal.Event.Type != "mode_action_accepted" {
+		t.Fatalf("normal mode action invalid: %+v", normal)
+	}
+	// A round_index far in the future is a domain rejection (HTTP 200 with
+	// Accepted=false and the mode_action_invalid reason code).
+	future := postJSON[core.ModeActionResponse](t, server.URL+"/v1/matches/"+matchID+"/mode-action", sessions[1].SessionToken, map[string]any{
+		"mode_id":     "battle_royale",
+		"action_type": "select_round_card",
+		"payload":     map[string]any{"card_id": candidate, "round_index": 100000},
+	})
+	if future.Accepted || future.Reason != "mode_action_invalid" {
+		t.Fatalf("expected future round rejection, got %+v", future)
+	}
+	// An oversized body is rejected with 413 before any decoding happens.
+	oversized := postRaw(t, server.URL+"/v1/matches/"+matchID+"/mode-action", sessions[2].SessionToken, map[string]any{
+		"mode_id":     "battle_royale",
+		"action_type": "select_round_card",
+		"payload":     map[string]any{"card_id": candidate, "padding": strings.Repeat("a", 70*1024)},
+	})
+	if oversized.Code != http.StatusRequestEntityTooLarge || oversized.ErrorCode != "body_too_large" {
+		t.Fatalf("expected 413 body_too_large, got %+v", oversized)
+	}
+}
+
 type errorBody struct {
 	OK        bool   `json:"ok"`
 	ErrorCode string `json:"error_code"`

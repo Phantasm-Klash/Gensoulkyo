@@ -1982,6 +1982,13 @@ func (s *Service) SubmitModeAction(sessionToken string, matchID string, raw map[
 	if req.ClientResultAuthoritative {
 		return nil, newError(codeForbiddenField, "client cannot submit client_result_authoritative")
 	}
+	// Cap the payload before any state is touched: the payload is deep-copied
+	// into the response and retained in ModeActions, so an oversized payload
+	// would amplify per-match state and the response alike. Values are
+	// JSON-derived, so the marshal here cannot fail.
+	if encoded, _ := json.Marshal(req.Payload); len(encoded) > maxModeActionPayloadBytes {
+		return nil, newError(codeModeAction, "payload exceeds %d bytes", maxModeActionPayloadBytes)
+	}
 	if req.ModeID == "" {
 		req.ModeID = match.ModeID
 	}
@@ -3339,6 +3346,30 @@ func (s *Service) applyCardRequestLocked(match *matchState, player *playerState,
 	}
 }
 
+// Mode-action state limits. Mode actions are retained per match for audit
+// (accepted and rejected alike), so every unbounded client-controlled input
+// needs a documented bound here.
+const (
+	// maxModeActionRounds hard-caps how far a client-supplied round_index may
+	// point. A battle-royale round is TickRate*30 ticks, so 64 rounds is
+	// already ~32 minutes of play, beyond any match length in use; a longer
+	// config cannot inflate the round_selections key space past this.
+	maxModeActionRounds = 64
+	// maxRetainedModeActions bounds the per-match ModeActions map. Rejected
+	// submissions are kept for audit like accepted ones, so without a cap a
+	// flood of rejected actions grows match state forever.
+	maxRetainedModeActions = 256
+	// maxRetainedRoundSelections bounds the round_selections entries (keyed
+	// by "round:user"). Eviction drops the earliest round's entries and never
+	// the current round's, so live draft state cannot be erased.
+	maxRetainedRoundSelections = 256
+	// maxModeActionPayloadBytes bounds the deep-copied payload echoed back in
+	// a mode-action response. Real payloads (card_id/round_index) are tens of
+	// bytes, so 4 KiB is generous while keeping the retained copy and the
+	// response finite.
+	maxModeActionPayloadBytes = 4 << 10
+)
+
 func (s *Service) applyModeActionLocked(match *matchState, player *playerState, req ModeActionRequest) ModeActionResponse {
 	match.NextModeActionSeq++
 	actionID := fmt.Sprintf("%s_a%06d", match.MatchID, match.NextModeActionSeq)
@@ -3362,7 +3393,7 @@ func (s *Service) applyModeActionLocked(match *matchState, player *playerState, 
 	var err error
 	switch req.ActionType {
 	case "select_round_card":
-		event, err = applyBattleRoyaleSelectionLocked(match, player, actionID, req.Payload)
+		event, err = applyBattleRoyaleSelectionLocked(match, player, actionID, req.Payload, s.matchDurationTicks)
 	case "transfer_card":
 		event, err = applyBossTransferLocked(match, player, actionID, req.Payload)
 	default:
@@ -3375,7 +3406,7 @@ func (s *Service) applyModeActionLocked(match *matchState, player *playerState, 
 		appendMatchEventLocked(match, event)
 		response.Event = lastMatchEvent(match)
 		response.ModeState = copyAnyMap(match.ModeState)
-		match.ModeActions[actionID] = response
+		recordModeActionLocked(match, actionID, response)
 		return response
 	}
 	response.Accepted = true
@@ -3387,8 +3418,48 @@ func (s *Service) applyModeActionLocked(match *matchState, player *playerState, 
 	// the pick always precedes the grant on the event stream.
 	maybeGrantDraftLocked(match)
 	response.ModeState = copyAnyMap(match.ModeState)
-	match.ModeActions[actionID] = response
+	recordModeActionLocked(match, actionID, response)
 	return response
+}
+
+// recordModeActionLocked retains the action response under its id and evicts
+// the oldest entries when the per-match retention cap is exceeded. The action
+// just recorded is always the newest, so the current action is never the one
+// evicted.
+func recordModeActionLocked(match *matchState, actionID string, response ModeActionResponse) {
+	match.ModeActions[actionID] = response
+	for len(match.ModeActions) > maxRetainedModeActions {
+		oldestKey := ""
+		oldestSeq := 0
+		for key := range match.ModeActions {
+			seq, ok := modeActionSeqFromID(key)
+			if !ok {
+				continue
+			}
+			if oldestKey == "" || seq < oldestSeq {
+				oldestKey, oldestSeq = key, seq
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(match.ModeActions, oldestKey)
+	}
+}
+
+// modeActionSeqFromID extracts the numeric sequence from an action id
+// ("<matchID>_a%06d"). Splitting on the last "_a" keeps match ids that
+// themselves contain "_a" unambiguous.
+func modeActionSeqFromID(actionID string) (int, bool) {
+	index := strings.LastIndex(actionID, "_a")
+	if index < 0 {
+		return 0, false
+	}
+	seq, err := strconv.Atoi(actionID[index+2:])
+	if err != nil {
+		return 0, false
+	}
+	return seq, true
 }
 
 func (s *Service) validateAndActivateCardLocked(match *matchState, player *playerState, slot int, tick int) (serverCardActivation, error) {
@@ -4887,7 +4958,7 @@ func validateInputPacket(packet InputPacket, player *playerState, match *matchSt
 	return nil
 }
 
-func applyBattleRoyaleSelectionLocked(match *matchState, player *playerState, actionID string, payload map[string]any) (MatchEvent, error) {
+func applyBattleRoyaleSelectionLocked(match *matchState, player *playerState, actionID string, payload map[string]any, matchDurationTicks int) (MatchEvent, error) {
 	if match.ModeID != "battle_royale" {
 		return MatchEvent{}, newError(codeModeAction, "select_round_card requires battle_royale")
 	}
@@ -4899,6 +4970,14 @@ func applyBattleRoyaleSelectionLocked(match *matchState, player *playerState, ac
 	roundIndex, ok := asInt(payload["round_index"])
 	if !ok {
 		roundIndex = max(0, match.Tick/(TickRate*30))
+	} else {
+		// A client-controlled round_index is only meaningful inside the
+		// match's own rounds; anything further out can never be played and
+		// would otherwise grow the "round:user" key space without bound.
+		maxRound := modeActionMaxRoundIndex(matchDurationTicks)
+		if roundIndex < 0 || roundIndex > maxRound {
+			return MatchEvent{}, newError(codeModeAction, "round_index must be 0..%d", maxRound)
+		}
 	}
 	cardID := strings.TrimSpace(asString(payload["card_id"]))
 	if cardID == "" {
@@ -4920,6 +4999,7 @@ func applyBattleRoyaleSelectionLocked(match *matchState, player *playerState, ac
 		"action_id":   actionID,
 	}
 	selections[selectionKey] = selection
+	evictEarliestRoundSelectionsLocked(selections, currentModeRoundIndex(match))
 	match.ModeState["round_selections"] = selections
 	match.ModeState["round_index"] = roundIndex
 	match.ModeState["candidate_cards"] = candidates
@@ -4936,6 +5016,67 @@ func applyBattleRoyaleSelectionLocked(match *matchState, player *playerState, ac
 		RoundIndex: roundIndex,
 		Status:     "accepted",
 	}, nil
+}
+
+// modeActionMaxRoundIndex returns the highest round index a client may
+// reference: the last round that fits inside the match duration, hard-capped
+// at maxModeActionRounds-1 so a long match config cannot inflate the
+// round_selections key space. A round past the match end can never be played,
+// so selections there are always rejected.
+func modeActionMaxRoundIndex(matchDurationTicks int) int {
+	roundTicks := TickRate * 30
+	last := (matchDurationTicks - 1) / roundTicks
+	if last < 0 {
+		last = 0
+	}
+	if last > maxModeActionRounds-1 {
+		last = maxModeActionRounds - 1
+	}
+	return last
+}
+
+// currentModeRoundIndex is the round the match is currently in; its selection
+// entries are live state and must never be evicted.
+func currentModeRoundIndex(match *matchState) int {
+	return match.Tick / (TickRate * 30)
+}
+
+// evictEarliestRoundSelectionsLocked drops the earliest rounds' entries when
+// the retention cap is exceeded. Entries belonging to the current round are
+// never evicted, so a flood of old-round selections cannot erase the state of
+// the round being played.
+func evictEarliestRoundSelectionsLocked(selections map[string]any, currentRound int) {
+	for len(selections) > maxRetainedRoundSelections {
+		evictKey := ""
+		evictRound := 0
+		for key := range selections {
+			round, ok := roundSelectionRoundFromKey(key)
+			if !ok || round == currentRound {
+				continue
+			}
+			if evictKey == "" || round < evictRound {
+				evictKey, evictRound = key, round
+			}
+		}
+		if evictKey == "" {
+			return
+		}
+		delete(selections, evictKey)
+	}
+}
+
+// roundSelectionRoundFromKey parses the round index out of a
+// round_selections key ("round:user").
+func roundSelectionRoundFromKey(key string) (int, bool) {
+	roundText, _, found := strings.Cut(key, ":")
+	if !found {
+		return 0, false
+	}
+	round, err := strconv.Atoi(roundText)
+	if err != nil {
+		return 0, false
+	}
+	return round, true
 }
 
 func applyBossTransferLocked(match *matchState, player *playerState, actionID string, payload map[string]any) (MatchEvent, error) {

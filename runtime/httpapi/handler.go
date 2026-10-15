@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,12 @@ const (
 	// verification (events: 64 rows; results: one signed result; both far
 	// below 1 MiB).
 	maxServiceCallbackBodyBytes = 1 << 20
+	// maxRequestBodyBytes bounds every /v1 business body decoded through
+	// decodeJSON (mode actions, decks, queue joins, lobby messages, ...).
+	// The largest legitimate body sharing the decoder is a deck snapshot
+	// (~20 cards, a few hundred bytes); 64 KiB leaves >100x headroom while
+	// making an unbounded body finite.
+	maxRequestBodyBytes = 64 << 10
 )
 
 type Handler struct {
@@ -1175,9 +1182,19 @@ func (h *Handler) lobbyAuditStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
 	if err := decoder.Decode(target); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+				"ok":         false,
+				"error_code": "body_too_large",
+				"message":    fmt.Sprintf("request body exceeds %d bytes", maxRequestBodyBytes),
+			})
+			return false
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
 		return false
 	}
