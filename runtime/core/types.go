@@ -387,6 +387,34 @@ type BattleAgentPlayer struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
+// BattleAgentEndpointReport is the payload of battle.agent.endpoint, the
+// service-origin RPC an out-of-process battle agent calls right after it has
+// spawned the battle process for a match.
+//
+// The agent picks the concrete UDP port at spawn time (a port the lobby cannot
+// know in advance: it is the first free port at or above the agent's port
+// floor), so the registered endpoint is only a stable handle. Without this
+// report the lobby keeps handing clients the registered port and concurrent
+// matches collide on one battle process.
+type BattleAgentEndpointReport struct {
+	BattleServerID string `json:"battle_server_id"`
+	MatchID        string `json:"match_id"`
+	Endpoint       string `json:"endpoint"`
+}
+
+// BattleAgentEndpointReportResponse is the reply to battle.agent.endpoint.
+type BattleAgentEndpointReportResponse struct {
+	OK                  bool                   `json:"ok"`
+	Version             VersionStamp           `json:"version"`
+	MatchID             string                 `json:"match_id"`
+	BattleServerID      string                 `json:"battle_server_id"`
+	Endpoint            string                 `json:"endpoint"`
+	Allocation          BattleServerAllocation `json:"allocation"`
+	Updated             bool                   `json:"updated"`
+	ServerTime          time.Time              `json:"server_time"`
+	ServerAuthoritative bool                   `json:"server_authoritative"`
+}
+
 // BattleAgentAssignmentsResponse is the reply to battle.agent.assignments.
 type BattleAgentAssignmentsResponse struct {
 	OK                  bool                    `json:"ok"`

@@ -7461,6 +7461,7 @@ func disallowedClientOperations() []string {
 		"battle.servers.heartbeat",
 		"battle.servers.offline",
 		"battle.agent.assignments",
+		"battle.agent.endpoint",
 	}
 }
 
@@ -7474,6 +7475,7 @@ func serviceCallbackOperations() []string {
 		"battle.servers.heartbeat",
 		"battle.servers.offline",
 		"battle.agent.assignments",
+		"battle.agent.endpoint",
 		"battle.ticket.consume",
 		"battle.result.submit",
 		"battle.events.submit",

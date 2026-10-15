@@ -4152,3 +4152,118 @@ func TestBattleAgentAssignmentsExpiresStaleAllocations(t *testing.T) {
 	}
 	service.mu.Unlock()
 }
+
+// TestBattleAgentEndpointReportPinsRealPort covers the per-match endpoint
+// report an out-of-process battle agent sends after it has spawned a match.
+// Without it every concurrent match is relayed to the registry port and lands
+// in the wrong battle process.
+func TestBattleAgentEndpointReportPinsRealPort(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	const registryEndpoint = "203.0.113.30:7400"
+	const realEndpoint = "203.0.113.30:7401"
+	if _, err := service.RegisterBattleServer(RegisterBattleServerRequest{
+		BattleServerID: "agent-endpoint-1",
+		Endpoint:       registryEndpoint,
+		Region:         "raksmart",
+		BuildID:        "battle-agent-endpoint",
+		Capacity:       4,
+		Status:         "online",
+		SupportedModes: []string{"pvp_duel"},
+	}); err != nil {
+		t.Fatalf("register battle server: %v", err)
+	}
+
+	alice := mustLogin(t, service, "Endpoint Alice")
+	bob := mustLogin(t, service, "Endpoint Bob")
+	if _, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "endpoint_alice_deck",
+		DeckSnapshot: validDeck("endpoint_alice_deck"),
+	}); err != nil {
+		t.Fatalf("join alice: %v", err)
+	}
+	queued, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "endpoint_bob_deck",
+		DeckSnapshot: validDeck("endpoint_bob_deck"),
+	})
+	if err != nil {
+		t.Fatalf("join bob: %v", err)
+	}
+	if queued.MatchID == "" {
+		t.Fatalf("expected a matched queue: %+v", queued)
+	}
+
+	// (b) Before the agent reports anything everything falls back to the
+	// registry endpoint: a missing report must never break allocation.
+	before, err := service.BattleAgentAssignments("agent-endpoint-1")
+	if err != nil {
+		t.Fatalf("assignments before report: %v", err)
+	}
+	if len(before.Assignments) != 1 || before.Assignments[0].Endpoint != registryEndpoint {
+		t.Fatalf("unreported allocation must fall back to the registry endpoint: %+v", before.Assignments)
+	}
+	if allocation, ok := service.BattleAllocationForMatch(queued.MatchID); !ok || allocation.Endpoint != registryEndpoint {
+		t.Fatalf("client allocation must fall back to the registry endpoint: %+v ok=%v", allocation, ok)
+	}
+
+	// (a) The report pins the concrete port the agent actually bound.
+	reported, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{
+		BattleServerID: "agent-endpoint-1",
+		MatchID:        queued.MatchID,
+		Endpoint:       realEndpoint,
+	})
+	if err != nil {
+		t.Fatalf("report endpoint: %v", err)
+	}
+	if !reported.OK || !reported.Updated || reported.Endpoint != realEndpoint {
+		t.Fatalf("endpoint report response invalid: %+v", reported)
+	}
+	after, err := service.BattleAgentAssignments("agent-endpoint-1")
+	if err != nil {
+		t.Fatalf("assignments after report: %v", err)
+	}
+	if len(after.Assignments) != 1 || after.Assignments[0].Endpoint != realEndpoint {
+		t.Fatalf("assignment must carry the reported endpoint: %+v", after.Assignments)
+	}
+	if allocation, ok := service.BattleAllocationForMatch(queued.MatchID); !ok || allocation.Endpoint != realEndpoint {
+		t.Fatalf("client allocation must carry the reported endpoint: %+v ok=%v", allocation, ok)
+	}
+
+	// (c) Re-reporting the same endpoint is a no-op, not an error: the agent
+	// retries until it is acknowledged, so the call must be idempotent.
+	duplicate, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{
+		BattleServerID: "agent-endpoint-1",
+		MatchID:        queued.MatchID,
+		Endpoint:       realEndpoint,
+	})
+	if err != nil {
+		t.Fatalf("duplicate endpoint report must be idempotent: %v", err)
+	}
+	if !duplicate.OK || duplicate.Updated || duplicate.Endpoint != realEndpoint {
+		t.Fatalf("duplicate endpoint report must not re-apply: %+v", duplicate)
+	}
+
+	// Fail-closed: a report must not be able to repoint another agent's match.
+	if _, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{
+		BattleServerID: "agent-someone-else",
+		MatchID:        queued.MatchID,
+		Endpoint:       "203.0.113.30:7999",
+	}); err == nil {
+		t.Fatalf("report from a foreign battle server must be rejected")
+	}
+	if _, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{MatchID: queued.MatchID}); err == nil {
+		t.Fatalf("report without an endpoint must be rejected")
+	}
+	if _, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{Endpoint: realEndpoint}); err == nil {
+		t.Fatalf("report without a match id must be rejected")
+	}
+	if _, err := service.ReportBattleAgentEndpoint(BattleAgentEndpointReport{
+		BattleServerID: "agent-endpoint-1",
+		MatchID:        "match_missing",
+		Endpoint:       realEndpoint,
+	}); ErrorCode(err) != codeNotFound {
+		t.Fatalf("unknown match must be reported as not found, got %v", err)
+	}
+}

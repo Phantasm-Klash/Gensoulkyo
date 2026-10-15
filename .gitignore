@@ -15,5 +15,5 @@ coverage/
 /gensoulkyo
 __pycache__/
 gensoulkyo.so
-battle-agent-link-linux-amd64
-battle-agent
+/battle-agent-link-linux-amd64
+/battle-agent

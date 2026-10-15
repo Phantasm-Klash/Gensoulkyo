@@ -295,6 +295,12 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "battle.agent.assignments":
 		battleServerID := fieldString(body, "battle_server_id", "battleServerId")
 		return handler.call(func() (any, error) { return handler.service.BattleAgentAssignments(battleServerID) })
+	case "battle.agent.endpoint":
+		var req core.BattleAgentEndpointReport
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.ReportBattleAgentEndpoint(req) })
 	case "battle.servers":
 		return successResponse(handler.service.BattleServers())
 	case "business.envelope.audit.status":

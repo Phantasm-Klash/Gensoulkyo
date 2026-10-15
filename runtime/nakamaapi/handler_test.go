@@ -1439,6 +1439,39 @@ func TestNakamaBusinessEventRejectsPublishedServerProjectionFields(t *testing.T)
 	}
 }
 
+// The per-match endpoint report is a service-origin callback: it must never
+// become an unauthenticated way to repoint a client's battle traffic.
+func TestNakamaRPCBattleAgentEndpointRequiresServiceOrigin(t *testing.T) {
+	handler := New(core.NewService(core.Config{}))
+	rejected := handler.HandleRPC(RPCRequest{
+		ID:        "battle.agent.endpoint",
+		SessionID: "player-session",
+		UserID:    "player-user",
+		Payload: map[string]any{
+			"battle_server_id": "agent-1",
+			"match_id":         "match-1",
+			"endpoint":         "203.0.113.9:7401",
+		},
+	})
+	if rejected.OK || rejected.Status != 403 || rejected.ErrorCode != CodeServiceOriginRequired {
+		t.Fatalf("per-match endpoint report must be service-origin only, got %+v", rejected)
+	}
+	// With service origin the call reaches core; an unknown match is the
+	// expected answer here, which proves the route is dispatched.
+	dispatched := handler.HandleRPC(RPCRequest{
+		ID:      "battle.agent.endpoint",
+		Service: true,
+		Payload: map[string]any{
+			"battle_server_id": "agent-1",
+			"match_id":         "match-missing",
+			"endpoint":         "203.0.113.9:7401",
+		},
+	})
+	if dispatched.OK || dispatched.Status != 404 || dispatched.ErrorCode != "not_found" {
+		t.Fatalf("service-origin endpoint report must reach core, got %+v", dispatched)
+	}
+}
+
 func TestNakamaBusinessEventSettlementAliasRejectsNonLookupFields(t *testing.T) {
 	handler := New(core.NewService(core.Config{}))
 	response := handler.HandleRPC(RPCRequest{
