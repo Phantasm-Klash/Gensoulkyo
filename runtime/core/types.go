@@ -114,6 +114,13 @@ type Config struct {
 	// routes answer `accounts_unavailable` instead of panicking, which keeps the
 	// anonymous/external sign-in paths usable without a database.
 	Accounts *account.Service
+	// CallbackSecret keys the HMAC that authenticates battle-server service
+	// callbacks (POST /v1/battle/events, /v1/battle/results/submit,
+	// /internal/battle/result). Each battle server derives its per-server
+	// secret as hex(HMAC-SHA256(callbackSecret, battleServerID)) and signs every
+	// callback body with it. A random 32-byte hex value is generated when empty;
+	// a fixed value is meant for tests only.
+	CallbackSecret string
 }
 
 type BattleLifecycleAuditStatus struct {
@@ -328,6 +335,12 @@ type BattleServerStatus struct {
 	SupportedModes      []string  `json:"supported_modes"`
 	LastSeenAt          time.Time `json:"last_seen_at"`
 	ServerAuthoritative bool      `json:"server_authoritative"`
+	// CallbackSecret is the per-battle-server callback secret
+	// (hex(HMAC-SHA256(callbackSecret, battle_server_id))). It is returned ONLY
+	// by RegisterBattleServer; heartbeat, offline and the public server list
+	// omit it (omitempty), so the derived secret never leaves the registration
+	// response.
+	CallbackSecret string `json:"callback_secret,omitempty"`
 }
 
 type BattleServerListResponse struct {

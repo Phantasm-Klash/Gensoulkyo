@@ -33,12 +33,20 @@ func TestHTTPBattleEventsCallbackGuards(t *testing.T) {
 		t.Fatalf("battle events with player session must be rejected, got %+v", response)
 	}
 
-	// Unknown match must be rejected with 404.
-	response = postRawWithHeaders(t, route, "", map[string]any{
+	// Unknown match must be rejected with 404 — but only after the callback
+	// signature gate passes, so the post carries a valid signature for the
+	// claimed battle server.
+	unknownMatchBody := map[string]any{
 		"battle_server_id": "battle-local-1",
 		"match_id":         "match-nope",
 		"events":           []map[string]any{{"type": "card_accepted", "tick": 1, "user_id": "u", "card_id": "focus_lens"}},
-	}, callbackHeaders)
+	}
+	signedUnknownHeaders := map[string]string{}
+	for key, value := range callbackHeaders {
+		signedUnknownHeaders[key] = value
+	}
+	signedUnknownHeaders[headerBattleSignature] = signedCallbackBody(t, service.BattleServerCallbackSecret("battle-local-1"), unknownMatchBody)
+	response = postRawWithHeaders(t, route, "", unknownMatchBody, signedUnknownHeaders)
 	if response.Code != http.StatusNotFound || response.ErrorCode != "not_found" {
 		t.Fatalf("battle events for unknown match must be rejected, got %+v", response)
 	}
@@ -102,17 +110,20 @@ func TestHTTPBattleEventsCallbackAppendsAndMatchesAreVisible(t *testing.T) {
 		t.Fatalf("allocation must name the battle server")
 	}
 
-	response := postRawWithHeaders(t, server.URL+"/v1/battle/events", "", map[string]any{
+	eventsBody := map[string]any{
 		"battle_server_id": serverID,
 		"match_id":         matchID,
 		"events": []map[string]any{
 			{"type": "card_accepted", "tick": 5, "user_id": alice.UserID, "card_id": "focus_lens", "slot": 1},
 			{"type": "card_effect_applied", "tick": 5, "user_id": alice.UserID, "card_id": "focus_lens", "value": 3},
 		},
-	}, map[string]string{
+	}
+	signedEventsHeaders := map[string]string{
 		headerServiceOrigin:  core.ServiceCallbackContext()[serviceOriginContextKey],
 		headerBattleCallback: "yes",
-	})
+		headerBattleSignature: signedCallbackBody(t, service.BattleServerCallbackSecret(serverID), eventsBody),
+	}
+	response := postRawWithHeaders(t, server.URL+"/v1/battle/events", "", eventsBody, signedEventsHeaders)
 	if response.Code != http.StatusOK {
 		t.Fatalf("authenticated battle events post must succeed, got %+v", response)
 	}

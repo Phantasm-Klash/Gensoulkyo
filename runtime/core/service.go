@@ -2,7 +2,10 @@ package core
 
 import (
 	"crypto/ed25519"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -157,6 +160,11 @@ type Service struct {
 	battleAuditStatus     BattleLifecycleAuditStatus
 	lobbyAuditRepo        LobbyLifecycleAuditRepository
 	lobbyAuditStatus      LobbyLifecycleAuditStatus
+	// callbackSecret keys the HMAC that authenticates battle-server service
+	// callbacks. It is immutable after construction, so it is read without the
+	// mutex; every per-server secret is derived from it (see
+	// BattleServerCallbackSecret).
+	callbackSecret        string
 	signingKeyID          string
 	signingPublicKey      ed25519.PublicKey
 	signingPrivateKey     ed25519.PrivateKey
@@ -478,6 +486,15 @@ func NewService(config Config) *Service {
 		matchTicks = DefaultMatchTicks
 	}
 	publicKey, privateKey, _ := ed25519.GenerateKey(nil)
+	callbackSecret := strings.TrimSpace(config.CallbackSecret)
+	if callbackSecret == "" {
+		// Random per-process master secret (mirrors account.Config.CodeSecret):
+		// the derived per-server secrets are only as strong as this value, and
+		// an empty fallback would make every signature forgeable.
+		if generated, err := randomHexSecret(32); err == nil {
+			callbackSecret = generated
+		}
+	}
 	service := &Service{
 		clock:              clock,
 		sessionRevokedHook: config.OnSessionRevoked,
@@ -495,6 +512,7 @@ func NewService(config Config) *Service {
 			Configured:          config.LobbyLifecycleAuditRepo != nil,
 			ServerAuthoritative: true,
 		},
+		callbackSecret:        callbackSecret,
 		signingKeyID:          "dev-ed25519-0",
 		signingPublicKey:      publicKey,
 		signingPrivateKey:     privateKey,
@@ -525,6 +543,51 @@ func NewService(config Config) *Service {
 	}
 	service.registerDefaultBattleServerLocked()
 	return service
+}
+
+// randomHexSecret returns n cryptographically random bytes, hex-encoded.
+func randomHexSecret(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// BattleServerCallbackSecret derives the per-battle-server callback secret:
+// hex(HMAC-SHA256(callbackSecret, battleServerID)).
+//
+// The derivation is deterministic, so re-registering the same battle server id
+// never rotates its secret and there is no state window between registration
+// and the first callback. The master callbackSecret never leaves the process.
+func (s *Service) BattleServerCallbackSecret(battleServerID string) string {
+	mac := hmac.New(sha256.New, []byte(s.callbackSecret))
+	mac.Write([]byte(strings.TrimSpace(battleServerID)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// BattleCallbackSignature computes the expected X-PhK-Battle-Signature header
+// value for a callback body: hex(HMAC-SHA256(perServerSecret, rawBody)).
+func BattleCallbackSignature(perServerSecret string, rawBody []byte) string {
+	mac := hmac.New(sha256.New, []byte(perServerSecret))
+	mac.Write(rawBody)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// BattleCallbackSignatureValid reports whether presentedSignature is the exact
+// HMAC of rawBody under the battle server's derived callback secret. The
+// comparison is constant time.
+func (s *Service) BattleCallbackSignatureValid(battleServerID string, rawBody []byte, presentedSignature string) bool {
+	serverID := strings.TrimSpace(battleServerID)
+	if serverID == "" {
+		return false
+	}
+	expected := BattleCallbackSignature(s.BattleServerCallbackSecret(serverID), rawBody)
+	presented := strings.ToLower(strings.TrimSpace(presentedSignature))
+	if len(presented) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) == 1
 }
 
 func (s *Service) BattleLifecycleAuditStatus() BattleLifecycleAuditStatus {
@@ -2115,6 +2178,10 @@ func (s *Service) RegisterBattleServer(req RegisterBattleServerRequest) (*Battle
 	}
 	s.recordBattleServerLifecycleAuditLocked(server, "server_registered")
 	status := battleServerStatusFromState(server)
+	// The registration response is the only face that carries the per-server
+	// callback secret; heartbeat/offline/list build their status through
+	// battleServerStatusFromState and therefore omit it.
+	status.CallbackSecret = s.BattleServerCallbackSecret(server.BattleServerID)
 	return &status, nil
 }
 

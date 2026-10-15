@@ -729,6 +729,25 @@ func (s *Server) HandleBattleResult(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
 		return
 	}
+	// The result callback settles a live match, so it is authenticated with the
+	// same HMAC mechanism as the /v1 service callbacks: the signature must be
+	// hex(HMAC-SHA256(perServerSecret, rawBody)) under the battle server that
+	// owns the match's allocation. The owning server is resolved from the
+	// allocation (the callback payload carries no server id); an unknown match
+	// has no allocation to derive from and falls through to the business layer,
+	// which keeps the existing not_found semantics.
+	if matchID := strings.TrimSpace(callback.MatchID); matchID != "" {
+		if allocation, ok := s.service.BattleAllocationForMatch(matchID); ok {
+			if !s.service.BattleCallbackSignatureValid(allocation.BattleServerID, body, r.Header.Get("X-PhK-Battle-Signature")) {
+				writeJSON(w, http.StatusForbidden, map[string]any{
+					"ok":         false,
+					"error_code": "battle_callback_signature_invalid",
+					"message":    "battle result callback requires a valid X-PhK-Battle-Signature",
+				})
+				return
+			}
+		}
+	}
 	resp, err := s.service.ApplyBattleResultCallback(callback)
 	if err != nil {
 		status := http.StatusBadRequest

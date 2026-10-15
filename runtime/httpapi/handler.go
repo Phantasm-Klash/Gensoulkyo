@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,8 +17,13 @@ import (
 const (
 	headerServiceOrigin       = "X-PhK-Service-Origin"
 	headerBattleCallback      = "X-PhK-Battle-Callback"
+	headerBattleSignature     = "X-PhK-Battle-Signature"
 	serviceOriginContextKey   = core.ServiceCallbackOriginKey
 	serviceCallbackContextKey = core.ServiceCallbackFlagKey
+	// maxServiceCallbackBodyBytes bounds the raw body read for HMAC
+	// verification (events: 64 rows; results: one signed result; both far
+	// below 1 MiB).
+	maxServiceCallbackBodyBytes = 1 << 20
 )
 
 type Handler struct {
@@ -1046,11 +1053,18 @@ func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
 	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
 		return
 	}
+	raw, ok := readServiceCallbackBody(w, r)
+	if !ok {
+		return
+	}
 	var req core.BattleResultSubmitRequest
-	if !decodeServiceJSON(w, r, &req) {
+	if !decodeServiceJSONRaw(w, raw, &req) {
 		return
 	}
 	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
+	if !h.verifyBattleCallbackSignature(w, r, raw, req.SignedResult.KeyID, req.SignedResult.Result.MatchID) {
 		return
 	}
 	resp, err := h.service.SubmitBattleResult(req)
@@ -1065,7 +1079,8 @@ func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
 // events it simulated (card_accepted / card_effect_applied / card_rejected) and
 // the lobby appends them to the match event log. The guard sequence mirrors
 // submitBattleResult: no player session, no business envelope, service-callback
-// headers required.
+// headers required, plus the HMAC callback signature (see
+// verifyBattleCallbackSignature).
 func (h *Handler) battleEvents(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
 		return
@@ -1073,11 +1088,18 @@ func (h *Handler) battleEvents(w http.ResponseWriter, r *http.Request) {
 	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
 		return
 	}
+	raw, ok := readServiceCallbackBody(w, r)
+	if !ok {
+		return
+	}
 	var req core.BattleEventsSubmitRequest
-	if !decodeServiceJSON(w, r, &req) {
+	if !decodeServiceJSONRaw(w, raw, &req) {
 		return
 	}
 	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
+	if !h.verifyBattleCallbackSignature(w, r, raw, req.BattleServerID, req.MatchID) {
 		return
 	}
 	resp, err := h.service.SubmitBattleEvents(req)
@@ -1163,14 +1185,37 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 }
 
 func decodeServiceJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	var raw map[string]any
-	decoder := json.NewDecoder(r.Body)
+	raw, ok := readServiceCallbackBody(w, r)
+	if !ok {
+		return false
+	}
+	return decodeServiceJSONRaw(w, raw, target)
+}
+
+// readServiceCallbackBody reads the raw request body (bounded) so the HMAC
+// callback signature can be verified over the exact bytes the caller sent.
+func readServiceCallbackBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxServiceCallbackBodyBytes))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_request", "message": err.Error()})
+		return nil, false
+	}
+	return raw, true
+}
+
+// decodeServiceJSONRaw decodes an already-read raw service-callback body into
+// target, applying the business-envelope payload rejection. It is the raw-body
+// sibling of decodeServiceJSON: the HMAC check in verifyBattleCallbackSignature
+// runs over the same bytes this function decodes.
+func decodeServiceJSONRaw(w http.ResponseWriter, raw []byte, target any) bool {
+	var payload map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	if err := decoder.Decode(&raw); err != nil {
+	if err := decoder.Decode(&payload); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
 		return false
 	}
-	if servicePayloadHasBusinessEnvelope(raw) {
+	if servicePayloadHasBusinessEnvelope(payload) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":         false,
 			"error_code": "invalid_request",
@@ -1178,13 +1223,47 @@ func decodeServiceJSON(w http.ResponseWriter, r *http.Request, target any) bool 
 		})
 		return false
 	}
-	encoded, err := json.Marshal(raw)
+	encoded, err := json.Marshal(payload)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
 		return false
 	}
 	if err := json.Unmarshal(encoded, target); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error_code": "invalid_json", "message": err.Error()})
+		return false
+	}
+	return true
+}
+
+// verifyBattleCallbackSignature enforces the real callback boundary: the
+// X-PhK-Battle-Signature header must be hex(HMAC-SHA256(perServerSecret, raw))
+// where perServerSecret is derived from the lobby master secret and the
+// battleServerID the payload claims. It additionally asserts that the match the
+// callback targets is owned by that same battle server, so a valid signature
+// from server A cannot write into a match allocated to server B.
+//
+// battleServerID/matchID come from the payload fields the business layer
+// already trusts for ownership (BattleEventsSubmitRequest.BattleServerID /
+// BattleResultSubmitRequest.SignedResult.KeyID and .Result.MatchID).
+func (h *Handler) verifyBattleCallbackSignature(w http.ResponseWriter, r *http.Request, raw []byte, battleServerID string, matchID string) bool {
+	if !h.service.BattleCallbackSignatureValid(battleServerID, raw, r.Header.Get(headerBattleSignature)) {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"ok":         false,
+			"error_code": "battle_callback_signature_invalid",
+			"message":    "service callback requires a valid X-PhK-Battle-Signature for the claimed battle server",
+		})
+		return false
+	}
+	matchID = strings.TrimSpace(matchID)
+	if matchID == "" {
+		return true
+	}
+	if allocation, ok := h.service.BattleAllocationForMatch(matchID); ok && allocation.BattleServerID != battleServerID {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"ok":         false,
+			"error_code": "battle_callback_server_mismatch",
+			"message":    "callback battle server does not own the match allocation",
+		})
 		return false
 	}
 	return true

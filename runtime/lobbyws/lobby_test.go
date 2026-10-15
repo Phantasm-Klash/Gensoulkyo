@@ -141,7 +141,14 @@ func TestLobbyRoomFlowMatchStartAndResult(t *testing.T) {
 			{PlayerID: loser, DamageDealt: 500, BossCurrentHP: 300},
 		},
 	}
-	status, resultResp := postBattleResult(t, ts, callback)
+	// The result callback settles a live match: an unsigned post must be
+	// rejected before settlement.
+	unsignedStatus, _ := postBattleResult(t, ts, nil, callback)
+	if unsignedStatus != http.StatusForbidden {
+		t.Fatalf("unsigned battle result callback must be rejected, got %d", unsignedStatus)
+	}
+
+	status, resultResp := postBattleResult(t, ts, service, callback)
 	if status != http.StatusOK {
 		t.Fatalf("result callback status = %d", status)
 	}
@@ -151,7 +158,7 @@ func TestLobbyRoomFlowMatchStartAndResult(t *testing.T) {
 
 	aliceResult := decodePayload[MatchResultMessage](t, alice.readEnvelope(TypeMatchResult, 5*time.Second))
 	if aliceResult.MatchID != bobStart.MatchID || aliceResult.WinnerPlayerID != winner {
-		t.Fatalf("unexpected match result: %+v", aliceResult)
+		t.Fatalf("unexpected match result for alice: %+v", aliceResult)
 	}
 	if aliceResult.Points[winner] != 3 || aliceResult.Points[loser] != 1 {
 		t.Fatalf("unexpected match result points: %+v", aliceResult.Points)
@@ -161,7 +168,7 @@ func TestLobbyRoomFlowMatchStartAndResult(t *testing.T) {
 	}
 
 	// Replaying the same callback is idempotent and must not re-broadcast.
-	status, duplicate := postBattleResult(t, ts, callback)
+	status, duplicate := postBattleResult(t, ts, service, callback)
 	if status != http.StatusOK || !duplicate.Duplicate {
 		t.Fatalf("expected idempotent duplicate, got status=%d resp=%+v", status, duplicate)
 	}
@@ -169,7 +176,7 @@ func TestLobbyRoomFlowMatchStartAndResult(t *testing.T) {
 
 func TestBattleResultUnknownMatchReturns404(t *testing.T) {
 	ts, _, _ := newLobbyTestServer(t)
-	status, _ := postBattleResult(t, ts, core.BattleResultCallback{MatchID: "match_missing", StateHash: "x"})
+	status, _ := postBattleResult(t, ts, nil, core.BattleResultCallback{MatchID: "match_missing", StateHash: "x"})
 	if status != http.StatusNotFound {
 		t.Fatalf("expected 404 for unknown match, got %d", status)
 	}
@@ -242,13 +249,27 @@ func TestRelayWithoutMatchReturnsError(t *testing.T) {
 	}
 }
 
-func postBattleResult(t *testing.T, ts *httptest.Server, callback core.BattleResultCallback) (int, core.BattleResultCallbackResponse) {
+// postBattleResult posts a battle result callback. When service is nil the post
+// is unsigned (used to assert the signature gate); otherwise the body is signed
+// with the derived callback secret of the battle server that owns the match's
+// allocation, exactly like the C++ battle server does.
+func postBattleResult(t *testing.T, ts *httptest.Server, service *core.Service, callback core.BattleResultCallback) (int, core.BattleResultCallbackResponse) {
 	t.Helper()
 	body, err := json.Marshal(callback)
 	if err != nil {
 		t.Fatalf("marshal callback: %v", err)
 	}
-	response, err := http.Post(ts.URL+"/internal/battle/result", "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/internal/battle/result", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if service != nil {
+		if allocation, ok := service.BattleAllocationForMatch(callback.MatchID); ok {
+			req.Header.Set("X-PhK-Battle-Signature", core.BattleCallbackSignature(service.BattleServerCallbackSecret(allocation.BattleServerID), body))
+		}
+	}
+	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("post result: %v", err)
 	}

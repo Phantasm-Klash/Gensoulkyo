@@ -1171,12 +1171,21 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	}
 	badProjection := result
 	badProjection.Result.RewardProjectionJSON = `{"source":"battle_server","reward":{"gold":999999}}`
-	forbiddenProjection := postRawWithHeaders(t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: badProjection}, serviceCallbackHeaders())
+	// The registration response is the battle server's source for its callback
+	// secret; sign the exact body with it so the request reaches the business
+	// layer (where the reward projection is rejected).
+	signedResultHeaders := map[string]string{}
+	for key, value := range serviceCallbackHeaders() {
+		signedResultHeaders[key] = value
+	}
+	signedResultHeaders[headerBattleSignature] = signedCallbackBody(t, registered.CallbackSecret, core.BattleResultSubmitRequest{SignedResult: badProjection})
+	forbiddenProjection := postRawWithHeaders(t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: badProjection}, signedResultHeaders)
 	if forbiddenProjection.Code != http.StatusForbidden || forbiddenProjection.ErrorCode != "forbidden_field" {
 		t.Fatalf("expected forbidden battle result projection rejection, got %+v", forbiddenProjection)
 	}
 
-	submit := postJSONWithHeaders[core.BattleResultSubmitResponse](t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: result}, serviceCallbackHeaders())
+	signedResultHeaders[headerBattleSignature] = signedCallbackBody(t, registered.CallbackSecret, core.BattleResultSubmitRequest{SignedResult: result})
+	submit := postJSONWithHeaders[core.BattleResultSubmitResponse](t, server.URL+"/v1/battle/results/submit", "", core.BattleResultSubmitRequest{SignedResult: result}, signedResultHeaders)
 	if !submit.OK || !submit.Accepted || submit.MatchID != queueBob.MatchID {
 		t.Fatalf("battle result submit invalid: %+v", submit)
 	}
