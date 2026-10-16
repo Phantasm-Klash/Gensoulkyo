@@ -126,6 +126,22 @@ context contract used by room rules, Nakama RPC gating, and the HTTP fallback he
 including the allowed low-frequency `business_event_request_kinds` for WSS/status reads.
 Use Nakama service-origin RPC gating plus mTLS/private networking for production callbacks.
 
+### Battle-callback master secret
+
+Every battle server's callback secret is derived deterministically as
+`hex(HMAC-SHA256(master, battle_server_id))` and returned by `battle.servers.register`
+(as `callback_secret`; heartbeat, offline and the public server list omit it). The master
+must be **stable across restarts** — a per-process random master rotates every derived
+secret, so in-flight battle servers get `403` on every callback until they re-register.
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `GENSOULKYO_CALLBACK_SECRET` | *(unset → random per process)* | Battle-callback master secret, 64 hex chars (32 bytes). Set it in the lobby's 0600 `EnvironmentFile` (e.g. `/etc/gotouhou/gensoulkyo-lobby.env`), e.g. `openssl rand -hex 32`. |
+
+When it is unset the lobby still starts, generates a random master, and logs a
+`callback-auth:` warning at startup — the random fallback is a last resort, not a silent
+default.
+
 ## Remote Deployment Ports
 
 To let a client running on another machine reach a self-hosted Gensoulkyo

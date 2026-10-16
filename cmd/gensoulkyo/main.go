@@ -81,11 +81,25 @@ func main() {
 		log.Printf("account: SMTP relay is not configured; registration e-mail cannot be sent")
 	}
 
+	// The battle-callback master secret MUST be stable across restarts: every
+	// battle server's callback secret is derived from it
+	// (hex(HMAC-SHA256(master, battleServerID))), so a per-process random master
+	// silently rotates all of them on restart and every in-flight server gets
+	// 403 until it re-registers. Deployments inject it through the same 0600
+	// EnvironmentFile as the other secrets. When it is absent we still fall back
+	// to a random per-process secret (core.NewService), but say so loudly here
+	// instead of silently breaking callbacks.
+	callbackSecret := envOr("GENSOULKYO_CALLBACK_SECRET", "")
+	if callbackSecret == "" {
+		log.Printf("callback-auth: GENSOULKYO_CALLBACK_SECRET is not set; the lobby will generate a random per-process battle-callback master secret, so every battle server gets 403 after a restart until it re-registers. Set it (64 hex chars) in the lobby EnvironmentFile (e.g. /etc/gotouhou/gensoulkyo-lobby.env).")
+	}
+
 	service := core.NewService(core.Config{
 		BattleLifecycleAuditRepo: battleRepo,
 		LobbyLifecycleAuditRepo:  lobbyRepo,
 		DemRepository:            demRepo,
 		Accounts:                 accounts,
+		CallbackSecret:           callbackSecret,
 	})
 	handler := httpapi.NewWithOptions(service, httpapi.WithBusinessEnvelopeGuard(guard))
 

@@ -98,3 +98,24 @@ func TestBattleCallbackSignatureValid(t *testing.T) {
 		t.Fatalf("derived secret must be 64 hex chars, got %q", randomSecret)
 	}
 }
+
+// B4-7.3 fix: the master callback secret comes from configuration, so two
+// consecutive NewService runs with the same configuration derive the SAME
+// per-battle-server secret. This is what stops a lobby restart from silently
+// rotating every battle server's callback secret.
+func TestBattleServerCallbackSecretIsStableAcrossServiceRuns(t *testing.T) {
+	const master = "configured-callback-master-0123456789abcdef"
+	const serverID = "stable-battle-1"
+
+	first := NewService(Config{CallbackSecret: master})
+	second := NewService(Config{CallbackSecret: master})
+	if got, want := first.BattleServerCallbackSecret(serverID), second.BattleServerCallbackSecret(serverID); got != want {
+		t.Fatalf("two NewService runs with the same config must derive the same secret: %q vs %q", got, want)
+	}
+
+	// The configured master must actually feed the derivation: a different master
+	// derives a different per-server secret.
+	if first.BattleServerCallbackSecret(serverID) == NewService(Config{CallbackSecret: master + "-other"}).BattleServerCallbackSecret(serverID) {
+		t.Fatalf("different masters must derive different per-server secrets")
+	}
+}

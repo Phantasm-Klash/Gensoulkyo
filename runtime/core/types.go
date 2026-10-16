@@ -129,8 +129,13 @@ type Config struct {
 	// callbacks (POST /v1/battle/events, /v1/battle/results/submit,
 	// /internal/battle/result). Each battle server derives its per-server
 	// secret as hex(HMAC-SHA256(callbackSecret, battleServerID)) and signs every
-	// callback body with it. A random 32-byte hex value is generated when empty;
-	// a fixed value is meant for tests only.
+	// callback body with it.
+	//
+	// It MUST be stable across restarts: a per-process random value rotates every
+	// derived per-server secret, so in-flight battle servers get 403 until they
+	// re-register. Deployments set it from GENSOULKYO_CALLBACK_SECRET
+	// (cmd/gensoulkyo); when empty a random 32-byte hex value is generated per
+	// process as a last resort.
 	CallbackSecret string
 }
 
