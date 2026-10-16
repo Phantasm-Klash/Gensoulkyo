@@ -364,6 +364,19 @@ type assignment struct {
 	ServerSeedHex  string   `json:"server_seed_hex"`
 	ModeConfigHash string   `json:"mode_config_hash"`
 	PlayerIDs      []string `json:"player_ids"`
+	// BossID / Loadouts 是线程A「游戏内容」新增字段：boss 房间级选择 + 每玩家
+	// 自机 loadout，逐条透传给 phk_battle_server 的 --boss-id / --loadout。
+	BossID   string              `json:"boss_id,omitempty"`
+	Loadouts []assignmentLoadout `json:"loadouts"`
+}
+
+// assignmentLoadout 与 core.BattleAgentLoadout 的 JSON 同名（player_id /
+// character_id / shot_type / bomb_type），仅在本包内保留一份以免耦合 core 包。
+type assignmentLoadout struct {
+	PlayerID    string `json:"player_id"`
+	CharacterID string `json:"character_id"`
+	ShotType    string `json:"shot_type"`
+	BombType    string `json:"bomb_type"`
 }
 
 type assignmentsResponse struct {
@@ -568,6 +581,13 @@ func (a *agent) spawn(ctx context.Context, item assignment) error {
 	}
 	if a.cfg.DefaultMaxTicks > 0 {
 		args = append(args, "--max-ticks", strconv.Itoa(a.cfg.DefaultMaxTicks))
+	}
+	// 房间 boss（仅房主可选）+ 每玩家自机 loadout。
+	if item.BossID != "" {
+		args = append(args, "--boss-id", item.BossID)
+	}
+	if encoded := formatLoadoutArgs(item.Loadouts); encoded != "" {
+		args = append(args, "--loadout", encoded)
 	}
 
 	cmd := exec.Command(a.cfg.BattleBinary, args...)
@@ -930,6 +950,27 @@ func seedFromHex(hexSeed string) string {
 		return "0"
 	}
 	return strconv.FormatInt(value, 10)
+}
+
+// formatLoadoutArgs 把每玩家 loadout 编成
+// `<player_id>:<character_id>:<shot_type>:<bomb_type>` 并以逗号连接。
+// 空字段保留（例如未选自机时 shot/bomb 为空串），让 C++ 侧按「缺省复现现状」
+// 处理；玩家 id 为 `p-<hash>`，不含冒号/逗号，转义无歧义。空列表返回空串，
+// 调用方据此决定是否追加 --loadout。
+func formatLoadoutArgs(loadouts []assignmentLoadout) string {
+	encoded := make([]string, 0, len(loadouts))
+	for _, loadout := range loadouts {
+		if strings.TrimSpace(loadout.PlayerID) == "" {
+			continue
+		}
+		encoded = append(encoded, strings.Join([]string{
+			loadout.PlayerID,
+			loadout.CharacterID,
+			loadout.ShotType,
+			loadout.BombType,
+		}, ":"))
+	}
+	return strings.Join(encoded, ",")
 }
 
 func envOr(key string, fallback string) string {
