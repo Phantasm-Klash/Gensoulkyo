@@ -190,6 +190,9 @@ type RoomStateMessage struct {
 	AllReady       bool             `json:"all_ready"`
 	RulesetVersion string           `json:"ruleset_version"`
 	ModeParams     map[string]string `json:"mode_params"`
+	// BossID 是房间 boss 选择（"tian"/"hui"，空 = 默认 timeline，仅房主可设）。
+	// 客户端的房间视图据此回显房主选中的 boss；缺了它 UI 永远显示 Default。
+	BossID string `json:"boss_id,omitempty"`
 }
 
 // BattleTicket mirrors the phk.v1.BattleTicket fields carried inside a signed
@@ -338,6 +341,7 @@ func roomStateMessageFromSnapshot(snapshot core.RoomSnapshot) RoomStateMessage {
 		AllReady:       snapshot.RoomStatus == "found",
 		RulesetVersion: snapshot.RulesetVersion,
 		ModeParams:     modeParams,
+		BossID:         snapshot.BossID,
 	}
 }
 
