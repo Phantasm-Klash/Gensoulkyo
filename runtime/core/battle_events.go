@@ -43,6 +43,12 @@ var allowedBattleEventTypes = map[string]bool{
 	// passively dropped. The battle server supplies only the SIGNAL — the
 	// lobby decides the outcome (a mutual flee, no contest, no score).
 	"all_players_disconnected": true,
+	// B3: bullet-player contact rows. They name the player that was touched
+	// and carry no card, so the validator exempts them from the card checks
+	// (see validateBattleEventRowLocked). The battle server starts emitting
+	// them once this whitelist lands.
+	"hit":   true,
+	"graze": true,
 }
 
 // BattleEventRow is one battle-simulated card event row.
@@ -238,6 +244,15 @@ func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
 		// T10 rule 2: a match-level completion signal — it names neither a card
 		// nor a player, so the card checks below do not apply (same shape as the
 		// boss_defeated early return above).
+		return nil
+	}
+	if row.Type == "hit" || row.Type == "graze" {
+		// B3: a contact row names the player it touched but carries no card.
+		// The player-membership check above already ran; keep the same value
+		// sanity check the card rows get.
+		if row.Value < 0 {
+			return newError(codeInvalidRequest, "battle event value must not be negative")
+		}
 		return nil
 	}
 	cardID := strings.TrimSpace(row.CardID)

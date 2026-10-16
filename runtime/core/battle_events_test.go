@@ -376,3 +376,38 @@ func TestMatchLevelRowIsExemptFromTheTickWindow(t *testing.T) {
 		t.Fatalf("a per-player row ahead of the window must still be rejected")
 	}
 }
+
+// B3: contact rows name the player they touched and carry no card. The lobby
+// accepts them (the battle server starts emitting them once this lands) while
+// still rejecting a row for a non-player or with a bad value.
+func TestHitAndGrazeRowsAreAcceptedWithoutACard(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Hit Alice")
+	bob := mustLogin(t, service, "Hit Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	submit := func(rows ...BattleEventRow) error {
+		_, err := service.SubmitBattleEvents(BattleEventsSubmitRequest{
+			BattleServerID: allocation.BattleServerID,
+			MatchID:        matchID,
+			Events:         rows,
+		})
+		return err
+	}
+	if err := submit(
+		BattleEventRow{Type: "hit", Tick: 3, UserID: alice.UserID, Value: 25},
+		BattleEventRow{Type: "graze", Tick: 3, UserID: bob.UserID, Value: 1},
+	); err != nil {
+		t.Fatalf("hit/graze rows must be accepted without a card: %v", err)
+	}
+	if err := submit(BattleEventRow{Type: "hit", Tick: 3, UserID: "nobody", Value: 25}); err == nil {
+		t.Fatalf("a contact row for a non-player must be rejected")
+	}
+	if err := submit(BattleEventRow{Type: "graze", Tick: 3, UserID: alice.UserID, Value: -1}); err == nil {
+		t.Fatalf("a contact row with a negative value must be rejected")
+	}
+}
