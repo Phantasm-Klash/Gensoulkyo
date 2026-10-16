@@ -182,6 +182,12 @@ type agent struct {
 	cfg    config
 	client *http.Client
 
+	// callbackSecret is the per-battle-server callback secret returned by
+	// battle.servers.register (hex(HMAC-SHA256(master, battle_server_id))). It
+	// is handed to each spawned battle server so the process can sign its
+	// service callbacks (result-submit, card events, dem upload).
+	callbackSecret string
+
 	mu        sync.Mutex
 	processes map[string]*battleProcess // match_id -> running process
 	usedPorts map[int]string            // port -> match_id
@@ -325,9 +331,16 @@ func (a *agent) register(ctx context.Context) error {
 		"status":           "ready",
 		"supported_modes":  a.cfg.modes(),
 	}
-	var out map[string]any
+	var out struct {
+		CallbackSecret string `json:"callback_secret"`
+	}
 	if err := a.callRPCDecoded(ctx, "battle.servers.register", body, &out); err != nil {
 		return err
+	}
+	if secret := strings.TrimSpace(out.CallbackSecret); secret != "" {
+		a.mu.Lock()
+		a.callbackSecret = secret
+		a.mu.Unlock()
 	}
 	log.Printf("registered with Nakama as %s (%s)", a.cfg.BattleServerID, a.cfg.Endpoint())
 	return nil
@@ -588,6 +601,18 @@ func (a *agent) spawn(ctx context.Context, item assignment) error {
 	}
 	if encoded := formatLoadoutArgs(item.Loadouts); encoded != "" {
 		args = append(args, "--loadout", encoded)
+	}
+	// 服务回调签名：对局服用自己的 battle_server_id + 每服密钥签
+	// X-PhK-Battle-Signature（结果回传 / 卡牌事件 / .dem 上传）。密钥来自
+	// 注册响应，只在这一条路径上流转。
+	if a.cfg.BattleServerID != "" {
+		args = append(args, "--battle-server-id", a.cfg.BattleServerID)
+	}
+	a.mu.Lock()
+	callbackSecret := a.callbackSecret
+	a.mu.Unlock()
+	if callbackSecret != "" {
+		args = append(args, "--callback-secret", callbackSecret)
 	}
 
 	cmd := exec.Command(a.cfg.BattleBinary, args...)
