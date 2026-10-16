@@ -54,7 +54,7 @@ func main() {
 	// registered over `/v2/rpc` would be invisible to the match allocation
 	// performed over `/v1`, and every match would silently fall back to the
 	// local spawner.
-	battleRepo, lobbyRepo, guard := sharedBusinessState(db)
+	battleRepo, lobbyRepo, demRepo, guard := sharedBusinessState(db)
 
 	// E-mail + password accounts. Credentials live in Postgres so they survive a
 	// restart; verification codes stay in memory because they are short-lived by
@@ -84,6 +84,7 @@ func main() {
 	service := core.NewService(core.Config{
 		BattleLifecycleAuditRepo: battleRepo,
 		LobbyLifecycleAuditRepo:  lobbyRepo,
+		DemRepository:            demRepo,
 		Accounts:                 accounts,
 	})
 	handler := httpapi.NewWithOptions(service, httpapi.WithBusinessEnvelopeGuard(guard))
@@ -164,9 +165,9 @@ func main() {
 // sharedBusinessState builds the audit repositories and the business-envelope
 // guard that both HTTP faces share. A nil database leaves the repositories nil,
 // which core treats as "auditing disabled".
-func sharedBusinessState(db *sql.DB) (core.BattleLifecycleAuditRepository, core.LobbyLifecycleAuditRepository, *security.BusinessEnvelopeGuard) {
+func sharedBusinessState(db *sql.DB) (core.BattleLifecycleAuditRepository, core.LobbyLifecycleAuditRepository, core.DemRepository, *security.BusinessEnvelopeGuard) {
 	if db == nil {
-		return nil, nil, security.NewBusinessEnvelopeGuard()
+		return nil, nil, nil, security.NewBusinessEnvelopeGuard()
 	}
 	sink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
 	if err != nil {
@@ -180,7 +181,11 @@ func sharedBusinessState(db *sql.DB) (core.BattleLifecycleAuditRepository, core.
 	if err != nil {
 		log.Fatal(err)
 	}
-	return battleRepo, lobbyRepo, security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
+	demRepo, err := core.NewSQLDemStore(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return battleRepo, lobbyRepo, demRepo, security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
 }
 
 // spawnerMode describes where matches will run, for the startup log line.

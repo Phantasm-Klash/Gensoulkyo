@@ -160,6 +160,9 @@ type Service struct {
 	battleAuditStatus     BattleLifecycleAuditStatus
 	lobbyAuditRepo        LobbyLifecycleAuditRepository
 	lobbyAuditStatus      LobbyLifecycleAuditStatus
+	demRepo               DemRepository
+	demStatus             DemStoreStatus
+	demUploads            map[string]*demUploadStaging
 	// callbackSecret keys the HMAC that authenticates battle-server service
 	// callbacks. It is immutable after construction, so it is read without the
 	// mutex; every per-server secret is derived from it (see
@@ -234,6 +237,7 @@ type queueTicket struct {
 	QueueKey     string
 	DeckSnapshot DeckSnapshot
 	Loadout      PlayerLoadout
+	BossID       string
 	CreatedAt    time.Time
 	MatchID      string
 	Status       string
@@ -250,6 +254,7 @@ type roomState struct {
 	CreatedAt  time.Time
 	MatchID    string
 	Status     string
+	BossID     string
 	StageID    string
 	ModeParams map[string]any
 	Messages   []LobbyMessage
@@ -259,6 +264,7 @@ type matchParticipantSpec struct {
 	UserID       string
 	DeckSnapshot DeckSnapshot
 	Loadout      PlayerLoadout
+	BossID       string
 }
 
 type rematchState struct {
@@ -276,6 +282,7 @@ type matchState struct {
 	RewardTableID      string
 	ServerSeed         int64
 	Status             string
+	BossID             string
 	StageID            string
 	Tick               int
 	LastSimulatedTick  int
@@ -476,6 +483,126 @@ var allowedCharacterIDs = map[string]struct{}{
 	"spell_power": {},
 }
 
+// allowedShotTypes / allowedBombTypes 是「自机选择」白名单，逐条对应
+// PhK-BattleServer/src/danmaku/player_loadout.cpp：
+//   * PlayerShotTable()  52 条 PlayerShotSpec.name（ReimuA1 … YuyukoB2）；
+//   * PlayerBombTable()  13 条 PlayerBombSpec.name（Reimu … Yuyuko）。
+// 客户端不提交时留空（空串合法 = 默认自机行为，复现现状）。
+var allowedShotTypes = map[string]struct{}{
+	"ReimuA1": {}, "ReimuA2": {}, "ReimuB1": {}, "ReimuB2": {},
+	"MarisaA1": {}, "MarisaA2": {}, "MarisaB1": {}, "MarisaB2": {},
+	"SanaeA1": {}, "SanaeA2": {}, "SanaeB1": {}, "SanaeB2": {},
+	"SakuyaA1": {}, "SakuyaA2": {}, "SakuyaB1": {}, "SakuyaB2": {},
+	"ReisenA1": {}, "ReisenA2": {}, "ReisenB1": {}, "ReisenB2": {},
+	"YoumuA1": {}, "YoumuA2": {}, "YoumuB1": {}, "YoumuB2": {},
+	"AyaA1": {}, "AyaA2": {}, "AyaB1": {}, "AyaB2": {},
+	"SeijaA1": {}, "SeijaA2": {}, "SeijaB1": {}, "SeijaB2": {},
+	"CirnoA1": {}, "CirnoA2": {}, "CirnoB1": {}, "CirnoB2": {},
+	"YukariA1": {}, "YukariA2": {}, "YukariB1": {}, "YukariB2": {},
+	"AliceA1": {}, "AliceA2": {}, "AliceB1": {}, "AliceB2": {},
+	"RemilliaA1": {}, "RemilliaA2": {}, "RemilliaB1": {}, "RemilliaB2": {},
+	"YuyukoA1": {}, "YuyukoA2": {}, "YuyukoB1": {}, "YuyukoB2": {},
+}
+
+var allowedBombTypes = map[string]struct{}{
+	"Reimu": {}, "Marisa": {}, "Sanae": {}, "Sakuya": {}, "Reisen": {},
+	"Youmu": {}, "Aya": {}, "Seija": {}, "Cirno": {}, "Yukari": {},
+	"Alice": {}, "Remillia": {}, "Yuyuko": {},
+}
+
+// BossMovementKind 是 boss 移动方式（整数三角波）。
+type BossMovementKind string
+
+const (
+	BossMovementStatic BossMovementKind = "static"
+	BossMovementSwayX  BossMovementKind = "sway_x"
+	BossMovementBobY   BossMovementKind = "bob_y"
+)
+
+type BossMovementSpec struct {
+	Kind           BossMovementKind
+	AmplitudeMilli int32
+	PeriodTicks    uint32
+	HalfTicks      uint32
+}
+
+type BossPatternPhase struct {
+	PatternID string
+	Waves     uint32
+}
+
+// BossCatalogEntry 是 Go 侧的 boss 权威目录项。**数值必须与
+// PhK-BattleServer/src/danmaku/boss_catalog.cpp 逐字段一致**（跨端一致性测试
+// TestBossCatalogMatchesPhKBattleServer 钉住；KB: knowledge-base/cards-and-records.md）。
+type BossCatalogEntry struct {
+	ID        string
+	Display   string
+	BossMaxHP uint64
+	Movement  BossMovementSpec
+	Phases    []BossPatternPhase
+}
+
+// BossCatalog 是 Go 侧权威 boss 目录（顺序即目录顺序，新增只允许追加）。
+// Go 只做协议校验与 id→HP 映射，弹幕展开以 C++ 为权威。
+var bossCatalog = []BossCatalogEntry{
+	{
+		ID: "tian", Display: "天", BossMaxHP: 20000,
+		Movement: BossMovementSpec{Kind: BossMovementSwayX, AmplitudeMilli: 60000, PeriodTicks: 600, HalfTicks: 300},
+		Phases: []BossPatternPhase{
+			{PatternID: "kome_ring", Waves: 4},
+			{PatternID: "arrow_aimed_fan", Waves: 3},
+			{PatternID: "ring_spiral", Waves: 4},
+			{PatternID: "kome_homing", Waves: 3},
+			{PatternID: "chou_four_dir", Waves: 4},
+		},
+	},
+	{
+		ID: "hui", Display: "辉", BossMaxHP: 24000,
+		Movement: BossMovementSpec{Kind: BossMovementBobY, AmplitudeMilli: 30000, PeriodTicks: 480, HalfTicks: 240},
+		Phases: []BossPatternPhase{
+			{PatternID: "kusabi_gap_ring", Waves: 3},
+			{PatternID: "sizuku_sine_radius", Waves: 4},
+			{PatternID: "kunai_bounce", Waves: 3},
+			{PatternID: "heart_sine_speed", Waves: 4},
+			{PatternID: "stama_mirror", Waves: 3},
+		},
+	},
+}
+
+// BossCatalogEntries 返回 Go 侧 boss 目录（只读用途）。
+func BossCatalogEntries() []BossCatalogEntry {
+	out := make([]BossCatalogEntry, len(bossCatalog))
+	copy(out, bossCatalog)
+	return out
+}
+
+// FindBossCatalogEntry 按 id 查目录项；空串或未知返回 nil。
+func FindBossCatalogEntry(bossID string) *BossCatalogEntry {
+	if bossID == "" {
+		return nil
+	}
+	for index := range bossCatalog {
+		if bossCatalog[index].ID == bossID {
+			return &bossCatalog[index]
+		}
+	}
+	return nil
+}
+
+// IsKnownBossID 报告 boss id 是否合法（空串视为「默认 timeline」，也合法）。
+func IsKnownBossID(bossID string) bool {
+	return bossID == "" || FindBossCatalogEntry(bossID) != nil
+}
+
+// validateBossID 校验房间 boss 选择；非法值返回 invalid_request。
+func validateBossID(bossID string) (string, error) {
+	bossID = strings.TrimSpace(bossID)
+	if !IsKnownBossID(bossID) {
+		return "", newError(codeInvalidRequest, "unsupported boss %q", bossID)
+	}
+	return bossID, nil
+}
+
 func NewService(config Config) *Service {
 	clock := config.Clock
 	if clock == nil {
@@ -512,6 +639,8 @@ func NewService(config Config) *Service {
 			Configured:          config.LobbyLifecycleAuditRepo != nil,
 			ServerAuthoritative: true,
 		},
+		demRepo:    demRepositoryOrDefault(config.DemRepository),
+		demUploads: map[string]*demUploadStaging{},
 		callbackSecret:        callbackSecret,
 		signingKeyID:          "dev-ed25519-0",
 		signingPublicKey:      publicKey,
@@ -1127,6 +1256,12 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	if err != nil {
 		return nil, err
 	}
+	// boss 选择只能由房主在建房时设定；非法值 invalid_request（guest 无权设，
+	// JoinRoomRequest 根本不含该字段）。
+	bossID, err := validateBossID(req.BossID)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.validateModeEntryLocked(user, modeID); err != nil {
 		return nil, err
 	}
@@ -1144,6 +1279,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		QueueKey:     queueKeyFor(modeID, loadout),
 		DeckSnapshot: deck,
 		Loadout:      loadout,
+		BossID:       bossID,
 		CreatedAt:    s.clock(),
 		Status:       "queued",
 		RoomCode:     roomCode,
@@ -1157,6 +1293,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		TicketIDs:  []string{ticketID},
 		CreatedAt:  ticket.CreatedAt,
 		Status:     "waiting",
+		BossID:     bossID,
 		StageID:    loadout.StageID,
 		ModeParams: copyAnyMap(req.ModeParams),
 	}
@@ -1241,6 +1378,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		QueueKey:     queueKeyFor(room.ModeID, loadout),
 		DeckSnapshot: deck,
 		Loadout:      loadout,
+		BossID:       room.BossID,
 		CreatedAt:    s.clock(),
 		Status:       "queued",
 		RoomCode:     normalizedRoomCode,
@@ -1394,6 +1532,12 @@ func (s *Service) Records(sessionToken string) (*RecordsView, error) {
 	}
 	recent := make([]MatchHistoryEntry, len(records.Recent))
 	copy(recent, records.Recent)
+	for index := range recent {
+		if hasDem, demSize := s.demHasForMatchLocked(recent[index].MatchID); hasDem {
+			recent[index].HasDem = true
+			recent[index].DemSize = demSize
+		}
+	}
 	return &RecordsView{
 		OK:                        true,
 		UserID:                    user.UserID,
@@ -2123,6 +2267,10 @@ func (s *Service) Replay(sessionToken string, replayID string) (*ReplayRecord, e
 		return nil, newError(codeUnauthorized, "user cannot read replay")
 	}
 	copy := copyReplayRecord(replay)
+	if hasDem, demSize := s.demHasForMatchLocked(replay.MatchID); hasDem {
+		copy.HasDem = true
+		copy.DemSize = demSize
+	}
 	return &copy, nil
 }
 
@@ -2347,11 +2495,18 @@ func (s *Service) BattleAgentAssignments(battleServerID string) (*BattleAgentAss
 			continue
 		}
 		players := make([]BattleAgentPlayer, 0, len(alloc.Players))
+		loadouts := make([]BattleAgentLoadout, 0, len(alloc.Players))
 		for _, player := range alloc.Players {
 			players = append(players, BattleAgentPlayer{
 				UserID:      player.UserID,
 				PlayerID:    player.PlayerID,
 				DisplayName: player.DisplayName,
+			})
+			loadouts = append(loadouts, BattleAgentLoadout{
+				PlayerID:    player.PlayerID,
+				CharacterID: player.Loadout.CharacterID,
+				ShotType:    player.Loadout.ShotType,
+				BombType:    player.Loadout.BombType,
 			})
 		}
 		// PlayerIDs must report the roster ids (the same ids clients embed in
@@ -2375,6 +2530,8 @@ func (s *Service) BattleAgentAssignments(battleServerID string) (*BattleAgentAss
 			ServerSeedHex:  alloc.ServerSeedHex,
 			ModeConfigHash: alloc.ModeConfigHash,
 			PlayerIDs:      playerIDs,
+			BossID:         alloc.BossID,
+			Loadouts:       loadouts,
 			Players:        players,
 			AllocatedAt:    alloc.AllocatedAt,
 		})
@@ -2608,6 +2765,7 @@ func (s *Service) createMatchLocked(mode ModeConfig, ticketIDs []string) *matchS
 			UserID:       ticket.UserID,
 			DeckSnapshot: copyDeckSnapshot(ticket.DeckSnapshot),
 			Loadout:      ticket.Loadout,
+			BossID:       ticket.BossID,
 		})
 	}
 	match := s.createMatchFromParticipantsLocked(mode, participants)
@@ -2636,6 +2794,7 @@ func rematchParticipantsFromMatch(match *matchState) []matchParticipantSpec {
 			UserID:       player.UserID,
 			DeckSnapshot: copyDeckSnapshot(player.DeckSnapshot),
 			Loadout:      player.Loadout,
+			BossID:       match.BossID,
 		})
 	}
 	return participants
@@ -2669,6 +2828,17 @@ func (s *Service) createMatchFromParticipantsLocked(mode ModeConfig, participant
 	match.BossHP = match.BossMaxHP
 	if len(participants) > 0 && participants[0].Loadout.StageID != "" {
 		match.StageID = participants[0].Loadout.StageID
+	}
+	// 房间级 boss：取参与者携带的 boss（房主设定，join 时写入各自 ticket）。
+	for _, participant := range participants {
+		if participant.BossID != "" {
+			match.BossID = participant.BossID
+			break
+		}
+	}
+	if entry := FindBossCatalogEntry(match.BossID); entry != nil {
+		match.BossMaxHP = int(entry.BossMaxHP)
+		match.BossHP = match.BossMaxHP
 	}
 	match.ModeState["stage_id"] = match.StageID
 	for _, participant := range participants {
@@ -2719,6 +2889,7 @@ func (s *Service) queueResponseLocked(ticket *queueTicket, mode ModeConfig, queu
 		TicketID:        ticket.TicketID,
 		ModeID:          ticket.ModeID,
 		Loadout:         ticket.Loadout,
+		BossID:          ticket.BossID,
 		RoomCode:        ticket.RoomCode,
 		RoomStatus:      ticket.RoomStatus,
 		RequiredPlayers: mode.MinPlayers,
@@ -3104,6 +3275,7 @@ func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapsho
 		MaxPlayers:          mode.MaxPlayers,
 		CurrentPlayers:      len(participants),
 		MatchID:             room.MatchID,
+		BossID:              room.BossID,
 		StageID:             room.StageID,
 		ModeRulesetVersion:  mode.ModeRulesetVersion,
 		RulesetVersion:      RulesetVersion,
@@ -4278,10 +4450,31 @@ func validateLoadout(modeID string, modeParams map[string]any, profile Certifica
 	} else if ratingParam := strings.TrimSpace(asString(modeParams["rating_code"])); ratingParam != "" && ratingParam != "<nil>" {
 		return PlayerLoadout{}, newError(codeInvalidMode, "rating_code is only valid for certification mode")
 	}
+	// 自机选择：shot_type/bomb_type 缺省留空（复现现状）；一旦提交必须命中白名单。
+	shotType := strings.TrimSpace(asString(modeParams["shot_type"]))
+	if shotType == "<nil>" {
+		shotType = ""
+	}
+	if shotType != "" {
+		if _, ok := allowedShotTypes[shotType]; !ok {
+			return PlayerLoadout{}, newError(codeInvalidMode, "unsupported shot %q", shotType)
+		}
+	}
+	bombType := strings.TrimSpace(asString(modeParams["bomb_type"]))
+	if bombType == "<nil>" {
+		bombType = ""
+	}
+	if bombType != "" {
+		if _, ok := allowedBombTypes[bombType]; !ok {
+			return PlayerLoadout{}, newError(codeInvalidMode, "unsupported bomb %q", bombType)
+		}
+	}
 	return PlayerLoadout{
 		StageID:             stageID,
 		CharacterID:         characterID,
 		RatingCode:          ratingCode,
+		ShotType:            shotType,
+		BombType:            bombType,
 		RulesetVersion:      RulesetVersion,
 		ServerAuthoritative: true,
 	}, nil
@@ -5576,6 +5769,7 @@ func (s *Service) ensureBattleAllocationLocked(match *matchState) *BattleServerA
 		Version:             currentVersionStamp(),
 		MatchID:             match.MatchID,
 		ModeID:              match.ModeID,
+		BossID:              match.BossID,
 		BattleServerID:      server.BattleServerID,
 		Endpoint:            server.Endpoint,
 		Players:             players,
@@ -5750,6 +5944,10 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 		DeckCardIDs:         deckCardIDs,
 		InitialEnergy:       cardStartingEnergy,
 		ServerSeedDecimal:   strconv.FormatInt(match.ServerSeed, 10),
+		BossID:              match.BossID,
+		CharacterID:         player.Loadout.CharacterID,
+		ShotType:            player.Loadout.ShotType,
+		BombType:            player.Loadout.BombType,
 		ServerAuthoritative: true,
 	}
 	payload, _ := json.Marshal(ticket)

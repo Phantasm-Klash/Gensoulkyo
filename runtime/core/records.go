@@ -21,6 +21,10 @@ type MatchHistoryEntry struct {
 	CardPlays     int       `json:"card_plays"`
 	DurationTicks int       `json:"duration_ticks"`
 	EndedAt       time.Time `json:"ended_at"`
+	// HasDem / DemSize 是 thread B 追加字段：该对局是否已有可下载的 .dem
+	// 录制，以及容器字节数。仅追加，不改动上面既有字段的语义。
+	HasDem  bool  `json:"has_dem"`
+	DemSize int64 `json:"dem_size,omitempty"`
 }
 
 // PlayerRecords 是每名玩家的个人记录数据仓库，聚合对局统计并维护有界的最近对局列表。

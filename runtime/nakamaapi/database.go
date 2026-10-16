@@ -20,10 +20,15 @@ func NewWithDatabase(db *sql.DB, options ...Option) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	demRepo, err := core.NewSQLDemStore(db)
+	if err != nil {
+		return nil, err
+	}
 	guard := security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
 	service := core.NewService(core.Config{
 		BattleLifecycleAuditRepo: battleRepo,
 		LobbyLifecycleAuditRepo:  lobbyRepo,
+		DemRepository:            demRepo,
 	})
 	handlerOptions := []Option{WithBusinessEnvelopeGuard(guard)}
 	handlerOptions = append(handlerOptions, options...)

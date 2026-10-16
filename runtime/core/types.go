@@ -43,9 +43,16 @@ type ModeConfig struct {
 }
 
 type PlayerLoadout struct {
-	StageID             string `json:"stage_id"`
-	CharacterID         string `json:"character_id"`
-	RatingCode          string `json:"rating_code,omitempty"`
+	StageID     string `json:"stage_id"`
+	CharacterID string `json:"character_id"`
+	RatingCode  string `json:"rating_code,omitempty"`
+	// ShotType / BombType 是「自机选择」轴（任务「自机机制」）：shot_type 取自
+	// PhK-BattleServer/src/danmaku/player_loadout.cpp 的 52 条 PlayerShotSpec.name
+	// （如 "ReimuA1"），bomb_type 取自 13 条 PlayerBombSpec.name（如 "Reimu"）。
+	// 两者 omitempty：客户端未提交时留空，C++/TS 侧走默认自机行为 —— 保证「缺省
+	// 复现现状」逐字节成立；一旦提交则必须命中白名单（见 validateLoadout）。
+	ShotType            string `json:"shot_type,omitempty"`
+	BombType            string `json:"bomb_type,omitempty"`
 	RulesetVersion      string `json:"ruleset_version"`
 	ServerAuthoritative bool   `json:"server_authoritative"`
 }
@@ -102,6 +109,10 @@ type Config struct {
 	MatchDurationTicks       int
 	BattleLifecycleAuditRepo BattleLifecycleAuditRepository
 	LobbyLifecycleAuditRepo  LobbyLifecycleAuditRepository
+	// DemRepository persists completed .dem v1 replay containers (thread B).
+	// When nil the Service falls back to an in-memory store, mirroring the
+	// optional-injection style of the audit repositories above.
+	DemRepository DemRepository
 	// OnSessionRevoked is invoked when a sign-in supersedes an existing session
 	// token for the same identity (single sign-on). The second argument is the
 	// *superseded* token, not the freshly issued one.
@@ -363,6 +374,7 @@ type BattleServerAllocation struct {
 	Version             VersionStamp             `json:"version"`
 	MatchID             string                   `json:"match_id"`
 	ModeID              string                   `json:"mode_id"`
+	BossID              string                   `json:"boss_id,omitempty"`
 	BattleServerID      string                   `json:"battle_server_id"`
 	Endpoint            string                   `json:"endpoint"`
 	// EndpointReported marks an endpoint the out-of-process battle agent has
@@ -390,10 +402,24 @@ type BattleAgentAssignment struct {
 	ServerSeedHex  string   `json:"server_seed_hex"`
 	ModeConfigHash string   `json:"mode_config_hash"`
 	PlayerIDs      []string `json:"player_ids"`
+	// BossID 是本局 boss（房间级，仅房主可选）；空串 = 默认 timeline（现状）。
+	BossID string `json:"boss_id,omitempty"`
+	// Loadouts 是每名玩家的自机 loadout；battle-agent 逐条转成
+	// `--loadout <player_id>:<character_id>:<shot_type>:<bomb_type>`。
+	Loadouts []BattleAgentLoadout `json:"loadouts"`
 	// Players carries the server-authoritative player refs. PlayerID is the
 	// value a battle result must echo back; UserID is the Nakama user.
 	Players     []BattleAgentPlayer `json:"players"`
 	AllocatedAt time.Time           `json:"allocated_at"`
+}
+
+// BattleAgentLoadout 是 agent 面向的每玩家自机 loadout 视图。字段名与 .dem
+// header 的 players[].loadout{character_id,shot_type,bomb_type} 对齐。
+type BattleAgentLoadout struct {
+	PlayerID    string `json:"player_id"`
+	CharacterID string `json:"character_id"`
+	ShotType    string `json:"shot_type"`
+	BombType    string `json:"bomb_type"`
 }
 
 // BattleAgentPlayer is the agent-facing view of an allocated player. The
@@ -466,14 +492,20 @@ type BattleTicket struct {
 	// ids drawn from the player's deck; initial_energy is the opening energy;
 	// server_seed is the authoritative lobby seed (seedFrom) as DECIMAL TEXT so
 	// seeds above 2^53 survive the JS client pass-through without narrowing.
-	HandCardIDs         []string `json:"hand_card_ids"`
+	HandCardIDs []string `json:"hand_card_ids"`
 	// DeckCardIDs is the lobby's authoritative ordered deck (W-1 phase 2):
 	// the opening hand above is its first len(HandCardIDs) entries, so the
 	// battle server can redraw after a cast from where the lobby left off.
-	DeckCardIDs         []string `json:"deck_card_ids"`
-	InitialEnergy       float64  `json:"initial_energy"`
-	ServerSeedDecimal   string   `json:"server_seed"`
-	ServerAuthoritative bool     `json:"server_authoritative"`
+	DeckCardIDs       []string `json:"deck_card_ids"`
+	InitialEnergy     float64  `json:"initial_energy"`
+	ServerSeedDecimal string   `json:"server_seed"`
+	// 房间 boss 选择与本玩家自机 loadout（任务「boss 选择 + 自机机制」）。
+	// 全部位于 ED25519 覆盖范围（签名对 json.Marshal(ticket) 计算），篡改即破签。
+	BossID              string `json:"boss_id,omitempty"`
+	CharacterID         string `json:"character_id,omitempty"`
+	ShotType            string `json:"shot_type,omitempty"`
+	BombType            string `json:"bomb_type,omitempty"`
+	ServerAuthoritative bool   `json:"server_authoritative"`
 }
 
 type SignedBattleTicket struct {
@@ -863,8 +895,13 @@ type CreateRoomRequest struct {
 	DeckSnapshot  DeckSnapshot   `json:"deck_snapshot"`
 	ModeParams    map[string]any `json:"mode_params"`
 	ClientVersion VersionStamp   `json:"client_version"`
+	// BossID 是房间的 boss 选择（仅建房/房主可设）。合法值为 Go 侧 BossCatalog
+	// 的 id（"tian"/"hui"）或空串（走默认 timeline）；非法值 invalid_request。
+	BossID string `json:"boss_id,omitempty"`
 }
 
+// JoinRoomRequest 有意**不含** boss_id：boss 只能由房主在建房时设定，guest 加入
+// 不得更改（房间级 boss 对双方生效）。
 type JoinRoomRequest struct {
 	ModeID        string         `json:"mode_id"`
 	ActiveDeckID  string         `json:"active_deck_id"`
@@ -915,6 +952,7 @@ type RoomSnapshot struct {
 	MaxPlayers          int                       `json:"max_players"`
 	CurrentPlayers      int                       `json:"current_players"`
 	MatchID             string                    `json:"match_id,omitempty"`
+	BossID              string                    `json:"boss_id,omitempty"`
 	StageID             string                    `json:"stage_id"`
 	ModeRulesetVersion  string                    `json:"mode_ruleset_version"`
 	RulesetVersion      string                    `json:"ruleset_version"`
@@ -1075,6 +1113,7 @@ type QueueResponse struct {
 	MatchID          string                  `json:"match_id,omitempty"`
 	ModeID           string                  `json:"mode_id"`
 	Loadout          PlayerLoadout           `json:"loadout"`
+	BossID           string                  `json:"boss_id,omitempty"`
 	RoomCode         string                  `json:"room_code,omitempty"`
 	RoomStatus       string                  `json:"room_status,omitempty"`
 	RequiredPlayers  int                     `json:"required_players"`
@@ -1445,6 +1484,10 @@ type ReplayRecord struct {
 	EventCount          int            `json:"event_count"`
 	Events              []MatchEvent   `json:"events"`
 	Settlement          MatchEndEvent  `json:"settlement"`
+	// HasDem / DemSize 是 thread B 追加字段：该 replay 是否已有可下载的
+	// .dem 录制，以及容器字节数。仅追加，不改动既有字段语义。
+	HasDem  bool  `json:"has_dem"`
+	DemSize int64 `json:"dem_size,omitempty"`
 }
 
 type RewardItem struct {

@@ -281,8 +281,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.battleEvents(w, r)
 		return
 	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "battle" && segments[2] == "replays" && segments[3] == "dem" && r.Method == http.MethodPost {
+		h.uploadDemReplay(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "replays" && r.Method == http.MethodGet {
 		h.replay(w, r, segments[2])
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "replays" && segments[3] == "dem" && r.Method == http.MethodGet {
+		h.demDownload(w, r, segments[2])
 		return
 	}
 	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "matches" {
@@ -896,6 +904,23 @@ func (h *Handler) replay(w http.ResponseWriter, r *http.Request, replayID string
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// demDownload streams the raw .dem v1 container for a replay the caller owns
+// (session auth + ownership, same口径 as Service.Replay). The response is
+// octet-stream, not JSON: the client verifies sha256 over the exact bytes.
+func (h *Handler) demDownload(w http.ResponseWriter, r *http.Request, replayID string) {
+	record, err := h.service.DemDownload(sessionToken(r), replayID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(record.Bytes)))
+	w.Header().Set("X-PhK-Dem-Sha256", record.SHA256)
+	w.Header().Set("X-PhK-Dem-Size", strconv.Itoa(len(record.Bytes)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(record.Bytes)
+}
+
 func (h *Handler) claimActivity(w http.ResponseWriter, r *http.Request) {
 	raw := map[string]any{}
 	if !decodeJSON(w, r, &raw) {
@@ -1110,6 +1135,35 @@ func (h *Handler) battleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.service.SubmitBattleEvents(req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// uploadDemReplay is the thread-B callback route: the battle server uploads a
+// finished .dem v1 container in base64 chunks. Guard sequence follows the
+// signature-less service-origin routes (registerBattleServer / heartbeat) rather
+// than battleEvents: the C++ uploader (dem.cpp DemCallbackHeaders) only carries
+// the X-PhK-Service-Origin / X-PhK-Battle-Callback headers, no HMAC signature,
+// matching the battle.servers.register (3daf021) precedent the .dem design cites.
+// The full-container sha256 in the body is the integrity check.
+func (h *Handler) uploadDemReplay(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
+	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
+		return
+	}
+	var req core.DemReplayUploadRequest
+	if !decodeServiceJSON(w, r, &req) {
+		return
+	}
+	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
+	resp, err := h.service.SubmitDemReplayChunk(req)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -1352,6 +1406,10 @@ func isServiceCallbackRoute(method string, segments []string) bool {
 		return false
 	}
 	if len(segments) == 3 && segments[1] == "battle" && segments[2] == "events" {
+		return true
+	}
+	// .dem 分块上传是服务间回调（对局服 → 大厅），不走业务信封。
+	if len(segments) == 4 && segments[1] == "battle" && segments[2] == "replays" && segments[3] == "dem" {
 		return true
 	}
 	if len(segments) == 4 && segments[1] == "battle" && segments[2] == "servers" {

@@ -6,6 +6,8 @@ Current files:
 
 - `001_business_security_audit.up.sql`: creates `business_envelope_keys`, `business_envelope_audits`, `packet_key_versions`, `business_envelope_nonce_windows`, `battle_servers`, `battle_ticket_audits`, `match_allocation_audits`, `battle_result_audits`, `replay_audits`, `lobby_room_audits`, and `lobby_message_audits`.
 - `001_business_security_audit.down.sql`: rollback for the same draft tables.
+- `002_accounts.up.sql` / `.down.sql`: e-mail + password account credentials (`gensoulkyo_accounts`).
+- `003_battle_dem_replays.up.sql` / `.down.sql`: finished `.dem` v1 battle replay containers keyed by `match_id` (`battle_dem_replays`).
 
 These migrations define the persistence target for `runtime/security` audit events, Nakama RPC/WSS envelope validation, packet/key-version rotation metadata, battle server registry state plus registration/heartbeat/offline lifecycle rows, battle ticket issuance/consumption/rejected-consume audits and match allocation bookkeeping with protocol/business/battle/ruleset version stamps, accepted, duplicate, and rejected battle result callback audits, replay audit records, and lobby room/message lifecycle audit records.
 
