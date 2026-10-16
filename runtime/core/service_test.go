@@ -4566,3 +4566,40 @@ func TestAbandonMatchSettlesWithNoScore(t *testing.T) {
 		t.Fatalf("an abandon must not change the leaver's rating: %d -> %d", aliceRankBefore, got)
 	}
 }
+
+// The reconnect response must carry the match tick, not just the disconnect and
+// abandon paths: a reconnecting client resyncs to it (T10 rule 4). Regression
+// guard for a field that was left at 0 on this one path.
+func TestReconnectResponseCarriesTheMatchTick(t *testing.T) {
+	now := time.Date(2026, 6, 26, 13, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	alice := mustLogin(t, service, "Alice Tick")
+	bob := mustLogin(t, service, "Bob Tick")
+	matchID := matchTwoPlayers(t, service, alice, bob, "certification")
+
+	if _, err := service.SubmitInput(alice.SessionToken, matchID, map[string]any{
+		"tick":      7,
+		"seq":       1,
+		"dir":       0,
+		"slow":      false,
+		"shoot":     true,
+		"bomb":      false,
+		"card_slot": -1,
+	}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	if _, err := service.DisconnectMatch(alice.SessionToken, matchID); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	reconnected, err := service.ReconnectMatch(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	match := service.matches[matchID]
+	if reconnected.Tick != match.Tick {
+		t.Fatalf("reconnect must carry the match tick: response %d, match %d", reconnected.Tick, match.Tick)
+	}
+	if reconnected.Tick != 7 {
+		t.Fatalf("the tick must be the one the input advanced to, got %d", reconnected.Tick)
+	}
+}

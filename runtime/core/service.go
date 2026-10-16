@@ -2128,6 +2128,9 @@ func (s *Service) ReconnectMatch(sessionToken string, matchID string) (*Reconnec
 		ReconnectStatus: "restored",
 		Connected:       true,
 		SecondsLeft:     secondsLeft,
+		// T10 rule 4: the reconnecting client resyncs to this tick and respawns.
+		// It must be filled here too, not only on the disconnect/abandon paths.
+		Tick:            match.Tick,
 		MatchStart:      start,
 		Snapshot:        snapshot,
 		ServerTime:      now,
