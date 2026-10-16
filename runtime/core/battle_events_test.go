@@ -3,6 +3,7 @@ package core
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // H-1: posted battle card events land in the match event log and are visible
@@ -300,5 +301,44 @@ func TestBattleEventsCompletionRowIsANoOpWithoutADrop(t *testing.T) {
 	}
 	if match := service.matches[matchID]; match == nil || match.Status == "ended" {
 		t.Fatalf("a completion row must not end a match with no drop outstanding")
+	}
+}
+
+// B4: the callback face is authenticated but must not be unbounded in
+// frequency — a burst inside the window passes, the batch past the cap is
+// rate limited, and the window slides so normal play recovers.
+func TestSubmitBattleEventsRateLimitsABattleServer(t *testing.T) {
+	now := time.Date(2026, 6, 26, 13, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	alice := mustLogin(t, service, "Rate Alice")
+	bob := mustLogin(t, service, "Rate Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	submit := func() error {
+		_, err := service.SubmitBattleEvents(BattleEventsSubmitRequest{
+			BattleServerID: allocation.BattleServerID,
+			MatchID:        matchID,
+			Events: []BattleEventRow{
+				{Type: "card_accepted", Tick: 1, UserID: alice.UserID, CardID: "focus_lens", Slot: 0},
+			},
+		})
+		return err
+	}
+	for i := 0; i < maxBattleEventSubmitsPerWindow; i++ {
+		if err := submit(); err != nil {
+			t.Fatalf("submission %d inside the window must pass: %v", i, err)
+		}
+	}
+	if err := submit(); err == nil || ErrorCode(err) != codeRateLimited {
+		t.Fatalf("the batch past the cap must be rate limited, got %v", err)
+	}
+	// The window slides: the next second is allowed again.
+	now = now.Add(2 * time.Second)
+	if err := submit(); err != nil {
+		t.Fatalf("a submission in the next window must pass: %v", err)
 	}
 }

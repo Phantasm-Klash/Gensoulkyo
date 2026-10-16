@@ -29,6 +29,7 @@ const (
 	codeForbiddenField    = "forbidden_field"
 	codeInvalidInput      = "input_invalid"
 	codeMatchState        = "match_state_invalid"
+	codeRateLimited       = "rate_limited"
 	codeClaimIneligible   = "claim_ineligible"
 	codeRoomUnavailable   = "room_unavailable"
 	codeReconnectExpired  = "reconnect_expired"
@@ -151,18 +152,18 @@ func NewForbiddenClientFieldError(field string) *Error {
 }
 
 type Service struct {
-	mu                    sync.Mutex
-	clock                 Clock
-	sessionRevokedHook    func(userID string, sessionToken string)
-	accountService        *account.Service
-	matchDurationTicks    int
-	battleAuditRepo       BattleLifecycleAuditRepository
-	battleAuditStatus     BattleLifecycleAuditStatus
-	lobbyAuditRepo        LobbyLifecycleAuditRepository
-	lobbyAuditStatus      LobbyLifecycleAuditStatus
-	demRepo               DemRepository
-	demStatus             DemStoreStatus
-	demUploads            map[string]*demUploadStaging
+	mu                 sync.Mutex
+	clock              Clock
+	sessionRevokedHook func(userID string, sessionToken string)
+	accountService     *account.Service
+	matchDurationTicks int
+	battleAuditRepo    BattleLifecycleAuditRepository
+	battleAuditStatus  BattleLifecycleAuditStatus
+	lobbyAuditRepo     LobbyLifecycleAuditRepository
+	lobbyAuditStatus   LobbyLifecycleAuditStatus
+	demRepo            DemRepository
+	demStatus          DemStoreStatus
+	demUploads         map[string]*demUploadStaging
 	// callbackSecret keys the HMAC that authenticates battle-server service
 	// callbacks. It is immutable after construction, so it is read without the
 	// mutex; every per-server secret is derived from it (see
@@ -191,6 +192,9 @@ type Service struct {
 	battleTickets         map[string]*SignedBattleTicket
 	battleTicketsByID     map[string]*SignedBattleTicket
 	consumedBattleTickets map[string]time.Time
+	// battleEventSubmits is the sliding submission window per battle server
+	// (B4): the callback face is authenticated but must not be unbounded.
+	battleEventSubmits map[string][]time.Time
 }
 
 // revokedSession describes a session token that was invalidated because the
@@ -344,11 +348,11 @@ type worldBossState struct {
 }
 
 type playerState struct {
-	UserID            string
-	DisplayName       string
-	Ready             bool
-	Connected         bool
-	DisconnectedAt    time.Time
+	UserID         string
+	DisplayName    string
+	Ready          bool
+	Connected      bool
+	DisconnectedAt time.Time
 	// Abandoned marks the player's OWN choice to leave from the lobby (T10
 	// rule 3), as opposed to a passive drop that may still reconnect (rule 4).
 	Abandoned         bool
@@ -488,8 +492,9 @@ var allowedCharacterIDs = map[string]struct{}{
 
 // allowedShotTypes / allowedBombTypes 是「自机选择」白名单，逐条对应
 // PhK-BattleServer/src/danmaku/player_loadout.cpp：
-//   * PlayerShotTable()  52 条 PlayerShotSpec.name（ReimuA1 … YuyukoB2）；
-//   * PlayerBombTable()  13 条 PlayerBombSpec.name（Reimu … Yuyuko）。
+//   - PlayerShotTable()  52 条 PlayerShotSpec.name（ReimuA1 … YuyukoB2）；
+//   - PlayerBombTable()  13 条 PlayerBombSpec.name（Reimu … Yuyuko）。
+//
 // 客户端不提交时留空（空串合法 = 默认自机行为，复现现状）。
 var allowedShotTypes = map[string]struct{}{
 	"ReimuA1": {}, "ReimuA2": {}, "ReimuB1": {}, "ReimuB2": {},
@@ -642,8 +647,8 @@ func NewService(config Config) *Service {
 			Configured:          config.LobbyLifecycleAuditRepo != nil,
 			ServerAuthoritative: true,
 		},
-		demRepo:    demRepositoryOrDefault(config.DemRepository),
-		demUploads: map[string]*demUploadStaging{},
+		demRepo:               demRepositoryOrDefault(config.DemRepository),
+		demUploads:            map[string]*demUploadStaging{},
 		callbackSecret:        callbackSecret,
 		signingKeyID:          "dev-ed25519-0",
 		signingPublicKey:      publicKey,
@@ -2130,11 +2135,11 @@ func (s *Service) ReconnectMatch(sessionToken string, matchID string) (*Reconnec
 		SecondsLeft:     secondsLeft,
 		// T10 rule 4: the reconnecting client resyncs to this tick and respawns.
 		// It must be filled here too, not only on the disconnect/abandon paths.
-		Tick:            match.Tick,
-		MatchStart:      start,
-		Snapshot:        snapshot,
-		ServerTime:      now,
-		BattleTicket:    ticket,
+		Tick:         match.Tick,
+		MatchStart:   start,
+		Snapshot:     snapshot,
+		ServerTime:   now,
+		BattleTicket: ticket,
 	}, nil
 }
 

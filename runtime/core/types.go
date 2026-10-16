@@ -370,13 +370,13 @@ type BattleAllocationPlayer struct {
 }
 
 type BattleServerAllocation struct {
-	OK                  bool                     `json:"ok"`
-	Version             VersionStamp             `json:"version"`
-	MatchID             string                   `json:"match_id"`
-	ModeID              string                   `json:"mode_id"`
-	BossID              string                   `json:"boss_id,omitempty"`
-	BattleServerID      string                   `json:"battle_server_id"`
-	Endpoint            string                   `json:"endpoint"`
+	OK             bool         `json:"ok"`
+	Version        VersionStamp `json:"version"`
+	MatchID        string       `json:"match_id"`
+	ModeID         string       `json:"mode_id"`
+	BossID         string       `json:"boss_id,omitempty"`
+	BattleServerID string       `json:"battle_server_id"`
+	Endpoint       string       `json:"endpoint"`
 	// EndpointReported marks an endpoint the out-of-process battle agent has
 	// confirmed it actually bound. Until it is set the endpoint is only the
 	// registry handle, and a client-facing consumer (the battle relay) must not

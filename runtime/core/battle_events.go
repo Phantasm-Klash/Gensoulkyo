@@ -22,6 +22,12 @@ const (
 	// slack is rejected as not belonging to this match.
 	maxBattleEventTickSlack = 64
 	maxBattleEventReasonLen = 128
+	// B4: the callback face is HMAC-authenticated but was unbounded in
+	// frequency, so a misbehaving (or compromised) battle server could drive
+	// unbounded work through the match event log. 30 batches/second leaves a
+	// wide margin over a real match's bursts.
+	battleEventSubmitWindow        = time.Second
+	maxBattleEventSubmitsPerWindow = 30
 )
 
 // allowedBattleEventTypes are the only event types the battle server may post.
@@ -97,6 +103,11 @@ func (s *Service) SubmitBattleEvents(req BattleEventsSubmitRequest) (*BattleEven
 	if match.Status != "running" {
 		return nil, newError(codeMatchState, "battle events require a running match, got %s", match.Status)
 	}
+	// B4: bound the submission rate. The identity and ownership checks above
+	// already ran, so only an authenticated server consumes this budget.
+	if !s.allowBattleEventSubmitLocked(req.BattleServerID, now) {
+		return nil, newError(codeRateLimited, "battle event submissions exceeded %d per %s", maxBattleEventSubmitsPerWindow, battleEventSubmitWindow)
+	}
 	if len(req.Events) == 0 {
 		return nil, newError(codeInvalidRequest, "events are required")
 	}
@@ -168,6 +179,28 @@ func hasUnresolvedDropLocked(match *matchState) bool {
 // membership check must not apply to it.
 func isMatchLevelBattleEvent(rowType string) bool {
 	return rowType == "all_players_disconnected"
+}
+
+// allowBattleEventSubmitLocked reports whether this battle server may submit a
+// batch now, recording the attempt when it may. The caller holds s.mu. The map
+// is initialised lazily so NewService needs no change.
+func (s *Service) allowBattleEventSubmitLocked(battleServerID string, now time.Time) bool {
+	if s.battleEventSubmits == nil {
+		s.battleEventSubmits = map[string][]time.Time{}
+	}
+	cutoff := now.Add(-battleEventSubmitWindow)
+	kept := s.battleEventSubmits[battleServerID][:0]
+	for _, at := range s.battleEventSubmits[battleServerID] {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
+	}
+	if len(kept) >= maxBattleEventSubmitsPerWindow {
+		s.battleEventSubmits[battleServerID] = kept
+		return false
+	}
+	s.battleEventSubmits[battleServerID] = append(kept, now)
+	return true
 }
 
 func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
