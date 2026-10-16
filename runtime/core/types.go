@@ -467,6 +467,10 @@ type BattleTicket struct {
 	// server_seed is the authoritative lobby seed (seedFrom) as DECIMAL TEXT so
 	// seeds above 2^53 survive the JS client pass-through without narrowing.
 	HandCardIDs         []string `json:"hand_card_ids"`
+	// DeckCardIDs is the lobby's authoritative ordered deck (W-1 phase 2):
+	// the opening hand above is its first len(HandCardIDs) entries, so the
+	// battle server can redraw after a cast from where the lobby left off.
+	DeckCardIDs         []string `json:"deck_card_ids"`
 	InitialEnergy       float64  `json:"initial_energy"`
 	ServerSeedDecimal   string   `json:"server_seed"`
 	ServerAuthoritative bool     `json:"server_authoritative"`

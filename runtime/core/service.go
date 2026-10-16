@@ -4417,6 +4417,41 @@ func initialHandCardIDs(deck DeckSnapshot) []string {
 	return filtered
 }
 
+// battleTicketDeckCardIDs resolves the authoritative ordered deck for the
+// signed battle ticket (W-1 phase 2) and re-checks the hand-is-prefix
+// invariant at the issuance hop. deckSize is re-asserted here even though
+// deck save already enforces exactly that many cards: issuance is the last
+// hop before the deck enters the ED25519-covered wire, so the bound is
+// checked, not inherited.
+func battleTicketDeckCardIDs(deck DeckSnapshot, handCardIDs []string) ([]string, error) {
+	if len(deck.CardIDs) == 0 {
+		return nil, newError(codeInvalidDeck, "ticket deck is empty")
+	}
+	if len(deck.CardIDs) > deckSize {
+		return nil, newError(codeInvalidDeck, "deck exceeds %d cards", deckSize)
+	}
+	resolved := make([]string, 0, len(deck.CardIDs))
+	for _, rawID := range deck.CardIDs {
+		cardID := strings.TrimSpace(rawID)
+		if cardID == "" {
+			return nil, newError(codeInvalidDeck, "card id is empty")
+		}
+		if _, ok := serverCardCatalog[cardID]; !ok {
+			return nil, newError(codeInvalidDeck, "unknown card %q", cardID)
+		}
+		resolved = append(resolved, cardID)
+	}
+	if len(handCardIDs) > len(resolved) {
+		return nil, newError(codeInvalidDeck, "opening hand is not the deck prefix")
+	}
+	for index, cardID := range handCardIDs {
+		if resolved[index] != cardID {
+			return nil, newError(codeInvalidDeck, "opening hand is not the deck prefix")
+		}
+	}
+	return resolved, nil
+}
+
 func drawServerCard(player *playerState) bool {
 	if player == nil || len(player.Hand) >= cardHandLimit || len(player.DeckSnapshot.CardIDs) == 0 {
 		return false
@@ -5689,6 +5724,10 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 	issuedAt := now
 	expiresAt := issuedAt.Add(time.Duration(BattleTicketTTLSeconds) * time.Second)
 	handCardIDs := initialHandCardIDs(player.DeckSnapshot)
+	deckCardIDs, err := battleTicketDeckCardIDs(player.DeckSnapshot, handCardIDs)
+	if err != nil {
+		return nil, err
+	}
 	ticket := BattleTicket{
 		Version:             currentVersionStamp(),
 		TicketID:            ticketID,
@@ -5708,6 +5747,7 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 		ExpiresAtMS:         expiresAt.UnixMilli(),
 		BusinessSessionID:   businessSessionRef(user.SessionToken),
 		HandCardIDs:         handCardIDs,
+		DeckCardIDs:         deckCardIDs,
 		InitialEnergy:       cardStartingEnergy,
 		ServerSeedDecimal:   strconv.FormatInt(match.ServerSeed, 10),
 		ServerAuthoritative: true,
