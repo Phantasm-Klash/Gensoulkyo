@@ -210,7 +210,13 @@ func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
 	if row.Tick < 0 {
 		return newError(codeInvalidRequest, "battle event tick must not be negative")
 	}
-	if row.Tick > match.Tick+maxBattleEventTickSlack {
+	// A match-level row is not tied to a moment of play, and the lobby's
+	// match.Tick only advances through submitted inputs: once every player goes
+	// silent it freezes while the battle server keeps ticking, so such a row
+	// legitimately arrives ahead of the slack (measured: the last player drops
+	// at tick_rate_hz*3 = 180, i.e. ~116 ticks past a slack of 64). Only
+	// per-player rows are held to the window.
+	if !isMatchLevelBattleEvent(row.Type) && row.Tick > match.Tick+maxBattleEventTickSlack {
 		return newError(codeInvalidRequest, "battle event tick %d is ahead of match tick %d", row.Tick, match.Tick)
 	}
 	if !isMatchLevelBattleEvent(row.Type) {

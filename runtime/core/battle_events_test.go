@@ -342,3 +342,37 @@ func TestSubmitBattleEventsRateLimitsABattleServer(t *testing.T) {
 		t.Fatalf("a submission in the next window must pass: %v", err)
 	}
 }
+
+// B2: the all-players-disconnected row is match-level and legitimately arrives
+// ahead of the tick slack — the lobby's match.Tick freezes once nobody sends
+// inputs while the battle server keeps ticking (measured overshoot ~116 ticks
+// past a slack of 64). It must be accepted; a per-player row that far ahead
+// must still be rejected.
+func TestMatchLevelRowIsExemptFromTheTickWindow(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "TickExempt Alice")
+	bob := mustLogin(t, service, "TickExempt Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	ahead := maxBattleEventTickSlack + 116
+	if _, err := service.SubmitBattleEvents(BattleEventsSubmitRequest{
+		BattleServerID: allocation.BattleServerID,
+		MatchID:        matchID,
+		Events:         []BattleEventRow{{Type: "all_players_disconnected", Tick: ahead}},
+	}); err != nil {
+		t.Fatalf("a match-level row must be exempt from the tick window: %v", err)
+	}
+	if _, err := service.SubmitBattleEvents(BattleEventsSubmitRequest{
+		BattleServerID: allocation.BattleServerID,
+		MatchID:        matchID,
+		Events: []BattleEventRow{
+			{Type: "card_accepted", Tick: ahead, UserID: alice.UserID, CardID: "focus_lens", Slot: 0},
+		},
+	}); err == nil {
+		t.Fatalf("a per-player row ahead of the window must still be rejected")
+	}
+}
