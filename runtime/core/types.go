@@ -1283,6 +1283,9 @@ type ReconnectResponse struct {
 	ServerTime        time.Time           `json:"server_time"`
 	ReconnectDeadline time.Time           `json:"reconnect_deadline,omitempty"`
 	BattleTicket      *SignedBattleTicket `json:"battle_ticket,omitempty"`
+	// Tick is the match tick at the moment of the call: a reconnecting client
+	// resyncs to it and respawns (T10 rule 4).
+	Tick int `json:"tick"`
 }
 
 type EventStreamResponse struct {

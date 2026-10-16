@@ -863,6 +863,25 @@ func (h *Handler) rematch(w http.ResponseWriter, r *http.Request, matchID string
 }
 
 func (h *Handler) disconnect(w http.ResponseWriter, r *http.Request, matchID string) {
+	// An optional {"intent":"abandon"} marks the player's own choice in the
+	// lobby (T10 rule 3): the match settles at once with no score. Anything
+	// else — a crash, a lost network — is a passive drop that keeps the match
+	// alive for a reconnect (rule 4).
+	raw := map[string]any{}
+	if r.Body != nil && r.ContentLength != 0 {
+		if !decodeJSON(w, r, &raw) {
+			return
+		}
+	}
+	if intent, ok := raw["intent"].(string); ok && strings.EqualFold(intent, "abandon") {
+		abandoned, err := h.service.AbandonMatch(sessionToken(r), matchID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, abandoned)
+		return
+	}
 	resp, err := h.service.DisconnectMatch(sessionToken(r), matchID)
 	if err != nil {
 		writeError(w, err)

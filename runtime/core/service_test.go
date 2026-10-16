@@ -4503,3 +4503,66 @@ func TestServiceIDCounterSurvivesRestartFloor(t *testing.T) {
 		t.Fatalf("seeded counter must mint a predictable id, got %q", pinned)
 	}
 }
+
+// T10 rule 3: an explicit lobby abandon ends the match immediately, the
+// connected player wins outright, the leaver is recorded as fleeing, and
+// NOTHING moves — no rewards, no task progress, no rating. Rule 4 is the
+// contrast case in the same test: a passive drop must not end the match.
+func TestAbandonMatchSettlesWithNoScore(t *testing.T) {
+	now := time.Date(2026, 6, 26, 13, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	alice := mustLogin(t, service, "Alice Abandon")
+	bob := mustLogin(t, service, "Bob Abandon")
+	matchID := matchTwoPlayers(t, service, alice, bob, "certification")
+
+	// Rule 4: a passive drop keeps the match alive and reconnectable.
+	if _, err := service.DisconnectMatch(alice.SessionToken, matchID); err != nil {
+		t.Fatalf("passive disconnect: %v", err)
+	}
+	if match := service.matches[matchID]; match == nil || match.Status == "ended" {
+		t.Fatalf("a passive drop must not end the match")
+	}
+	if _, err := service.ReconnectMatch(alice.SessionToken, matchID); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+
+	bobRankBefore := service.users[bob.UserID].Certification.RankScore
+	aliceRankBefore := service.users[alice.UserID].Certification.RankScore
+
+	abandoned, err := service.AbandonMatch(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if abandoned.ReconnectStatus != "abandoned" || abandoned.Connected {
+		t.Fatalf("abandon response invalid: %+v", abandoned)
+	}
+	if abandoned.Tick != service.matches[matchID].Tick {
+		t.Fatalf("abandon response must carry the current tick: %d", abandoned.Tick)
+	}
+
+	match := service.matches[matchID]
+	if match == nil || match.Status != "ended" {
+		t.Fatalf("an abandon must end the match immediately")
+	}
+	bobSettlement := service.settlements[settlementKey(matchID, bob.UserID)]
+	if bobSettlement == nil || bobSettlement.Result != "win" {
+		t.Fatalf("the connected player must win outright: %+v", bobSettlement)
+	}
+	aliceSettlement := service.settlements[settlementKey(matchID, alice.UserID)]
+	if aliceSettlement == nil || aliceSettlement.Result != "flee" {
+		t.Fatalf("the leaver must be recorded as fleeing: %+v", aliceSettlement)
+	}
+	if len(bobSettlement.RewardJSON) != 0 || len(aliceSettlement.RewardJSON) != 0 {
+		t.Fatalf("an abandon must grant no rewards")
+	}
+	if len(bobSettlement.TaskProgress) != 0 || len(aliceSettlement.TaskProgress) != 0 {
+		t.Fatalf("an abandon must not advance task progress")
+	}
+	// The assertion this whole rule exists for: no score moved for either side.
+	if got := service.users[bob.UserID].Certification.RankScore; got != bobRankBefore {
+		t.Fatalf("an abandon must not change the winner's rating: %d -> %d", bobRankBefore, got)
+	}
+	if got := service.users[alice.UserID].Certification.RankScore; got != aliceRankBefore {
+		t.Fatalf("an abandon must not change the leaver's rating: %d -> %d", aliceRankBefore, got)
+	}
+}

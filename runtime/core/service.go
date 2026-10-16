@@ -349,6 +349,9 @@ type playerState struct {
 	Ready             bool
 	Connected         bool
 	DisconnectedAt    time.Time
+	// Abandoned marks the player's OWN choice to leave from the lobby (T10
+	// rule 3), as opposed to a passive drop that may still reconnect (rule 4).
+	Abandoned         bool
 	LastSeenAt        time.Time
 	X                 float64
 	Y                 float64
@@ -1935,6 +1938,104 @@ func (s *Service) SubmitInput(sessionToken string, matchID string, raw map[strin
 	return &InputResponse{OK: true, Accepted: true, Reason: "none", Packet: packet, Snapshot: snapshot}, nil
 }
 
+// settleFleeLocked settles a match that ends by abandonment rather than by play.
+//
+// T10 rule 3: an explicit lobby abandon ends the match with NO score — the
+// still-connected player wins outright, the leaver is recorded as fleeing.
+// T10 rule 2: when both sides merely wait until every battle-server boss
+// process has finished, the outcome is a mutual flee (no contest).
+//
+// The difference from settleMatchLocked is deliberate and is the point of this
+// function: it never calls applyRewardsLocked / applyProgressLocked and clears
+// the settlement's reward and task lists, so neither player's wallet, inventory,
+// rating or task progress moves. A test asserts that zero change.
+func (s *Service) settleFleeLocked(match *matchState, leaverID string, bothFled bool) {
+	if match.Status == "ended" {
+		return
+	}
+	match.Status = "ended"
+	s.finalizeModeResultLocked(match)
+	reason := "opponent_abandoned"
+	if bothFled {
+		reason = "both_fled"
+	}
+	appendMatchEventLocked(match, MatchEvent{
+		Type:   "match_ended",
+		Tick:   match.Tick,
+		Reason: reason,
+		Status: "flee",
+	})
+	for _, userID := range match.PlayerIDs {
+		player := match.Players[userID]
+		user := s.users[userID]
+		result := "flee"
+		if !bothFled && userID != leaverID {
+			result = "win"
+		}
+		settlement := s.buildSettlementLocked(match, player, user, result)
+		settlement.RewardJSON = []RewardItem{}
+		settlement.TaskProgress = []TaskProgress{}
+		key := settlementKey(match.MatchID, userID)
+		s.settlements[key] = settlement
+		replay := s.buildReplayRecordLocked(match, player, settlement)
+		s.replays[settlement.ReplayID] = replay
+		s.recordReplayAuditLocked(replay)
+	}
+}
+
+// AbandonMatch is the "the player chose to disconnect in the lobby" path
+// (T10 rule 3): the match ends at once, the opponent wins outright, the caller
+// is recorded as fleeing, and neither side's score moves.
+//
+// A passive drop must NOT come here — it keeps the match alive so the player can
+// reconnect and respawn (rule 4); DisconnectMatch stays that path.
+func (s *Service) AbandonMatch(sessionToken string, matchID string) (*ReconnectResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	match, player, err := s.matchPlayerLocked(user.UserID, matchID)
+	if err != nil {
+		return nil, err
+	}
+	if match.Status == "ended" {
+		return nil, newError(codeMatchState, "match already ended")
+	}
+	now := s.clock()
+	wasConnected := player.Connected
+	player.Connected = false
+	player.DisconnectedAt = now
+	player.Abandoned = true
+	match.LastEvents = []MatchEvent{}
+	appendMatchEventLocked(match, MatchEvent{
+		Type:   "player_disconnected",
+		Tick:   match.Tick,
+		UserID: user.UserID,
+		Reason: "abandon",
+		Status: "abandoned",
+	})
+	if wasConnected {
+		s.recordLobbyConnectionAuditLocked(match, user.UserID, "abandoned")
+	}
+	s.settleFleeLocked(match, user.UserID, false)
+	snapshot := s.snapshotLocked(match, true)
+	return &ReconnectResponse{
+		OK:                true,
+		MatchID:           match.MatchID,
+		UserID:            user.UserID,
+		ReconnectStatus:   "abandoned",
+		Connected:         false,
+		SecondsLeft:       0,
+		Tick:              match.Tick,
+		Snapshot:          snapshot,
+		ServerTime:        now,
+		ReconnectDeadline: now,
+	}, nil
+}
+
 func (s *Service) DisconnectMatch(sessionToken string, matchID string) (*ReconnectResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1967,6 +2068,7 @@ func (s *Service) DisconnectMatch(sessionToken string, matchID string) (*Reconne
 		ReconnectStatus:   "disconnected",
 		Connected:         false,
 		SecondsLeft:       ReconnectWindowSeconds,
+		Tick:              match.Tick,
 		Snapshot:          snapshot,
 		ServerTime:        now,
 		ReconnectDeadline: now.Add(time.Duration(ReconnectWindowSeconds) * time.Second),
