@@ -118,7 +118,10 @@ func parseConfig() config {
 	flag.StringVar(&cfg.BuildID, "build-id", envOr("GENSOULKYO_BATTLE_BUILD_ID", "dev"), "battle server build id")
 	flag.StringVar(&cfg.SupportedModes, "modes", envOr("GENSOULKYO_BATTLE_MODES", "mvp_boss_race"), "comma separated supported mode ids")
 	flag.StringVar(&cfg.BattleBinary, "binary", envOr("PHK_BATTLE_SERVER_BIN", "./phk_battle_server"), "path to the phk_battle_server binary")
-	flag.StringVar(&cfg.LobbyEndpoint, "lobby", os.Getenv("GENSOULKYO_BATTLE_LOBBY"), "optional legacy host:port result POST target")
+	// `GENSOULKYO_BATTLE_LOBBY` is the agent's own name; `GENSOULKYO_LOBBY_ENDPOINT`
+	// is the lobby service's name for the same value and is accepted too so a
+	// deployment does not silently end up without a result/dem upload target.
+	flag.StringVar(&cfg.LobbyEndpoint, "lobby", envOr("GENSOULKYO_BATTLE_LOBBY", os.Getenv("GENSOULKYO_LOBBY_ENDPOINT")), "host:port the battle process posts its result and .dem to")
 	flag.StringVar(&cfg.RulesetOverride, "ruleset", os.Getenv("GENSOULKYO_BATTLE_RULESET"), "ruleset override (defaults to the assignment ruleset)")
 	flag.DurationVar(&cfg.HeartbeatInterval, "heartbeat", 5*time.Second, "heartbeat interval")
 	flag.DurationVar(&cfg.PollInterval, "poll", 3*time.Second, "assignment poll interval")
@@ -945,10 +948,13 @@ func (a *agent) submitResult(ctx context.Context, item assignment, line battleRe
 	return a.callRPCDecoded(ctx, "battle.result.submit", body, nil)
 }
 
+// resultHashOf mirrors the lobby's `looksLikeSha256Ref` contract: the digest
+// has to carry the `sha256:` prefix, otherwise `battle.result.submit` rejects
+// the whole result with "battle result hash is invalid".
 func resultHashOf(raw rawResult) string {
 	canonical := fmt.Sprintf("%s|%s|%s|%d|%s", raw.MatchID, raw.ModeID, raw.WinnerPlayerID, raw.WinnerTick, raw.StateHash)
 	sum := sha256.Sum256([]byte(canonical))
-	return hex.EncodeToString(sum[:])
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // devSignature mirrors the scaffold signature shape required by core
