@@ -16,14 +16,15 @@ import (
 	"gensoulkyo/runtime/core"
 )
 
-// thread B: POST /v1/battle/replays/dem follows the signature-less
-// service-origin guard sequence (registerBattleServer precedent), and
-// GET /v1/replays/{id}/dem streams the container to the owning session.
+// thread B: POST /v1/battle/replays/dem mirrors the battleEvents guard sequence
+// (service callback headers + per-server HMAC signature over the exact body),
+// and GET /v1/replays/{id}/dem streams the container to the owning session.
 func TestHTTPDemReplayUploadAndDownload(t *testing.T) {
 	service := core.NewService(core.Config{})
 	server := httptest.NewServer(New(service))
 	defer server.Close()
 
+	const battleServerID = "dem-http-battle-1"
 	route := server.URL + "/v1/battle/replays/dem"
 	callbackHeaders := map[string]string{
 		headerServiceOrigin:  core.ServiceCallbackContext()[serviceOriginContextKey],
@@ -48,25 +49,40 @@ func TestHTTPDemReplayUploadAndDownload(t *testing.T) {
 	sha := sha256.Sum256(dem)
 	demSHA := hex.EncodeToString(sha[:])
 	total := (len(dem) + 31) / 32
-	for index := 0; index < total; index++ {
+	chunkBody := func(index int) map[string]any {
 		begin := index * 32
 		end := begin + 32
 		if end > len(dem) {
 			end = len(dem)
 		}
 		chunk := dem[begin:end]
-		md5sum := md5Hex(chunk)
-		body := map[string]any{
-			"replay_id":    "replay-http-dem",
-			"match_id":     "match-http-dem",
-			"dem_size":     len(dem),
-			"dem_sha256":   demSHA,
-			"chunk_index":  index,
-			"chunk_total":  total,
-			"chunk_md5":    md5sum,
-			"chunk_base64": base64.StdEncoding.EncodeToString(chunk),
+		return map[string]any{
+			"battle_server_id": battleServerID,
+			"replay_id":        "replay-http-dem",
+			"match_id":         "match-http-dem",
+			"dem_size":         len(dem),
+			"dem_sha256":       demSHA,
+			"chunk_index":      index,
+			"chunk_total":      total,
+			"chunk_md5":        md5Hex(chunk),
+			"chunk_base64":     base64.StdEncoding.EncodeToString(chunk),
 		}
-		response = postRawWithHeaders(t, route, "", body, callbackHeaders)
+	}
+
+	// 正确的服务回调头但缺签名 → 403 battle_callback_signature_invalid。
+	response = postRawWithHeaders(t, route, "", chunkBody(0), callbackHeaders)
+	if response.Code != http.StatusForbidden || response.ErrorCode != "battle_callback_signature_invalid" {
+		t.Fatalf("unsigned dem upload must be rejected, got %+v", response)
+	}
+
+	for index := 0; index < total; index += 1 {
+		body := chunkBody(index)
+		headers := map[string]string{
+			headerServiceOrigin:   callbackHeaders[headerServiceOrigin],
+			headerBattleCallback:  callbackHeaders[headerBattleCallback],
+			headerBattleSignature: signedCallbackBody(t, service.BattleServerCallbackSecret(battleServerID), body),
+		}
+		response = postRawWithHeaders(t, route, "", body, headers)
 		if response.Code != http.StatusOK {
 			t.Fatalf("chunk %d upload must succeed, got %+v", index, response)
 		}
@@ -79,6 +95,12 @@ func TestHTTPDemReplayUploadAndDownload(t *testing.T) {
 	}
 	if len(got.body) != len(dem) || hex.EncodeToString(got.body) != hex.EncodeToString(dem) {
 		t.Fatalf("downloaded dem bytes differ from uploaded container")
+	}
+
+	// 也接受 match_id 作为 key（records 视图只有 match_id）。
+	got = getRawBytes(t, server.URL+"/v1/replays/match-http-dem/dem", player.SessionToken)
+	if got.status != http.StatusOK {
+		t.Fatalf("match_id-keyed dem download must succeed, got %d", got.status)
 	}
 
 	// 缺 replay_id → 404。

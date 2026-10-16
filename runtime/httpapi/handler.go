@@ -1143,12 +1143,13 @@ func (h *Handler) battleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // uploadDemReplay is the thread-B callback route: the battle server uploads a
-// finished .dem v1 container in base64 chunks. Guard sequence follows the
-// signature-less service-origin routes (registerBattleServer / heartbeat) rather
-// than battleEvents: the C++ uploader (dem.cpp DemCallbackHeaders) only carries
-// the X-PhK-Service-Origin / X-PhK-Battle-Callback headers, no HMAC signature,
-// matching the battle.servers.register (3daf021) precedent the .dem design cites.
-// The full-container sha256 in the body is the integrity check.
+// finished .dem v1 container in base64 chunks. Guard sequence mirrors
+// battleEvents / submitBattleResult exactly — service callback headers plus the
+// per-server HMAC signature (X-PhK-Battle-Signature) over the exact request
+// body. The endpoint is public, so an unsigned upload would let anyone inject a
+// forged .dem; the per-chunk signature and the container sha256 are the two
+// gates. The signed body also names battle_server_id + match_id so the owner
+// allocation can be checked (same as battleEvents).
 func (h *Handler) uploadDemReplay(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
 		return
@@ -1156,11 +1157,18 @@ func (h *Handler) uploadDemReplay(w http.ResponseWriter, r *http.Request) {
 	if rejectBusinessEnvelopeHeadersForServiceRoute(w, r) {
 		return
 	}
+	raw, ok := readServiceCallbackBody(w, r)
+	if !ok {
+		return
+	}
 	var req core.DemReplayUploadRequest
-	if !decodeServiceJSON(w, r, &req) {
+	if !decodeServiceJSONRaw(w, raw, &req) {
 		return
 	}
 	if rejectMissingServiceOriginHeadersForServiceRoute(w, r) {
+		return
+	}
+	if !h.verifyBattleCallbackSignature(w, r, raw, req.BattleServerID, req.MatchID) {
 		return
 	}
 	resp, err := h.service.SubmitDemReplayChunk(req)

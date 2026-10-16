@@ -385,15 +385,18 @@ type demUploadStaging struct {
 
 // DemReplayUploadRequest 是 POST /v1/battle/replays/dem 的单块请求体。
 // 字段名与 C++ dem.cpp BuildDemUploadChunkJson 逐字段对齐（双端共识）。
+// battle_server_id + match_id 是服务回调鉴权所需：大厅用 battle_server_id 派生
+// 每服 HMAC 密钥校验签名，并用 match_id 校验该对局归属同一对战服。
 type DemReplayUploadRequest struct {
-	ReplayID    string `json:"replay_id"`
-	MatchID     string `json:"match_id"`
-	DemSize     int64  `json:"dem_size"`
-	DemSHA256   string `json:"dem_sha256"`
-	ChunkIndex  int    `json:"chunk_index"`
-	ChunkTotal  int    `json:"chunk_total"`
-	ChunkMD5    string `json:"chunk_md5"`
-	ChunkBase64 string `json:"chunk_base64"`
+	BattleServerID string `json:"battle_server_id"`
+	ReplayID       string `json:"replay_id"`
+	MatchID        string `json:"match_id"`
+	DemSize        int64  `json:"dem_size"`
+	DemSHA256      string `json:"dem_sha256"`
+	ChunkIndex     int    `json:"chunk_index"`
+	ChunkTotal     int    `json:"chunk_total"`
+	ChunkMD5       string `json:"chunk_md5"`
+	ChunkBase64    string `json:"chunk_base64"`
 }
 
 // DemReplayUploadResult 是分块上传的响应体。OK 字段必须渲染为 "ok":true
@@ -613,10 +616,11 @@ func (s *Service) demHasForMatchLocked(matchID string) (bool, int64) {
 	return s.demRepo.HasDem(matchID)
 }
 
-// DemDownload 返回某 replay 的 .dem 容器字节（session 鉴权 + 属主校验，
-// 与 Service.Replay 同口径）。先按 replay_id 直查（上传时记录），再回落到
-// replay 记录里的 match_id（存在 replay 但 .dem 的 replay_id 为空时）。
-func (s *Service) DemDownload(sessionToken string, replayID string) (DemRecord, error) {
+// DemDownload 返回某 replay / match 的 .dem 容器字节（session 鉴权 + 参与者校验）。
+// `id` 既可以是 replay_id（下载路由的规范入参，同 Service.Replay），也可以是
+// match_id —— records/最近对局视图只有 match_id，没有 replay_id，故两者都接受。
+// 参与者校验：上传属主 + 同一 match 下所有 replay 的属主都视为合法下载者。
+func (s *Service) DemDownload(sessionToken string, id string) (DemRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -624,34 +628,41 @@ func (s *Service) DemDownload(sessionToken string, replayID string) (DemRecord, 
 	if err != nil {
 		return DemRecord{}, err
 	}
-	replayID = strings.TrimSpace(replayID)
-	if replayID == "" {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return DemRecord{}, newError(codeInvalidRequest, "replay_id is required")
 	}
 	if s.demRepo == nil {
 		return DemRecord{}, newError(codeNotFound, "dem not found")
 	}
-	record, ok := s.demRepo.GetDemByReplay(replayID)
+	record, ok := s.demRepo.GetDemByReplay(id)
 	if !ok {
-		if replay, found := s.replays[replayID]; found && replay != nil {
+		// 也可能是 match_id（records 视图），或存在 replay 记录但 .dem 的
+		// replay_id 为空 —— 两条回落路径都尝试。
+		record, ok = s.demRepo.GetDemByMatch(id)
+	}
+	if !ok {
+		if replay, found := s.replays[id]; found && replay != nil {
 			record, ok = s.demRepo.GetDemByMatch(replay.MatchID)
 		}
 	}
 	if !ok {
 		return DemRecord{}, newError(codeNotFound, "dem not found")
 	}
-	// 属主校验：以「请求的 replay_id 的属主」为准（同 Service.Replay 口径），
-	// 这样同一 match 的其他参与者用各自的 replay_id 也能下载同一份 .dem；
-	// replay 记录缺失时回落到 .dem 记录自带的 user_id。
-	ownerID := ""
-	if replay, found := s.replays[replayID]; found && replay != nil {
-		ownerID = replay.UserID
+
+	participants := map[string]struct{}{}
+	if record.UserID != "" {
+		participants[record.UserID] = struct{}{}
 	}
-	if ownerID == "" {
-		ownerID = record.UserID
+	for _, replay := range s.replays {
+		if replay != nil && replay.MatchID == record.MatchID && replay.UserID != "" {
+			participants[replay.UserID] = struct{}{}
+		}
 	}
-	if ownerID != "" && ownerID != user.UserID {
-		return DemRecord{}, newError(codeUnauthorized, "user cannot read dem")
+	if len(participants) > 0 {
+		if _, allowed := participants[user.UserID]; !allowed {
+			return DemRecord{}, newError(codeUnauthorized, "user cannot read dem")
+		}
 	}
 	return record, nil
 }

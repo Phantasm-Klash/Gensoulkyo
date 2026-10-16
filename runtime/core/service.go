@@ -7920,6 +7920,7 @@ func disallowedClientOperations() []string {
 		"battle.result.submit",
 		"battle.ticket.consume",
 		"battle.events.submit",
+		"battle.replay.upload",
 		"battle.servers.register",
 		"battle.servers.heartbeat",
 		"battle.servers.offline",
@@ -7942,6 +7943,7 @@ func serviceCallbackOperations() []string {
 		"battle.ticket.consume",
 		"battle.result.submit",
 		"battle.events.submit",
+		"battle.replay.upload",
 	}
 }
 
