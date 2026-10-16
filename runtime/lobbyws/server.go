@@ -732,18 +732,30 @@ func (s *Server) HandleBattleResult(w http.ResponseWriter, r *http.Request) {
 	}
 	// The result callback settles a live match, so it is authenticated with the
 	// same HMAC mechanism as the /v1 service callbacks: the signature must be
-	// hex(HMAC-SHA256(perServerSecret, rawBody)) under the battle server that
+	// hex(HMAC-SHA256(perServerSecret, material)) under the battle server that
 	// owns the match's allocation. The owning server is resolved from the
 	// allocation (the callback payload carries no server id); an unknown match
 	// has no allocation to derive from and falls through to the business layer,
 	// which keeps the existing not_found semantics.
+	//
+	// B4-7.1: material is the raw body for the legacy form, or
+	// timestamp + "\n" + nonce + "\n" + body when the X-PhK-Battle-Timestamp and
+	// X-PhK-Battle-Nonce headers are both present (then the callback must also
+	// be fresh and carry an unseen nonce). See core.VerifyBattleCallback.
 	if matchID := strings.TrimSpace(callback.MatchID); matchID != "" {
 		if allocation, ok := s.service.BattleAllocationForMatch(matchID); ok {
-			if !s.service.BattleCallbackSignatureValid(allocation.BattleServerID, body, r.Header.Get("X-PhK-Battle-Signature")) {
+			code, verified := s.service.VerifyBattleCallback(
+				allocation.BattleServerID,
+				body,
+				r.Header.Get("X-PhK-Battle-Timestamp"),
+				r.Header.Get("X-PhK-Battle-Nonce"),
+				r.Header.Get("X-PhK-Battle-Signature"),
+			)
+			if !verified {
 				writeJSON(w, http.StatusForbidden, map[string]any{
 					"ok":         false,
-					"error_code": "battle_callback_signature_invalid",
-					"message":    "battle result callback requires a valid X-PhK-Battle-Signature",
+					"error_code": code,
+					"message":    "battle result callback rejected: " + code,
 				})
 				return
 			}

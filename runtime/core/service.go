@@ -195,6 +195,14 @@ type Service struct {
 	// battleEventSubmits is the sliding submission window per battle server
 	// (B4): the callback face is authenticated but must not be unbounded.
 	battleEventSubmits map[string][]time.Time
+	// battleCallbackNonces is the bounded per-server seen-nonce set that closes
+	// the callback replay window (B4-7.1). Lazily initialised under s.mu.
+	battleCallbackNonces map[string]*battleCallbackNonceWindow
+	// legacyBattleCallbacks counts callbacks accepted through the pre-freshness
+	// form (HMAC over the raw body only, no timestamp/nonce headers). It is
+	// updated atomically and read via LegacyBattleCallbackCount; it is the
+	// staged-rollout signal (B4-7.1).
+	legacyBattleCallbacks int64
 }
 
 // revokedSession describes a session token that was invalidated because the

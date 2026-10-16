@@ -16,9 +16,15 @@ import (
 )
 
 const (
-	headerServiceOrigin       = "X-PhK-Service-Origin"
-	headerBattleCallback      = "X-PhK-Battle-Callback"
-	headerBattleSignature     = "X-PhK-Battle-Signature"
+	headerServiceOrigin   = "X-PhK-Service-Origin"
+	headerBattleCallback  = "X-PhK-Battle-Callback"
+	headerBattleSignature = "X-PhK-Battle-Signature"
+	// B4-7.1: optional freshness headers. When both are present they are folded
+	// into the signed material and the callback must be fresh + unique; when
+	// neither is present the legacy (raw-body-only) signature is accepted and
+	// counted. See core.VerifyBattleCallback.
+	headerBattleTimestamp     = "X-PhK-Battle-Timestamp"
+	headerBattleNonce         = "X-PhK-Battle-Nonce"
 	serviceOriginContextKey   = core.ServiceCallbackOriginKey
 	serviceCallbackContextKey = core.ServiceCallbackFlagKey
 	// maxServiceCallbackBodyBytes bounds the raw body read for HMAC
@@ -1334,21 +1340,34 @@ func decodeServiceJSONRaw(w http.ResponseWriter, raw []byte, target any) bool {
 }
 
 // verifyBattleCallbackSignature enforces the real callback boundary: the
-// X-PhK-Battle-Signature header must be hex(HMAC-SHA256(perServerSecret, raw))
-// where perServerSecret is derived from the lobby master secret and the
-// battleServerID the payload claims. It additionally asserts that the match the
-// callback targets is owned by that same battle server, so a valid signature
-// from server A cannot write into a match allocated to server B.
+// X-PhK-Battle-Signature header must be hex(HMAC-SHA256(perServerSecret,
+// material)) where perServerSecret is derived from the lobby master secret and
+// the battleServerID the payload claims. It additionally asserts that the match
+// the callback targets is owned by that same battle server, so a valid
+// signature from server A cannot write into a match allocated to server B.
+//
+// B4-7.1: the signed material is rawBody alone for the legacy form, or
+// timestamp + "\n" + nonce + "\n" + rawBody when the X-PhK-Battle-Timestamp and
+// X-PhK-Battle-Nonce headers are both present; in the latter case the callback
+// must also be fresh (±300s) and carry an unseen nonce (see
+// core.VerifyBattleCallback). A partial header set is rejected.
 //
 // battleServerID/matchID come from the payload fields the business layer
 // already trusts for ownership (BattleEventsSubmitRequest.BattleServerID /
 // BattleResultSubmitRequest.SignedResult.KeyID and .Result.MatchID).
 func (h *Handler) verifyBattleCallbackSignature(w http.ResponseWriter, r *http.Request, raw []byte, battleServerID string, matchID string) bool {
-	if !h.service.BattleCallbackSignatureValid(battleServerID, raw, r.Header.Get(headerBattleSignature)) {
+	code, ok := h.service.VerifyBattleCallback(
+		battleServerID,
+		raw,
+		r.Header.Get(headerBattleTimestamp),
+		r.Header.Get(headerBattleNonce),
+		r.Header.Get(headerBattleSignature),
+	)
+	if !ok {
 		writeJSON(w, http.StatusForbidden, map[string]any{
 			"ok":         false,
-			"error_code": "battle_callback_signature_invalid",
-			"message":    "service callback requires a valid X-PhK-Battle-Signature for the claimed battle server",
+			"error_code": code,
+			"message":    battleCallbackRejectionMessage(code),
 		})
 		return false
 	}
@@ -1365,6 +1384,24 @@ func (h *Handler) verifyBattleCallbackSignature(w http.ResponseWriter, r *http.R
 		return false
 	}
 	return true
+}
+
+// battleCallbackRejectionMessage maps a core.VerifyBattleCallback error code to
+// a human-readable 403 message. The codes are stable API surface (clients and
+// the C++ signer branch on them), so they are matched literally.
+func battleCallbackRejectionMessage(code string) string {
+	switch code {
+	case "battle_callback_freshness_incomplete":
+		return "service callback must supply both X-PhK-Battle-Timestamp and X-PhK-Battle-Nonce, or neither"
+	case "battle_callback_nonce_invalid":
+		return "service callback nonce exceeds the accepted length"
+	case "battle_callback_timestamp_stale":
+		return "service callback timestamp is outside the accepted freshness window"
+	case "battle_callback_replay":
+		return "service callback nonce has already been seen (replay)"
+	default:
+		return "service callback requires a valid X-PhK-Battle-Signature for the claimed battle server"
+	}
 }
 
 func sessionToken(r *http.Request) string {
