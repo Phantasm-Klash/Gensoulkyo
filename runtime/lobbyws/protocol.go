@@ -60,7 +60,11 @@ type LoadoutRef struct {
 	CharacterID string           `json:"character_id"`
 	StageID     string           `json:"stage_id"`
 	RatingCode  string           `json:"rating_code"`
-	Deck        *DeckSnapshotRef `json:"deck,omitempty"`
+	// ShotType / BombType 是自机选择（shot 名如 "ReimuA1"，bomb 名如 "Reimu"）。
+	// 空 = 默认自机行为（复现现状）。
+	ShotType string           `json:"shot_type"`
+	BombType string           `json:"bomb_type"`
+	Deck     *DeckSnapshotRef `json:"deck,omitempty"`
 }
 
 // LobbyPlayerProfile mirrors phk.v1.LobbyPlayerProfile.
@@ -132,6 +136,8 @@ type RoomCreateRequest struct {
 	HostUserID string            `json:"host_user_id"`
 	Loadout    LoadoutRef        `json:"loadout"`
 	ModeParams map[string]string `json:"mode_params"`
+	// BossID 是房间 boss 选择（仅房主可设；空 = 默认 timeline）。
+	BossID string `json:"boss_id"`
 }
 
 // RoomCreateResponse mirrors phk.v1.RoomCreateResponse.
@@ -146,11 +152,12 @@ type RoomCreateResponse struct {
 
 // RoomJoinRequest mirrors phk.v1.RoomJoinRequest.
 type RoomJoinRequest struct {
-	Version  VersionStamp `json:"version"`
-	RoomCode string       `json:"room_code"`
-	UserID   string       `json:"user_id"`
-	PlayerID string       `json:"player_id"`
-	Loadout  LoadoutRef   `json:"loadout"`
+	Version    VersionStamp      `json:"version"`
+	RoomCode   string            `json:"room_code"`
+	UserID     string            `json:"user_id"`
+	PlayerID   string            `json:"player_id"`
+	Loadout    LoadoutRef        `json:"loadout"`
+	ModeParams map[string]string `json:"mode_params"`
 }
 
 // RoomJoinResponse mirrors phk.v1.RoomJoinResponse.
