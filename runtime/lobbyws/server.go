@@ -538,6 +538,7 @@ func (c *client) handleRoomCreate(raw json.RawMessage) {
 		ModeID:       strings.TrimSpace(req.ModeID),
 		ModeParams:   modeParamsFromLoadout(req.Loadout, req.ModeParams),
 		ActiveDeckID: "",
+		BossID:       strings.TrimSpace(req.BossID),
 	})
 	if err != nil {
 		c.sendEnvelope(TypeRoomCreateResponse, RoomCreateResponse{Error: &ErrorStatus{Code: core.ErrorCode(err), Message: err.Error()}})
@@ -562,7 +563,7 @@ func (c *client) handleRoomJoin(raw json.RawMessage) {
 	var req RoomJoinRequest
 	_ = json.Unmarshal(raw, &req)
 	resp, err := c.server.service.JoinRoom(c.token, req.RoomCode, core.JoinRoomRequest{
-		ModeParams: modeParamsFromLoadout(req.Loadout, nil),
+		ModeParams: modeParamsFromLoadout(req.Loadout, req.ModeParams),
 	})
 	if err != nil {
 		c.sendEnvelope(TypeRoomJoinResponse, RoomJoinResponse{Error: &ErrorStatus{Code: core.ErrorCode(err), Message: err.Error()}})
@@ -1092,6 +1093,12 @@ func modeParamsFromLoadout(loadout LoadoutRef, extra map[string]string) map[stri
 	}
 	if ratingCode := strings.TrimSpace(loadout.RatingCode); ratingCode != "" {
 		params["rating_code"] = ratingCode
+	}
+	if shotType := strings.TrimSpace(loadout.ShotType); shotType != "" {
+		params["shot_type"] = shotType
+	}
+	if bombType := strings.TrimSpace(loadout.BombType); bombType != "" {
+		params["bomb_type"] = bombType
 	}
 	return params
 }
