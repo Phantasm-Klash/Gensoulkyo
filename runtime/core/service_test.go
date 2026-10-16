@@ -376,6 +376,9 @@ func TestBattleAllocationAndSignedTicketUseRegisteredServer(t *testing.T) {
 	if !strings.HasPrefix(queueBob.BattleTicket.Ticket.DeckSnapshotHash, "sha256:") || queueBob.BattleTicket.Ticket.TicketNonceHex == "" {
 		t.Fatalf("battle ticket missing hash/nonce: %+v", queueBob.BattleTicket.Ticket)
 	}
+	if !isBattleTicketNonceHexShape(queueBob.BattleTicket.Ticket.TicketNonceHex) {
+		t.Fatalf("battle ticket nonce must be >=24 hex chars for the battle server verifier, got %q", queueBob.BattleTicket.Ticket.TicketNonceHex)
+	}
 	if queueBob.BattleTicket.Ticket.ModeConfigHash != queueBob.BattleAllocation.ModeConfigHash || !strings.HasPrefix(queueBob.BattleTicket.Ticket.ModeConfigHash, "sha256:") {
 		t.Fatalf("battle ticket must be signed against allocation mode config: allocation=%+v ticket=%+v", queueBob.BattleAllocation, queueBob.BattleTicket.Ticket)
 	}
@@ -4601,5 +4604,68 @@ func TestReconnectResponseCarriesTheMatchTick(t *testing.T) {
 	}
 	if reconnected.Tick != 7 {
 		t.Fatalf("the tick must be the one the input advanced to, got %d", reconnected.Tick)
+	}
+}
+
+// isBattleTicketNonceHexShape mirrors the battle server verifier's nonce rule
+// (PhK-BattleServer src/ticket.cpp): at least 24 lowercase hex characters.
+func isBattleTicketNonceHexShape(nonce string) bool {
+	if len(nonce) < 24 {
+		return false
+	}
+	for _, ch := range nonce {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// The battle server verifier (PhK-BattleServer src/ticket.cpp) rejects any
+// ticket whose ticket_nonce_hex is missing or shorter than 24 hex characters
+// (reason=ticket_nonce_invalid), and the client reads that exact nonce off the
+// battle.ticket response. Regression cover for the real-match deadlock where
+// the response nonce was only 16 chars long.
+func TestBattleTicketNonceHexIsBattleServerVerifiable(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Nonce Alice")
+	bob := mustLogin(t, service, "Nonce Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	ticket, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("battle ticket: %v", err)
+	}
+	nonce := ticket.Ticket.TicketNonceHex
+	if !isBattleTicketNonceHexShape(nonce) {
+		t.Fatalf("ticket_nonce_hex = %q (%d chars), want >=24 lowercase hex chars", nonce, len(nonce))
+	}
+	// The battle.ticket response payload must carry the nonce verbatim under
+	// the wire key the client and the C++ verifier read.
+	payload, err := json.Marshal(ticket)
+	if err != nil {
+		t.Fatalf("marshal signed ticket: %v", err)
+	}
+	var wire struct {
+		Ticket struct {
+			TicketNonceHex string `json:"ticket_nonce_hex"`
+		} `json:"ticket"`
+	}
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		t.Fatalf("unmarshal signed ticket: %v", err)
+	}
+	if wire.Ticket.TicketNonceHex != nonce {
+		t.Fatalf("response ticket_nonce_hex = %q, want ticket value %q", wire.Ticket.TicketNonceHex, nonce)
+	}
+	if !verifySignedBattleTicket(t, ticket) {
+		t.Fatal("signature must verify over the ticket carrying the widened nonce")
+	}
+	// A refetch serves the cached ticket with the same nonce.
+	again, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("battle ticket refetch: %v", err)
+	}
+	if again.Ticket.TicketNonceHex != nonce {
+		t.Fatalf("nonce changed between fetches: %q -> %q", nonce, again.Ticket.TicketNonceHex)
 	}
 }

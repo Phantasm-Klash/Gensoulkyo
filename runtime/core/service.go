@@ -6052,7 +6052,7 @@ func (s *Service) signedBattleTicketLocked(match *matchState, user *userState) (
 		DeckSnapshotHash:    deckSnapshotHash(player.DeckSnapshot),
 		ModeConfigHash:      allocation.ModeConfigHash,
 		RulesetVersion:      match.RulesetVersion,
-		TicketNonceHex:      shortHash(fmt.Sprintf("%s:%s:%s:%d", ticketID, match.MatchID, user.UserID, issuedAt.UnixNano())) + shortHash(user.SessionToken),
+		TicketNonceHex:      battleTicketNonceHex(ticketID, match.MatchID, user.UserID, issuedAt.UnixNano(), user.SessionToken),
 		IssuedAt:            issuedAt,
 		ExpiresAt:           expiresAt,
 		IssuedAtMS:          issuedAt.UnixMilli(),
@@ -7002,6 +7002,19 @@ func seedFrom(matchID string) int64 {
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:4])
+}
+
+// battleTicketNonceHex derives the nonce carried by a signed battle ticket.
+// The battle server verifier rejects tickets whose ticket_nonce_hex is
+// missing or shorter than 24 hex characters (PhK-BattleServer
+// src/ticket.cpp: reason=ticket_nonce_invalid); the former two-digest
+// shortHash form only produced 16, so real matches could never pass
+// verification. The nonce stays inside the signed ticket payload, so this
+// changes only the value being signed, never what the signature covers.
+func battleTicketNonceHex(ticketID, matchID, userID string, issuedAtUnixNano int64, sessionToken string) string {
+	material := fmt.Sprintf("%s:%s:%s:%d:%s", ticketID, matchID, userID, issuedAtUnixNano, sessionToken)
+	sum := sha256.Sum256([]byte(material))
+	return hex.EncodeToString(sum[:16])
 }
 
 func lifecycleFingerprint(parts ...string) string {

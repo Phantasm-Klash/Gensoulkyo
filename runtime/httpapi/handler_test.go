@@ -1089,6 +1089,16 @@ func TestHTTPBattleServerAllocationAndTicketFlow(t *testing.T) {
 	if !ticket.OK || ticket.Ticket.UserID != alice.UserID || ticket.Ticket.BattleServerID != "aaa-http-battle" || ticket.SignatureHex == "" || ticket.PublicKeyHex == "" {
 		t.Fatalf("explicit battle ticket invalid: %+v", ticket)
 	}
+	// The C++ verifier rejects ticket_nonce_hex shorter than 24 hex chars; the
+	// HTTP response must carry it (an absent field unmarshals to "").
+	if len(ticket.Ticket.TicketNonceHex) < 24 {
+		t.Fatalf("battle.ticket response ticket_nonce_hex must be >=24 hex chars for the battle server verifier, got %q", ticket.Ticket.TicketNonceHex)
+	}
+	for _, ch := range ticket.Ticket.TicketNonceHex {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+			t.Fatalf("battle.ticket response ticket_nonce_hex = %q contains non-hex character %q", ticket.Ticket.TicketNonceHex, ch)
+		}
+	}
 	consume := postJSONWithHeaders[core.BattleTicketConsumeResponse](t, server.URL+"/v1/battle/tickets/consume", "", map[string]any{
 		"version":          ticket.Ticket.Version,
 		"ticket_id":        ticket.Ticket.TicketID,
