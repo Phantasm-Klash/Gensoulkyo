@@ -222,3 +222,83 @@ func TestSubmitBattleEventsRejections(t *testing.T) {
 		})
 	}
 }
+
+// T10 rule 2: every boss process finished while a player was still passively
+// dropped — nobody reconnected and nobody claimed the win, so the match is a
+// mutual flee: no contest, no score. The battle server supplies the signal only.
+func TestBattleEventsBothFledWhenBossProcessesFinishWithADrop(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Flee Alice")
+	bob := mustLogin(t, service, "Flee Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	// A passive drop must keep the match alive and reconnectable (rule 4).
+	if _, err := service.DisconnectMatch(alice.SessionToken, matchID); err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	if match := service.matches[matchID]; match == nil || match.Status == "ended" {
+		t.Fatalf("a passive drop must not end the match")
+	}
+	aliceRankBefore := service.users[alice.UserID].Certification.RankScore
+	bobRankBefore := service.users[bob.UserID].Certification.RankScore
+
+	if _, err := service.SubmitBattleEvents(BattleEventsSubmitRequest{
+		BattleServerID: allocation.BattleServerID,
+		MatchID:        matchID,
+		Events: []BattleEventRow{
+			{Type: "all_players_disconnected", Tick: 12, Reason: "boss_processes_finished"},
+		},
+	}); err != nil {
+		t.Fatalf("submit completion row: %v", err)
+	}
+
+	match := service.matches[matchID]
+	if match == nil || match.Status != "ended" {
+		t.Fatalf("an unresolved drop with finished boss processes must end the match")
+	}
+	aliceSettlement := service.settlements[settlementKey(matchID, alice.UserID)]
+	bobSettlement := service.settlements[settlementKey(matchID, bob.UserID)]
+	if aliceSettlement == nil || aliceSettlement.Result != "flee" {
+		t.Fatalf("the dropped player must be recorded as fleeing: %+v", aliceSettlement)
+	}
+	if bobSettlement == nil || bobSettlement.Result != "flee" {
+		t.Fatalf("nobody claimed the win, so the opponent flees too: %+v", bobSettlement)
+	}
+	if len(aliceSettlement.RewardJSON) != 0 || len(bobSettlement.RewardJSON) != 0 {
+		t.Fatalf("a mutual flee must grant no rewards")
+	}
+	if got := service.users[alice.UserID].Certification.RankScore; got != aliceRankBefore {
+		t.Fatalf("a mutual flee must not change the dropped player's rating: %d -> %d", aliceRankBefore, got)
+	}
+	if got := service.users[bob.UserID].Certification.RankScore; got != bobRankBefore {
+		t.Fatalf("a mutual flee must not change the opponent's rating: %d -> %d", bobRankBefore, got)
+	}
+}
+
+// The same row must be a no-op when nobody is dropped: a live match must never
+// be ended by a completion signal alone.
+func TestBattleEventsCompletionRowIsANoOpWithoutADrop(t *testing.T) {
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "NoDrop Alice")
+	bob := mustLogin(t, service, "NoDrop Bob")
+	matchID := matchTwoPlayers(t, service, alice, bob, "pvp_duel")
+
+	allocation, err := service.BattleAllocation(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("allocation: %v", err)
+	}
+	if _, err := service.SubmitBattleEvents(BattleEventsSubmitRequest{
+		BattleServerID: allocation.BattleServerID,
+		MatchID:        matchID,
+		Events:         []BattleEventRow{{Type: "all_players_disconnected", Tick: 3}},
+	}); err != nil {
+		t.Fatalf("submit completion row: %v", err)
+	}
+	if match := service.matches[matchID]; match == nil || match.Status == "ended" {
+		t.Fatalf("a completion row must not end a match with no drop outstanding")
+	}
+}

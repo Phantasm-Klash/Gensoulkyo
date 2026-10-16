@@ -33,6 +33,10 @@ var allowedBattleEventTypes = map[string]bool{
 	// and routes it to the draft engine; the battle server does not emit this
 	// row yet (see task-queue/out/T9_impl_notes.md for the wiring gap).
 	"boss_defeated": true,
+	// T10 rule 2: every boss process finished while a player was still
+	// passively dropped. The battle server supplies only the SIGNAL — the
+	// lobby decides the outcome (a mutual flee, no contest, no score).
+	"all_players_disconnected": true,
 }
 
 // BattleEventRow is one battle-simulated card event row.
@@ -124,6 +128,18 @@ func (s *Service) SubmitBattleEvents(req BattleEventsSubmitRequest) (*BattleEven
 			_, _ = s.reportBossDefeatLocked(match, row.UserID, strings.TrimSpace(row.Reason), row.Tick)
 		}
 	}
+	// T10 rule 2: the boss processes all finished while a player was still
+	// passively dropped — nobody reconnected and nobody claimed the win, so the
+	// match is a mutual flee: no contest and no score for either side. Only the
+	// lobby settles; the battle server never invents an outcome.
+	for _, row := range req.Events {
+		if row.Type == "all_players_disconnected" {
+			if hasUnresolvedDropLocked(match) {
+				s.settleFleeLocked(match, "", true)
+			}
+			break
+		}
+	}
 	return &BattleEventsSubmitResponse{
 		OK:                  true,
 		Version:             currentVersionStamp(),
@@ -132,6 +148,26 @@ func (s *Service) SubmitBattleEvents(req BattleEventsSubmitRequest) (*BattleEven
 		ServerAuthoritative: true,
 		ServerTime:          now,
 	}, nil
+}
+
+// hasUnresolvedDropLocked reports whether some player is passively dropped and
+// may still reconnect (T10 rule 4). An explicit abandon already settled the
+// match, so such a player never shows up here as "unresolved".
+func hasUnresolvedDropLocked(match *matchState) bool {
+	for _, userID := range match.PlayerIDs {
+		player := match.Players[userID]
+		if player != nil && !player.Connected && !player.Abandoned {
+			return true
+		}
+	}
+	return false
+}
+
+// isMatchLevelBattleEvent marks rows that describe the match as a whole rather
+// than one player's action. Such a row carries no user id, so the per-player
+// membership check must not apply to it.
+func isMatchLevelBattleEvent(rowType string) bool {
+	return rowType == "all_players_disconnected"
 }
 
 func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
@@ -144,8 +180,10 @@ func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
 	if row.Tick > match.Tick+maxBattleEventTickSlack {
 		return newError(codeInvalidRequest, "battle event tick %d is ahead of match tick %d", row.Tick, match.Tick)
 	}
-	if _, ok := match.Players[row.UserID]; !ok {
-		return newError(codeInvalidRequest, "battle event user %q is not a player of match %q", row.UserID, match.MatchID)
+	if !isMatchLevelBattleEvent(row.Type) {
+		if _, ok := match.Players[row.UserID]; !ok {
+			return newError(codeInvalidRequest, "battle event user %q is not a player of match %q", row.UserID, match.MatchID)
+		}
 	}
 	if len(row.Reason) > maxBattleEventReasonLen {
 		return newError(codeInvalidRequest, "battle event reason exceeds %d bytes", maxBattleEventReasonLen)
@@ -155,6 +193,12 @@ func validateBattleEventRowLocked(match *matchState, row BattleEventRow) error {
 		if strings.TrimSpace(row.Reason) == "" {
 			return newError(codeInvalidRequest, "boss_defeated reason must carry the boss id")
 		}
+		return nil
+	}
+	if row.Type == "all_players_disconnected" {
+		// T10 rule 2: a match-level completion signal — it names neither a card
+		// nor a player, so the card checks below do not apply (same shape as the
+		// boss_defeated early return above).
 		return nil
 	}
 	cardID := strings.TrimSpace(row.CardID)
