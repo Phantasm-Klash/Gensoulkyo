@@ -3699,6 +3699,8 @@ func (s *Service) applyModeActionLocked(match *matchState, player *playerState, 
 		event, err = applyBattleRoyaleSelectionLocked(match, player, actionID, req.Payload, s.matchDurationTicks)
 	case "transfer_card":
 		event, err = applyBossTransferLocked(match, player, actionID, req.Payload)
+	case "gift":
+		event, err = applyGiftLocked(match, player, actionID, req.Payload)
 	default:
 		err = newError(codeModeAction, "unsupported mode action %q", req.ActionType)
 	}
@@ -5492,6 +5494,67 @@ func applyBossTransferLocked(match *matchState, player *playerState, actionID st
 		ToUserID:   toUserID,
 		Status:     "accepted",
 	}, nil
+}
+
+// applyGiftLocked runs the social "gift" mode action: the sender spends energy
+// to hand one catalog gift to the other player in the match. A gift is social
+// only — it appends a single gift_sent event to the match event stream and
+// never touches the deterministic simulation (ticks, bullets, boss HP), which
+// is what keeps a .dem replay byte-identical.
+func applyGiftLocked(match *matchState, player *playerState, actionID string, payload map[string]any) (MatchEvent, error) {
+	if match.Status != "running" {
+		return MatchEvent{}, newError(codeMatchState, "gift requires a running match, got %s", match.Status)
+	}
+	// A missing key must read as "required", not as the "<nil>" string
+	// asString renders for a nil value.
+	rawGiftID, hasGiftID := payload["gift_id"]
+	giftID := strings.TrimSpace(asString(rawGiftID))
+	if !hasGiftID || giftID == "" {
+		return MatchEvent{}, newError(codeModeAction, "gift_id is required")
+	}
+	definition, ok := giftDefinitionFor(giftID)
+	if !ok {
+		return MatchEvent{}, newError(codeInvalidRequest, "unknown gift %q", giftID)
+	}
+	receiver := otherMatchPlayerLocked(match, player.UserID)
+	if receiver == nil {
+		return MatchEvent{}, newError(codeModeAction, "gift requires exactly one opponent in the match")
+	}
+	// Same epsilon-bounded check the card activation uses, so float drift can
+	// never reject a gift the sender can exactly afford.
+	if player.Energy+0.0001 < definition.Cost {
+		return MatchEvent{}, newError(codeInvalidRequest, "not enough energy for gift %q", giftID)
+	}
+	player.Energy = math.Max(0, player.Energy-definition.Cost)
+	return MatchEvent{
+		Type:         "gift_sent",
+		Tick:         match.Tick,
+		UserID:       player.UserID,
+		TargetUserID: receiver.UserID,
+		CardID:       giftID,
+		ActionID:     actionID,
+		ActionType:   "gift",
+		Value:        int(definition.Cost),
+		Status:       "accepted",
+	}, nil
+}
+
+// otherMatchPlayerLocked returns the one other player seated in the match, or
+// nil when the match has no opponent (solo) or more than one (party modes).
+// The gift payload carries no target — the receiver is always the other seat —
+// so an ambiguous seat layout is a rejection, never a guess.
+func otherMatchPlayerLocked(match *matchState, userID string) *playerState {
+	var other *playerState
+	for _, id := range match.PlayerIDs {
+		if id == userID {
+			continue
+		}
+		if other != nil {
+			return nil
+		}
+		other = match.Players[id]
+	}
+	return other
 }
 
 func firstForbiddenField(raw map[string]any) string {
