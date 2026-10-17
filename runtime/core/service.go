@@ -327,6 +327,10 @@ type matchState struct {
 	BattleResultAt     time.Time
 	Draft              *draftRound
 	DraftRoundSeq      int
+	// GiftChargesUsed counts each player's spent gift charges for this match.
+	// Social-only: it never enters any hashed or serialized simulation state,
+	// exactly like the gift catalog itself.
+	GiftChargesUsed map[string]int
 }
 
 type battleServerState struct {
@@ -5496,11 +5500,11 @@ func applyBossTransferLocked(match *matchState, player *playerState, actionID st
 	}, nil
 }
 
-// applyGiftLocked runs the social "gift" mode action: the sender spends energy
-// to hand one catalog gift to the other player in the match. A gift is social
-// only — it appends a single gift_sent event to the match event stream and
-// never touches the deterministic simulation (ticks, bullets, boss HP), which
-// is what keeps a .dem replay byte-identical.
+// applyGiftLocked runs the social "gift" mode action: the sender spends gift
+// charges to hand one catalog gift to the other player in the match. A gift is
+// social only — it appends a single gift_sent event to the match event stream
+// and never touches the deterministic simulation (ticks, bullets, boss HP),
+// which is what keeps a .dem replay byte-identical.
 func applyGiftLocked(match *matchState, player *playerState, actionID string, payload map[string]any) (MatchEvent, error) {
 	if match.Status != "running" {
 		return MatchEvent{}, newError(codeMatchState, "gift requires a running match, got %s", match.Status)
@@ -5520,12 +5524,19 @@ func applyGiftLocked(match *matchState, player *playerState, actionID string, pa
 	if receiver == nil {
 		return MatchEvent{}, newError(codeModeAction, "gift requires exactly one opponent in the match")
 	}
-	// Same epsilon-bounded check the card activation uses, so float drift can
-	// never reject a gift the sender can exactly afford.
-	if player.Energy+0.0001 < definition.Cost {
-		return MatchEvent{}, newError(codeInvalidRequest, "not enough energy for gift %q", giftID)
+	// The gift pool is its own budget, deliberately NOT the card energy: the
+	// card economy runs on the ticket's initial_energy (2.0) while cards cost
+	// up to 10.0, so pricing gifts in that unit made all but the cheapest gift
+	// permanently unaffordable. A social interaction must not compete with the
+	// gameplay one.
+	if match.GiftChargesUsed == nil {
+		match.GiftChargesUsed = map[string]int{}
 	}
-	player.Energy = math.Max(0, player.Energy-definition.Cost)
+	used := match.GiftChargesUsed[player.UserID]
+	if used+definition.Cost > giftChargeBudget {
+		return MatchEvent{}, newError(codeInvalidRequest, "gift charges exhausted for gift %q", giftID)
+	}
+	match.GiftChargesUsed[player.UserID] = used + definition.Cost
 	return MatchEvent{
 		Type:         "gift_sent",
 		Tick:         match.Tick,
@@ -5534,7 +5545,7 @@ func applyGiftLocked(match *matchState, player *playerState, actionID string, pa
 		CardID:       giftID,
 		ActionID:     actionID,
 		ActionType:   "gift",
-		Value:        int(definition.Cost),
+		Value:        definition.Cost,
 		Status:       "accepted",
 	}, nil
 }

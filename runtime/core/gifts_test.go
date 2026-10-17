@@ -7,34 +7,41 @@ import (
 
 // TestGiftCatalogContractReplaysClientTable pins the server gift table to the
 // client catalog (SpellKard laya src/core/game/gift_catalog.ts): every id the
-// client can send must resolve here with the same name and energy cost, the
-// table must hold no extra entries, and an id outside the table must not
-// resolve. A drift on either side is a protocol break, so the whole table is
-// asserted rather than sampled.
+// client can send must resolve here with the same name, the table must hold no
+// extra entries, and an id outside the table must not resolve. A drift on
+// either side is a protocol break, so the whole table is asserted rather than
+// sampled.
 func TestGiftCatalogContractReplaysClientTable(t *testing.T) {
 	want := []struct {
 		giftID string
 		name   string
-		cost   float64
+		cost   int
 	}{
-		{"heart", "心愿", 10},
-		{"star", "星砂", 20},
-		{"ribbon", "丝带", 30},
-		{"lantern", "灯笼", 40},
-		{"wand", "御币", 50},
-		{"cup", "茶", 60},
+		{"heart", "心愿", 1},
+		{"star", "星砂", 1},
+		{"ribbon", "丝带", 1},
+		{"lantern", "灯笼", 2},
+		{"wand", "御币", 2},
+		{"cup", "茶", 3},
 	}
 	if len(giftCatalog) != len(want) {
 		t.Fatalf("gift catalog holds %d entries, want %d", len(giftCatalog), len(want))
 	}
+	total := 0
 	for _, expected := range want {
 		definition, ok := giftDefinitionFor(expected.giftID)
 		if !ok {
 			t.Fatalf("gift %q missing from the server catalog", expected.giftID)
 		}
 		if definition.Name != expected.name || definition.Cost != expected.cost {
-			t.Fatalf("gift %q = {name %q, cost %v}, want {name %q, cost %v}", expected.giftID, definition.Name, definition.Cost, expected.name, expected.cost)
+			t.Fatalf("gift %q = {name %q, cost %d}, want {name %q, cost %d}", expected.giftID, definition.Name, definition.Cost, expected.name, expected.cost)
 		}
+		total += definition.Cost
+	}
+	// One full pass of the catalog must out-cost the per-match budget, so the
+	// charge pool stays a real choice rather than a formality.
+	if total <= giftChargeBudget {
+		t.Fatalf("catalog total = %d charges, want more than the %d-charge budget", total, giftChargeBudget)
 	}
 	// Lookup is exact: the caller trims the payload, so padded or cased ids
 	// must not resolve by accident.
@@ -76,6 +83,11 @@ func submitGift(t *testing.T, service *Service, session *AuthSession, matchID st
 	return response
 }
 
+// giftChargesUsed reads a player's spent gift charges for the match.
+func giftChargesUsed(service *Service, matchID string, userID string) int {
+	return service.matches[matchID].GiftChargesUsed[userID]
+}
+
 // countGiftSentEvents counts the gift_sent rows on a match's event stream.
 func countGiftSentEvents(t *testing.T, service *Service, session *AuthSession, matchID string) int {
 	t.Helper()
@@ -92,20 +104,18 @@ func countGiftSentEvents(t *testing.T, service *Service, session *AuthSession, m
 	return count
 }
 
-// TestGiftModeActionSpendsEnergyAndAnnouncesGiftSent walks the happy path: an
-// affordable gift is accepted, the sender's energy drops by exactly the
-// catalog cost, the receiver is untouched, and one gift_sent event lands on
-// the match event stream with the client's field contract (card_id = gift id,
-// user_id = sender, target_user_id = receiver). The deterministic simulation
-// (tick, boss HP, bullets) must not move.
-func TestGiftModeActionSpendsEnergyAndAnnouncesGiftSent(t *testing.T) {
+// TestGiftModeActionSpendsChargesAndAnnouncesGiftSent walks the happy path: an
+// in-budget gift is accepted, the sender's charge counter rises by exactly the
+// catalog cost, the receiver is never charged, the card energy of both players
+// is untouched, and one gift_sent event lands on the match event stream with
+// the client's field contract (card_id = gift id, user_id = sender,
+// target_user_id = receiver). The deterministic simulation (tick, boss HP,
+// bullets) must not move.
+func TestGiftModeActionSpendsChargesAndAnnouncesGiftSent(t *testing.T) {
 	service, players, matchID := giftMatchFixture(t, "pvp_duel")
 	match := service.matches[matchID]
 	sender := match.Players[players[0].UserID]
 	receiver := match.Players[players[1].UserID]
-	service.mu.Lock()
-	sender.Energy = 45 // enough for ribbon (30) with change left over
-	service.mu.Unlock()
 	beforeTick, beforeBossHP, beforeBullets := match.Tick, match.BossHP, len(match.Bullets)
 
 	response := submitGift(t, service, players[0], matchID, "ribbon")
@@ -116,14 +126,17 @@ func TestGiftModeActionSpendsEnergyAndAnnouncesGiftSent(t *testing.T) {
 	if event.Type != "gift_sent" || event.CardID != "ribbon" || event.UserID != players[0].UserID || event.TargetUserID != players[1].UserID {
 		t.Fatalf("gift_sent event fields wrong: %+v", event)
 	}
-	if event.ActionType != "gift" || event.ActionID == "" || event.Value != 30 {
+	if event.ActionType != "gift" || event.ActionID == "" || event.Value != 1 {
 		t.Fatalf("gift_sent event metadata wrong: %+v", event)
 	}
-	if sender.Energy != 15 {
-		t.Fatalf("sender energy = %v, want 15 (45 - ribbon 30)", sender.Energy)
+	if used := giftChargesUsed(service, matchID, players[0].UserID); used != 1 {
+		t.Fatalf("sender gift charges used = %d, want 1 (ribbon 1)", used)
 	}
-	if receiver.Energy != cardStartingEnergy {
-		t.Fatalf("receiver energy = %v, want untouched %v", receiver.Energy, cardStartingEnergy)
+	if _, charged := match.GiftChargesUsed[players[1].UserID]; charged {
+		t.Fatalf("receiver was charged gift charges: %+v", match.GiftChargesUsed)
+	}
+	if sender.Energy != cardStartingEnergy || receiver.Energy != cardStartingEnergy {
+		t.Fatalf("gift touched card energy: sender %v receiver %v, want untouched %v", sender.Energy, receiver.Energy, cardStartingEnergy)
 	}
 	if match.Tick != beforeTick || match.BossHP != beforeBossHP || len(match.Bullets) != beforeBullets {
 		t.Fatalf("gift moved the deterministic simulation: tick %d->%d boss %d->%d bullets %d->%d", beforeTick, match.Tick, beforeBossHP, match.BossHP, beforeBullets, len(match.Bullets))
@@ -138,40 +151,98 @@ func TestGiftModeActionSpendsEnergyAndAnnouncesGiftSent(t *testing.T) {
 	if !repeat.Accepted {
 		t.Fatalf("a repeat gift should be accepted: %+v", repeat)
 	}
-	if sender.Energy != 5 {
-		t.Fatalf("sender energy after repeat gift = %v, want 5 (15 - heart 10)", sender.Energy)
+	if used := giftChargesUsed(service, matchID, players[0].UserID); used != 2 {
+		t.Fatalf("sender gift charges used = %d, want 2 (ribbon 1 + heart 1)", used)
 	}
 	if count := countGiftSentEvents(t, service, players[0], matchID); count != 2 {
 		t.Fatalf("event stream holds %d gift_sent events, want 2", count)
 	}
 
-	// An exactly-affordable gift must clear the epsilon-bounded energy check.
-	service.mu.Lock()
-	sender.Energy = 10
-	service.mu.Unlock()
-	exact := submitGift(t, service, players[0], matchID, "heart")
-	if !exact.Accepted || sender.Energy != 0 {
-		t.Fatalf("exactly-affordable heart rejected or mispriced: %+v energy=%v", exact, sender.Energy)
+	// Charges accumulate across expensive gifts: cup costs 3, draining the
+	// 5-charge budget exactly.
+	cup := submitGift(t, service, players[0], matchID, "cup")
+	if !cup.Accepted || cup.Event.Value != 3 {
+		t.Fatalf("cup gift invalid: %+v", cup)
+	}
+	if used := giftChargesUsed(service, matchID, players[0].UserID); used != giftChargeBudget {
+		t.Fatalf("sender gift charges used = %d, want the %d-charge budget fully drained", used, giftChargeBudget)
 	}
 }
 
-// TestGiftModeActionRejectsUnknownGiftWithoutSpendingEnergy: an id outside the
-// catalog is an invalid_request domain rejection, spends nothing, and writes
-// no gift_sent event. A missing gift_id is a mode-action rejection, not an
-// accept.
-func TestGiftModeActionRejectsUnknownGiftWithoutSpendingEnergy(t *testing.T) {
+// TestGiftModeActionIgnoresCardEnergy proves the two pools are decoupled: a
+// sender with no card energy at all can still send a gift, and sending one
+// leaves the card energy untouched.
+func TestGiftModeActionIgnoresCardEnergy(t *testing.T) {
 	service, players, matchID := giftMatchFixture(t, "pvp_duel")
 	sender := service.matches[matchID].Players[players[0].UserID]
 	service.mu.Lock()
-	sender.Energy = cardMaxEnergy
+	sender.Energy = 0 // no card energy whatsoever
 	service.mu.Unlock()
+
+	response := submitGift(t, service, players[0], matchID, "heart")
+	if !response.Accepted {
+		t.Fatalf("gift must not depend on card energy: %+v", response)
+	}
+	if sender.Energy != 0 {
+		t.Fatalf("gift touched card energy: %v", sender.Energy)
+	}
+	if used := giftChargesUsed(service, matchID, players[0].UserID); used != 1 {
+		t.Fatalf("gift charges used = %d, want 1", used)
+	}
+}
+
+// TestGiftModeActionRejectsExhaustedGiftCharges: the per-match charge budget
+// caps the social interaction. cup(3)+wand(2) exactly drains the 5-charge
+// budget, the next gift — even the cheapest — is refused, and a refused gift
+// neither spends a charge nor writes a gift_sent event.
+func TestGiftModeActionRejectsExhaustedGiftCharges(t *testing.T) {
+	service, players, matchID := giftMatchFixture(t, "pvp_duel")
+
+	cup := submitGift(t, service, players[0], matchID, "cup")
+	if !cup.Accepted {
+		t.Fatalf("cup gift rejected: %+v", cup)
+	}
+	if used := giftChargesUsed(service, matchID, players[0].UserID); used != 3 {
+		t.Fatalf("gift charges used = %d, want 3 (cup 3)", used)
+	}
+	wand := submitGift(t, service, players[0], matchID, "wand")
+	if !wand.Accepted {
+		t.Fatalf("wand gift rejected: %+v", wand)
+	}
+	if used := giftChargesUsed(service, matchID, players[0].UserID); used != giftChargeBudget {
+		t.Fatalf("gift charges used = %d, want the %d-charge budget fully drained", used, giftChargeBudget)
+	}
+
+	beforeEvents := countGiftSentEvents(t, service, players[0], matchID)
+	rejected := submitGift(t, service, players[0], matchID, "heart")
+	if rejected.Accepted || rejected.Reason != codeInvalidRequest || rejected.Status != "rejected" {
+		t.Fatalf("expected exhausted-charge rejection, got %+v", rejected)
+	}
+	if used := giftChargesUsed(service, matchID, players[0].UserID); used != giftChargeBudget {
+		t.Fatalf("refused gift spent a charge: used = %d", used)
+	}
+	if count := countGiftSentEvents(t, service, players[0], matchID); count != beforeEvents {
+		t.Fatalf("refused gift wrote a gift_sent event: %d -> %d", beforeEvents, count)
+	}
+}
+
+// TestGiftModeActionRejectsUnknownGiftWithoutSpendingCharges: an id outside the
+// catalog is an invalid_request domain rejection, spends no charge, and writes
+// no gift_sent event. A missing gift_id is a mode-action rejection, not an
+// accept.
+func TestGiftModeActionRejectsUnknownGiftWithoutSpendingCharges(t *testing.T) {
+	service, players, matchID := giftMatchFixture(t, "pvp_duel")
+	sender := service.matches[matchID].Players[players[0].UserID]
 
 	response := submitGift(t, service, players[0], matchID, "diamond")
 	if response.Accepted || response.Reason != codeInvalidRequest || response.Status != "rejected" {
 		t.Fatalf("expected unknown-gift rejection, got %+v", response)
 	}
-	if sender.Energy != cardMaxEnergy {
-		t.Fatalf("rejected gift spent energy: %v", sender.Energy)
+	if _, charged := service.matches[matchID].GiftChargesUsed[players[0].UserID]; charged {
+		t.Fatalf("rejected gift created a charge entry: %+v", service.matches[matchID].GiftChargesUsed)
+	}
+	if sender.Energy != cardStartingEnergy {
+		t.Fatalf("rejected gift touched card energy: %v", sender.Energy)
 	}
 	if count := countGiftSentEvents(t, service, players[0], matchID); count != 0 {
 		t.Fatalf("rejected gift wrote %d gift_sent events, want 0", count)
@@ -188,37 +259,8 @@ func TestGiftModeActionRejectsUnknownGiftWithoutSpendingEnergy(t *testing.T) {
 	if missing.Accepted || missing.Reason != codeModeAction {
 		t.Fatalf("expected missing gift_id rejection, got %+v", missing)
 	}
-	if sender.Energy != cardMaxEnergy {
-		t.Fatalf("missing-gift rejection spent energy: %v", sender.Energy)
-	}
-}
-
-// TestGiftModeActionRejectsInsufficientEnergy: a gift the sender cannot afford
-// is an invalid_request domain rejection and leaves the energy untouched.
-func TestGiftModeActionRejectsInsufficientEnergy(t *testing.T) {
-	service, players, matchID := giftMatchFixture(t, "pvp_duel")
-	sender := service.matches[matchID].Players[players[0].UserID]
-	service.mu.Lock()
-	sender.Energy = 9.999 // heart costs 10
-	service.mu.Unlock()
-
-	response := submitGift(t, service, players[0], matchID, "heart")
-	if response.Accepted || response.Reason != codeInvalidRequest {
-		t.Fatalf("expected insufficient-energy rejection, got %+v", response)
-	}
-	if sender.Energy != 9.999 {
-		t.Fatalf("rejected gift spent energy: %v", sender.Energy)
-	}
-	// The top of the catalog is unaffordable at any card-scale energy.
-	expensive := submitGift(t, service, players[0], matchID, "cup")
-	if expensive.Accepted || expensive.Reason != codeInvalidRequest {
-		t.Fatalf("expected unaffordable cup rejection, got %+v", expensive)
-	}
-	if sender.Energy != 9.999 {
-		t.Fatalf("rejected gift spent energy: %v", sender.Energy)
-	}
-	if count := countGiftSentEvents(t, service, players[0], matchID); count != 0 {
-		t.Fatalf("rejected gifts wrote %d gift_sent events, want 0", count)
+	if _, charged := service.matches[matchID].GiftChargesUsed[players[0].UserID]; charged {
+		t.Fatalf("missing-gift rejection created a charge entry: %+v", service.matches[matchID].GiftChargesUsed)
 	}
 }
 
@@ -291,6 +333,9 @@ func TestGiftModeActionRejectsPartyModeWithoutUniqueOpponent(t *testing.T) {
 	response := submitGift(t, service, players[0], matchID, "heart")
 	if response.Accepted || response.Reason != codeModeAction {
 		t.Fatalf("expected party-mode gift rejection, got %+v", response)
+	}
+	if _, charged := service.matches[matchID].GiftChargesUsed[players[0].UserID]; charged {
+		t.Fatalf("rejected party gift created a charge entry: %+v", service.matches[matchID].GiftChargesUsed)
 	}
 	if count := countGiftSentEvents(t, service, players[0], matchID); count != 0 {
 		t.Fatalf("rejected party gift wrote %d gift_sent events, want 0", count)
