@@ -320,3 +320,58 @@ func TestCardEffectRejectsInsufficientEnergyAndCooldown(t *testing.T) {
 		t.Fatalf("expected cooldown rejection, got %+v", cooldown.Snapshot.Events)
 	}
 }
+
+// The 16 -> 20 pool expansion gives opponent_pattern cards their own fan
+// geometry: ember_lance fires 5 faster, smaller, amber bullets while
+// mirror_lance keeps the original constants bit-for-bit (the pre-expansion
+// behaviour other layers and goldens depend on).
+func TestCardEffectOpponentPatternGeometryPerCard(t *testing.T) {
+	for _, tc := range []struct {
+		cardID     string
+		wantCount  int
+		wantSpeed  float64
+		wantRadius float64
+		wantColor  string
+	}{
+		{"mirror_lance", cardOpponentPatternCount, cardOpponentPatternSpeed, cardOpponentPatternRadius, cardOpponentPatternColor},
+		{"ember_lance", 5, 6.5, 4.0, "amber"},
+	} {
+		t.Run(tc.cardID, func(t *testing.T) {
+			service, alice, bob, matchID := cardEffectMatch(t)
+			armCard(t, service, matchID, alice.UserID, tc.cardID, 10)
+
+			resp := submitCard(t, service, alice, matchID, 1, 1, 0)
+
+			event := findEvent(resp.Snapshot.Events, "card_effect_applied")
+			if event == nil || event.CardID != tc.cardID || event.Value != tc.wantCount {
+				t.Fatalf("%s expected card_effect_applied value %d, got %+v", tc.cardID, tc.wantCount, resp.Snapshot.Events)
+			}
+			if len(resp.Snapshot.ActiveCards) != 1 {
+				t.Fatalf("%s expected one active card, got %+v", tc.cardID, resp.Snapshot.ActiveCards)
+			}
+			card := resp.Snapshot.ActiveCards[0]
+			if card.CardID != tc.cardID || card.EffectKind != "opponent_pattern" || card.PatternID != tc.cardID || card.TargetUserID != bob.UserID {
+				t.Fatalf("%s unexpected active card: %+v", tc.cardID, card)
+			}
+			spawns := 0
+			for _, delta := range resp.Snapshot.BulletsDelta {
+				if delta.Op != "spawn" || delta.PatternID != tc.cardID {
+					continue
+				}
+				spawns++
+				if delta.Color != tc.wantColor {
+					t.Fatalf("%s spawn color = %q, want %q", tc.cardID, delta.Color, tc.wantColor)
+				}
+				if delta.Radius != tc.wantRadius {
+					t.Fatalf("%s spawn radius = %v, want %v", tc.cardID, delta.Radius, tc.wantRadius)
+				}
+				if speed := math.Hypot(delta.VX, delta.VY); math.Abs(speed-tc.wantSpeed) > 0.001 {
+					t.Fatalf("%s spawn speed = %v, want %v", tc.cardID, speed, tc.wantSpeed)
+				}
+			}
+			if spawns != tc.wantCount {
+				t.Fatalf("%s spawned %d bullets, want %d", tc.cardID, spawns, tc.wantCount)
+			}
+		})
+	}
+}

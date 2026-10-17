@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -179,5 +180,142 @@ func TestBattleTicketDeckTamperBreaksSignature(t *testing.T) {
 	tampered.Ticket.DeckCardIDs = []string{"finale_arc", "finale_arc", "finale_arc", "finale_arc"}
 	if verifySignedBattleTicket(t, &tampered) {
 		t.Fatal("deck tampering must invalidate the ticket signature")
+	}
+}
+
+// The 16 -> 20 pool expansion (frost_arc / ember_lance / iron_veil /
+// thunder_fall) must be deck-legal under the existing rules: the catalog now
+// holds exactly deckSize ids, and a deck built from the new cards validates
+// at every hop while the copy and high-rarity caps still bite.
+func TestCardCatalogExpansionIsDeckLegal(t *testing.T) {
+	expansion := []string{"frost_arc", "ember_lance", "iron_veil", "thunder_fall"}
+	if len(serverCardCatalog) != deckSize {
+		t.Fatalf("catalog must hold exactly deckSize (%d) ids, got %d", deckSize, len(serverCardCatalog))
+	}
+	if frost := serverCardCatalog["frost_arc"]; frost.EffectKind != "bullet_purge" || frost.Cost != 2 || frost.CooldownTicks != 360 ||
+		frost.DurationTicks != 1 || frost.Damage != 0 || frost.ScoreBonus != 18 || frost.PurgeRadius != 100 || frost.PurgeCount != 12 {
+		t.Fatalf("frost_arc definition drifted: %+v", frost)
+	}
+	if ember := serverCardCatalog["ember_lance"]; ember.EffectKind != "opponent_pattern" || ember.Cost != 3 || ember.CooldownTicks != 300 ||
+		ember.DurationTicks != 240 || ember.Damage != 20 || ember.ScoreBonus != 24 || ember.PatternID != "ember_lance" {
+		t.Fatalf("ember_lance definition drifted: %+v", ember)
+	}
+	if iron := serverCardCatalog["iron_veil"]; iron.EffectKind != "invulnerable" || iron.Cost != 4 || iron.CooldownTicks != 480 ||
+		iron.DurationTicks != 120 || iron.Damage != 0 || iron.ScoreBonus != 16 {
+		t.Fatalf("iron_veil definition drifted: %+v", iron)
+	}
+	if thunder := serverCardCatalog["thunder_fall"]; thunder.EffectKind != "finisher" || thunder.Cost != 4 || thunder.CooldownTicks != 420 ||
+		thunder.DurationTicks != 1 || thunder.Damage != 30 || thunder.ScoreBonus != 40 {
+		t.Fatalf("thunder_fall definition drifted: %+v", thunder)
+	}
+	// Only thunder_fall may count against the high-rarity cap, so two copies
+	// of every new card stay legal (2 <= maxHighRareCards).
+	for _, cardID := range expansion {
+		if _, ok := serverCardRarities[cardID]; !ok {
+			t.Fatalf("rarity table missing expansion card %q", cardID)
+		}
+	}
+	if !isHighRareCard("thunder_fall") {
+		t.Fatal("thunder_fall is epic and must count as high rarity")
+	}
+	for _, cardID := range []string{"frost_arc", "ember_lance", "iron_veil"} {
+		if isHighRareCard(cardID) {
+			t.Fatalf("%s is uncommon and must not count as high rarity", cardID)
+		}
+	}
+
+	// A deck built from the four new cards (two copies each = 8 slots) topped
+	// up with common/uncommon filler validates end to end and reaches the
+	// signed ticket.
+	filler := []string{"focus_lens", "hitbox_charm", "bomb_amplifier", "graze_engine", "draw_sigil", "purge_charm"}
+	expansionDeck := make([]string, 0, deckSize)
+	for _, cardID := range expansion {
+		expansionDeck = append(expansionDeck, cardID, cardID)
+	}
+	for i := 0; len(expansionDeck) < deckSize; i++ {
+		expansionDeck = append(expansionDeck, filler[i%len(filler)])
+	}
+
+	service := NewService(Config{})
+	alice := mustLogin(t, service, "Expansion Alice")
+	bob := mustLogin(t, service, "Expansion Bob")
+	if _, err := service.SaveDeck(alice.SessionToken, SaveDeckRequest{
+		DeckID:  "expansion_deck",
+		Name:    "Expansion",
+		Format:  defaultDeckFormat,
+		CardIDs: expansionDeck,
+		Active:  true,
+	}); err != nil {
+		t.Fatalf("deck built from the expansion cards must save: %v", err)
+	}
+
+	// Alice joins on her saved expansion deck; Bob on a stock valid deck.
+	if _, err := service.JoinQueue(alice.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: "expansion_deck",
+	}); err != nil {
+		t.Fatalf("alice join queue: %v", err)
+	}
+	if _, err := service.JoinQueue(bob.SessionToken, JoinQueueRequest{
+		ModeID:       "pvp_duel",
+		ActiveDeckID: fmt.Sprintf("%s_deck_0", bob.UserID),
+		DeckSnapshot: validDeck(fmt.Sprintf("%s_deck_0", bob.UserID)),
+	}); err != nil {
+		t.Fatalf("bob join queue: %v", err)
+	}
+	matchID := ""
+	service.mu.Lock()
+	for id, match := range service.matches {
+		if _, ok := match.Players[alice.UserID]; ok {
+			matchID = id
+			break
+		}
+	}
+	service.mu.Unlock()
+	if matchID == "" {
+		t.Fatal("expansion deck match did not fill")
+	}
+	ticket, err := service.BattleTicket(alice.SessionToken, matchID)
+	if err != nil {
+		t.Fatalf("battle ticket with expansion deck: %v", err)
+	}
+	for _, cardID := range expansion {
+		if !cardTestContains(ticket.Ticket.DeckCardIDs, cardID) {
+			t.Fatalf("ticket deck missing expansion card %q: %v", cardID, ticket.Ticket.DeckCardIDs)
+		}
+	}
+
+	// The two-copy limit still applies to a new card.
+	overCopies := copyStringSlice(expansionDeck)
+	for index, cardID := range overCopies {
+		if cardID == "frost_arc" {
+			overCopies[index] = "ember_lance"
+			break
+		}
+	}
+	if _, err := service.SaveDeck(alice.SessionToken, SaveDeckRequest{
+		DeckID:  "over_copies",
+		Name:    "Over Copies",
+		Format:  defaultDeckFormat,
+		CardIDs: overCopies,
+	}); ErrorCode(err) != codeInvalidDeck {
+		t.Fatalf("three copies of a card must be refused, got %v", err)
+	}
+
+	// The high-rarity cap still applies with the new epic in the mix:
+	// 2x thunder_fall + 2x last_arc + 2x finale_arc + 2x mirror_lance = 8 > 6.
+	tooManyHigh := []string{
+		"thunder_fall", "thunder_fall", "last_arc", "last_arc", "finale_arc", "finale_arc", "mirror_lance", "mirror_lance",
+	}
+	for i := 0; len(tooManyHigh) < deckSize; i++ {
+		tooManyHigh = append(tooManyHigh, filler[i%len(filler)])
+	}
+	if _, err := service.SaveDeck(alice.SessionToken, SaveDeckRequest{
+		DeckID:  "too_many_high",
+		Name:    "Too Many High",
+		Format:  defaultDeckFormat,
+		CardIDs: tooManyHigh,
+	}); ErrorCode(err) != codeInvalidDeck {
+		t.Fatalf("high-rarity cap must bite with the new epic, got %v", err)
 	}
 }

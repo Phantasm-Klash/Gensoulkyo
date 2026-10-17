@@ -16,6 +16,55 @@ const (
 	cardOpponentPatternColor  = "violet"
 )
 
+// cardPatternGeometry is the fan geometry of one opponent_pattern card.
+// mirror_lance keeps the original constants verbatim; cards added by the
+// 16 -> 20 pool expansion declare their own set in cardPatternGeometries.
+// Pure compile-time data: it never enters any serialized (hashed) state —
+// only the bullets a card actually spawns do.
+type cardPatternGeometry struct {
+	Count  int
+	Spread float64
+	Speed  float64
+	Radius float64
+	Color  string
+}
+
+// cardPatternGeometries keys fan geometry by pattern id (the catalog's
+// PatternID, falling back to the card id when left empty). mirror_lance is
+// pinned here so a future re-tune of the defaults cannot silently change it.
+var cardPatternGeometries = map[string]cardPatternGeometry{
+	"mirror_lance": {
+		Count:  cardOpponentPatternCount,
+		Spread: cardOpponentPatternSpread,
+		Speed:  cardOpponentPatternSpeed,
+		Radius: cardOpponentPatternRadius,
+		Color:  cardOpponentPatternColor,
+	},
+	"ember_lance": {
+		Count:  5,
+		Spread: cardOpponentPatternSpread, // the design leaves the fan angle unchanged
+		Speed:  6.5,
+		Radius: 4.0,
+		Color:  "amber",
+	},
+}
+
+// cardPatternGeometryFor resolves the fan geometry for a pattern id. An
+// unregistered id falls back to the original constants, so behaviour for
+// every pattern that predates the table is bit-identical.
+func cardPatternGeometryFor(patternID string) cardPatternGeometry {
+	if geometry, ok := cardPatternGeometries[patternID]; ok {
+		return geometry
+	}
+	return cardPatternGeometry{
+		Count:  cardOpponentPatternCount,
+		Spread: cardOpponentPatternSpread,
+		Speed:  cardOpponentPatternSpeed,
+		Radius: cardOpponentPatternRadius,
+		Color:  cardOpponentPatternColor,
+	}
+}
+
 // applyCardEffectLocked runs the EffectKind behaviour of a freshly accepted
 // card activation. It is invoked by applyCardRequestLocked after the generic
 // activation bookkeeping (energy, cooldown, damage, card_accepted event) so
@@ -50,17 +99,18 @@ func (s *Service) applyOpponentPatternLocked(match *matchState, player *playerSt
 	if patternID == "" {
 		patternID = activation.CardID
 	}
+	geometry := cardPatternGeometryFor(patternID)
 	target := match.Players[targetID]
 	base := math.Atan2(target.Y-bossY, target.X-bossX)
-	start := base - cardOpponentPatternSpread*0.5
+	start := base - geometry.Spread*0.5
 	step := 0.0
-	if cardOpponentPatternCount > 1 {
-		step = cardOpponentPatternSpread / float64(cardOpponentPatternCount-1)
+	if geometry.Count > 1 {
+		step = geometry.Spread / float64(geometry.Count-1)
 	}
 	spawned := 0
-	for i := 0; i < cardOpponentPatternCount; i++ {
+	for i := 0; i < geometry.Count; i++ {
 		before := len(match.Bullets)
-		addBulletLocked(match, tick, patternID, "nway", start+step*float64(i), cardOpponentPatternSpeed, cardOpponentPatternRadius, 1, cardOpponentPatternColor)
+		addBulletLocked(match, tick, patternID, "nway", start+step*float64(i), geometry.Speed, geometry.Radius, 1, geometry.Color)
 		if len(match.Bullets) > before {
 			spawned++
 		}

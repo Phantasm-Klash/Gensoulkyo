@@ -435,6 +435,11 @@ type serverCardActivation struct {
 	PurgeCount    int
 }
 
+// serverCardCatalog is the authoritative card pool. It holds exactly
+// deckSize (20) entries on purpose: the deck limit is the pool limit, so a
+// 21st card requires raising deckSize first — a product decision, not an
+// implementation detail. New entries are appended; existing ones are never
+// reordered or re-tuned (the C++ mirror and the client key off the ids).
 var serverCardCatalog = map[string]serverCardDefinition{
 	"focus_lens":     {CardID: "focus_lens", EffectKind: "self", Cost: 2, CooldownTicks: 240, DurationTicks: 360, Damage: 12, ScoreBonus: 18},
 	"hitbox_charm":   {CardID: "hitbox_charm", EffectKind: "self", Cost: 3, CooldownTicks: 420, DurationTicks: 300, Damage: 14, ScoreBonus: 20},
@@ -452,6 +457,10 @@ var serverCardCatalog = map[string]serverCardDefinition{
 	"purge_bell":     {CardID: "purge_bell", EffectKind: "bullet_purge", Cost: 3, CooldownTicks: 480, DurationTicks: 1, Damage: 0, ScoreBonus: 22, PurgeRadius: 120, PurgeCount: 24},
 	"aegis_ward":     {CardID: "aegis_ward", EffectKind: "invulnerable", Cost: 5, CooldownTicks: 720, DurationTicks: 180, Damage: 0, ScoreBonus: 20},
 	"finale_arc":     {CardID: "finale_arc", EffectKind: "finisher", Cost: 6, CooldownTicks: 900, DurationTicks: 1, Damage: 60, ScoreBonus: 80},
+	"frost_arc":      {CardID: "frost_arc", EffectKind: "bullet_purge", Cost: 2, CooldownTicks: 360, DurationTicks: 1, Damage: 0, ScoreBonus: 18, PurgeRadius: 100, PurgeCount: 12},
+	"ember_lance":    {CardID: "ember_lance", EffectKind: "opponent_pattern", Cost: 3, CooldownTicks: 300, DurationTicks: 240, Damage: 20, ScoreBonus: 24, PatternID: "ember_lance"},
+	"iron_veil":      {CardID: "iron_veil", EffectKind: "invulnerable", Cost: 4, CooldownTicks: 480, DurationTicks: 120, Damage: 0, ScoreBonus: 16},
+	"thunder_fall":   {CardID: "thunder_fall", EffectKind: "finisher", Cost: 4, CooldownTicks: 420, DurationTicks: 1, Damage: 30, ScoreBonus: 40},
 }
 
 var serverCardRarities = map[string]string{
@@ -471,6 +480,10 @@ var serverCardRarities = map[string]string{
 	"purge_bell":     "uncommon",
 	"aegis_ward":     "rare",
 	"finale_arc":     "epic",
+	"frost_arc":      "uncommon",
+	"ember_lance":    "uncommon",
+	"iron_veil":      "uncommon",
+	"thunder_fall":   "epic",
 }
 
 var serverStrongInterferenceCards = map[string]struct{}{
