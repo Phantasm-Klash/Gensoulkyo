@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -958,14 +959,15 @@ func resultHashOf(raw rawResult) string {
 }
 
 // devSignature mirrors the scaffold signature shape required by core
-// validation: 64 hex bytes derived deterministically from the result and the
-// battle server key id. It is intentionally not a real MAC; production builds
-// must replace it with a hardware-backed ED25519 signature.
+// validation: exactly 128 hex characters (64 bytes), derived deterministically
+// from the result and the battle server key id. `len(signature_hex) != 128` is
+// rejected with "battle result signature shape is invalid" before settlement,
+// so the digest must be a 64-byte one. It is intentionally not a real MAC;
+// production builds must replace it with a hardware-backed ED25519 signature.
 func devSignature(result map[string]any, keyID string) string {
 	canonical, _ := json.Marshal(result)
-	sum := sha256.Sum256([]byte(string(canonical) + ":" + keyID + ":result-signature"))
-	sig := sha256.Sum256(sum[:])
-	return hex.EncodeToString(sig[:])
+	sum := sha512.Sum512([]byte(string(canonical) + ":" + keyID + ":result-signature"))
+	return hex.EncodeToString(sum[:])
 }
 
 func versionStamp() map[string]any {
