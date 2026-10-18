@@ -574,18 +574,18 @@ func (a *agent) isRunning(matchID string) bool {
 // process management
 // ---------------------------------------------------------------------------
 
-func (a *agent) spawn(ctx context.Context, item assignment) error {
-	port, err := a.allocatePort(item)
-	if err != nil {
-		return err
-	}
-	endpoint := a.cfg.endpoint(port)
-
+// spawnArgs is the battle binary's command line. Kept separate from spawn so a
+// test can assert the settlement contract without launching a process.
+func (a *agent) spawnArgs(item assignment, port int) []string {
 	args := []string{
 		"--port", strconv.Itoa(port),
 		"--match-id", item.MatchID,
 		"--seed", seedFromHex(item.ServerSeedHex),
 		"--players", strings.Join(item.PlayerIDs, ","),
+		// 结算权只留一条路：agent 的签名 RPC battle.result.submit。对局服
+		// 不再 POST /internal/battle/result，否则两条路径竞争（先到者写
+		// replay_ 前缀 hash，后到者 409），结算结果取决于时序。
+		"--no-result-submit",
 	}
 	ruleset := a.cfg.RulesetOverride
 	if ruleset == "" {
@@ -628,6 +628,17 @@ func (a *agent) spawn(ctx context.Context, item assignment) error {
 	if callbackSecret != "" {
 		args = append(args, "--callback-secret", callbackSecret)
 	}
+	return args
+}
+
+func (a *agent) spawn(ctx context.Context, item assignment) error {
+	port, err := a.allocatePort(item)
+	if err != nil {
+		return err
+	}
+	endpoint := a.cfg.endpoint(port)
+
+	args := a.spawnArgs(item, port)
 
 	cmd := exec.Command(a.cfg.BattleBinary, args...)
 	stdout, err := cmd.StdoutPipe()
@@ -903,6 +914,14 @@ func (a *agent) submitResult(ctx context.Context, item assignment, line battleRe
 		raw.MatchID = item.MatchID
 	}
 
+	body := signedResultPayload(item, raw, a.cfg.BattleServerID, time.Now().UTC().UnixMilli())
+	return a.callRPCDecoded(ctx, "battle.result.submit", body, nil)
+}
+
+// signedResultPayload is the exact JSON envelope the lobby decodes into
+// core.BattleResultSubmitRequest. Kept separate so a test can feed the real
+// payload through the lobby's validation without an HTTP round trip.
+func signedResultPayload(item assignment, raw rawResult, keyID string, settledAtMS int64) map[string]any {
 	playerIDs := make([]string, 0, len(raw.Players))
 	for _, p := range raw.Players {
 		playerIDs = append(playerIDs, p.PlayerID)
@@ -919,34 +938,33 @@ func (a *agent) submitResult(ctx context.Context, item assignment, line battleRe
 		"players":          raw.Players,
 	})
 
-	resultHash := resultHashOf(raw)
-	replayID := "replay-" + raw.MatchID
-	settledAtMS := time.Now().UTC().UnixMilli()
-
 	result := map[string]any{
 		"version":          versionStamp(),
 		"match_id":         raw.MatchID,
 		"mode_id":          firstNonEmpty(raw.ModeID, item.ModeID),
-		"result_hash":      resultHash,
-		"replay_id":        replayID,
+		"result_hash":      resultHashOf(raw),
+		"replay_id":        "replay-" + raw.MatchID,
 		"player_ids":       playerIDs,
 		"mode_result_json": string(modalJSON),
 		"settled_at_ms":    settledAtMS,
 	}
 
-	signature := devSignature(result, a.cfg.BattleServerID)
+	return signedResultBody(result, keyID, devSignature(result, keyID))
+}
 
-	body := map[string]any{
+// signedResultBody is the envelope; signature is computed by the caller so the
+// signed bytes stay exactly the result map that is sent on the wire.
+func signedResultBody(result map[string]any, keyID string, signature string) map[string]any {
+	return map[string]any{
 		"signed_result": map[string]any{
 			"ok":                   true,
 			"result":               result,
 			"signature_alg":        "ED25519",
-			"key_id":               a.cfg.BattleServerID,
+			"key_id":               keyID,
 			"signature_hex":        signature,
 			"server_authoritative": true,
 		},
 	}
-	return a.callRPCDecoded(ctx, "battle.result.submit", body, nil)
 }
 
 // resultHashOf mirrors the lobby's `looksLikeSha256Ref` contract: the digest
