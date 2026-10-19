@@ -187,6 +187,22 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.OpenChest(request.SessionID, req) })
+	case "gacha.pools":
+		return handler.call(func() (any, error) { return handler.service.GachaPools(request.SessionID) })
+	case "gacha.pull":
+		var req core.GachaPullRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.GachaPull(request.SessionID, req) })
+	case "gacha.roster":
+		return handler.call(func() (any, error) { return handler.service.GachaRoster(request.SessionID) })
+	case "gacha.faith.exchange":
+		var req core.FaithExchangeRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.ExchangeFaith(request.SessionID, req) })
 	case "shop.catalog", "shop.get":
 		return handler.call(func() (any, error) { return handler.service.ShopCatalog(request.SessionID) })
 	case "shop.purchase":

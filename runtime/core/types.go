@@ -677,6 +677,7 @@ type BootstrapSnapshot struct {
 	Inventory     InventorySnapshot         `json:"inventory"`
 	Decks         DeckListResponse          `json:"decks"`
 	Chests        ChestSnapshot             `json:"chests"`
+	Characters    CharacterRosterSnapshot   `json:"characters"`
 	Tasks         map[string]TaskState      `json:"tasks"`
 	Events        map[string]EventState     `json:"events"`
 	Leaderboards  map[string]LeaderboardRow `json:"leaderboards"`

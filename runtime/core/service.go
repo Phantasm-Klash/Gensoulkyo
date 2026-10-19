@@ -240,6 +240,12 @@ type userState struct {
 	ShopPurchased      map[string]int
 	ShopInventory      map[string]int
 	Records            *PlayerRecords
+	// Gacha (T10): unlocked player shots, per-pool pity counters, the
+	// opening audit trail and the last pull results. See gacha.go.
+	Characters       map[string]CharacterOwnership
+	GachaPity        map[string]ChestPityState
+	GachaOpenings    []GachaOpeningRecord
+	GachaLastResults []GachaPullResult
 }
 
 type queueTicket struct {
@@ -840,6 +846,7 @@ func (s *Service) LoginAnonymous(req AnonymousLoginRequest) (*AuthSession, error
 		ShopPurchased:      map[string]int{},
 		ShopInventory:      map[string]int{},
 	}
+	initGachaStateLocked(user, now)
 	user.Certification.UserID = user.UserID
 	defaultDeck := defaultDeckRecord(now)
 	user.Decks[defaultDeck.DeckID] = defaultDeck
@@ -913,6 +920,7 @@ func (s *Service) loginExternal(req ExternalSessionRequest) (*AuthSession, []rev
 			ShopPurchased:      map[string]int{},
 			ShopInventory:      map[string]int{},
 		}
+		initGachaStateLocked(user, now)
 		user.Certification.UserID = user.UserID
 		defaultDeck := defaultDeckRecord(now)
 		user.Decks[defaultDeck.DeckID] = defaultDeck
@@ -950,6 +958,7 @@ func (s *Service) Bootstrap(sessionToken string) (*BootstrapSnapshot, error) {
 		Inventory:     s.inventorySnapshotLocked(user),
 		Decks:         s.deckListLocked(user),
 		Chests:        s.chestSnapshotLocked(user),
+		Characters:    s.characterRosterSnapshotLocked(user),
 		Tasks:         copyTasks(user.Tasks),
 		Events:        copyEvents(user.Events),
 		Leaderboards:  copyLeaderboards(user.Leaderboards),
@@ -1234,6 +1243,9 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 	if err != nil {
 		return nil, err
 	}
+	if err := validateLoadoutOwnershipLocked(user, loadout, s.clock()); err != nil {
+		return nil, err
+	}
 	if err := s.validateModeEntryLocked(user, modeID); err != nil {
 		return nil, err
 	}
@@ -1287,6 +1299,9 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	}
 	loadout, err := validateLoadout(modeID, req.ModeParams, user.Certification)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateLoadoutOwnershipLocked(user, loadout, s.clock()); err != nil {
 		return nil, err
 	}
 	// boss 选择只能由房主在建房时设定；非法值 invalid_request（guest 无权设，
@@ -1392,6 +1407,9 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 	}
 	loadout, err := validateLoadout(room.ModeID, req.ModeParams, user.Certification)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateLoadoutOwnershipLocked(user, loadout, s.clock()); err != nil {
 		return nil, err
 	}
 	if !hasLoadoutStageParam(req.ModeParams) {
@@ -7809,6 +7827,10 @@ func contractClientOperations() []string {
 		"checkin.get",
 		"checkin.claim",
 		"records.get",
+		"gacha.pools",
+		"gacha.pull",
+		"gacha.roster",
+		"gacha.faith.exchange",
 	}
 }
 
@@ -7972,6 +7994,10 @@ func clientOperationRequestFields(operation string) []string {
 		return []string{"deck_id", "name", "format", "card_ids", "active", "updated_at"}
 	case "chests.open":
 		return []string{"pool_id", "count"}
+	case "gacha.pull":
+		return []string{"pool_id", "count"}
+	case "gacha.faith.exchange":
+		return []string{"item_id"}
 	case "shop.get", "shop.catalog":
 		return []string{}
 	case "shop.purchase":
@@ -8007,7 +8033,7 @@ func clientOperationProjectionFields(operation string) []string {
 	common := []string{"ok", "server_authoritative"}
 	switch operation {
 	case "bootstrap":
-		return append(common, "user_id", "session_token", "server_version", "ruleset_version", "modes", "inventory", "decks", "chests", "certification", "world_boss")
+		return append(common, "user_id", "session_token", "server_version", "ruleset_version", "modes", "inventory", "decks", "chests", "characters", "certification", "world_boss")
 	case "inventory.get":
 		return append(common, "user_id", "ruleset_version", "items", "server_time")
 	case "cards.upgrade":
@@ -8020,6 +8046,14 @@ func clientOperationProjectionFields(operation string) []string {
 		return append(common, "user_id", "ruleset_version", "wallet", "owned_chests", "pools", "pity_counters", "opening_log", "last_results", "server_time")
 	case "chests.open":
 		return append(common, "user_id", "pool_id", "count", "wallet", "owned_chests", "inventory", "pity_counters", "results", "audit", "server_time")
+	case "gacha.pools":
+		return append(common, "pools", "wallet", "faith", "pity_counters", "server_time")
+	case "gacha.pull":
+		return append(common, "pool_id", "count", "results", "wallet", "faith", "inventory", "characters", "pity_counters", "audit", "server_time")
+	case "gacha.roster":
+		return append(common, "user_id", "shots", "bombs", "faith", "pity_counters", "locked_shot_ids", "exchange_cost_faith", "server_time")
+	case "gacha.faith.exchange":
+		return append(common, "item_id", "faith", "faith_spent", "characters", "wallet", "server_time")
 	case "shop.get", "shop.catalog":
 		return append(common, "products", "wallet", "season", "server_time")
 	case "shop.purchase":
@@ -8114,7 +8148,7 @@ func clientOperationProjectionFields(operation string) []string {
 
 func clientOperationAuthority(operation string) string {
 	switch operation {
-	case "shop.get", "shop.catalog", "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "records.get", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
+	case "shop.get", "shop.catalog", "business.event", "business.event.settlement", "business.contract", "rooms.list", "rooms.get", "rooms.rules", "matchmaking.ticket", "battle.servers", "battle.allocation", "battle.ticket", "replay.get", "records.get", "gacha.pools", "gacha.roster", "business.envelope.audit.status", "battle.audit.status", "lobby.audit.status":
 		return clientRequestAuthorityLookupOnly
 	default:
 		return "intent_only"

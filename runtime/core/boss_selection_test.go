@@ -235,6 +235,7 @@ func TestBattleTicketCoversBossAndLoadoutBySignature(t *testing.T) {
 	service := NewService(Config{})
 	host := mustLogin(t, service, "Ticket Boss Host")
 	guest := mustLogin(t, service, "Ticket Boss Guest")
+	grantShotForTest(t, service, host.SessionToken, "ReimuB1")
 
 	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
 		ModeID:       "mvp_boss_race",
@@ -304,6 +305,8 @@ func TestBattleAgentAssignmentCarriesBossAndLoadouts(t *testing.T) {
 	service := NewService(Config{})
 	host := mustLogin(t, service, "Agent Boss Host")
 	guest := mustLogin(t, service, "Agent Boss Guest")
+	grantShotForTest(t, service, host.SessionToken, "SakuyaA1")
+	grantShotForTest(t, service, guest.SessionToken, "YoumuA1")
 
 	created, err := service.CreateRoom(host.SessionToken, CreateRoomRequest{
 		ModeID:       "mvp_boss_race",

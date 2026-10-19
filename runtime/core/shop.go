@@ -143,6 +143,7 @@ func defaultWallet() map[string]int {
 		"gems":       300,
 		"card_dust":  0,
 		"chest_keys": 1,
+		"faith":      0,
 	}
 }
 

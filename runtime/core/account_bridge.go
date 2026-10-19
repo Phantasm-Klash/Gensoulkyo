@@ -200,6 +200,7 @@ func newUserState(userID, displayName, deviceID string, now time.Time) *userStat
 		ShopPurchased:      map[string]int{},
 		ShopInventory:      map[string]int{},
 	}
+	initGachaStateLocked(user, now)
 	user.Certification.UserID = user.UserID
 	defaultDeck := defaultDeckRecord(now)
 	user.Decks[defaultDeck.DeckID] = defaultDeck

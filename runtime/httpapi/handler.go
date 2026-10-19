@@ -175,6 +175,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.openChest(w, r)
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "gacha" && segments[2] == "pools" && r.Method == http.MethodGet {
+		h.gachaPools(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "gacha" && segments[2] == "pull" && r.Method == http.MethodPost {
+		h.gachaPull(w, r)
+		return
+	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "gacha" && segments[2] == "roster" && r.Method == http.MethodGet {
+		h.gachaRoster(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "gacha" && segments[2] == "faith" && segments[3] == "exchange" && r.Method == http.MethodPost {
+		h.gachaFaithExchange(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "shop" && segments[2] == "catalog" && r.Method == http.MethodGet {
 		h.shopCatalog(w, r)
 		return
@@ -502,6 +518,50 @@ func (h *Handler) openChest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.service.OpenChest(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) gachaPools(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.GachaPools(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) gachaPull(w http.ResponseWriter, r *http.Request) {
+	var req core.GachaPullRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.GachaPull(sessionToken(r), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) gachaRoster(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.GachaRoster(sessionToken(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) gachaFaithExchange(w http.ResponseWriter, r *http.Request) {
+	var req core.FaithExchangeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.ExchangeFaith(sessionToken(r), req)
 	if err != nil {
 		writeError(w, err)
 		return
