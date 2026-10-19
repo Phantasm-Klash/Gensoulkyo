@@ -279,8 +279,16 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(request.SessionID, matchID) })
+	case "match.mode_action", "matches.mode_action":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.SubmitModeAction(request.SessionID, matchID, body) })
 	case "match.disconnect", "matches.disconnect":
 		matchID := fieldString(body, "match_id", "matchId")
+		// T10 rule 3: an explicit abandon settles the match at once with no
+		// score; anything else is a passive drop that stays reconnectable.
+		if strings.EqualFold(strings.TrimSpace(fieldString(body, "intent")), "abandon") {
+			return handler.call(func() (any, error) { return handler.service.AbandonMatch(request.SessionID, matchID) })
+		}
 		return handler.call(func() (any, error) { return handler.service.DisconnectMatch(request.SessionID, matchID) })
 	case "match.reconnect", "matches.reconnect":
 		matchID := fieldString(body, "match_id", "matchId")
@@ -438,8 +446,14 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 	case "match.ready", "matches.ready":
 		matchID := fieldString(body, "match_id", "matchId")
 		return handler.call(func() (any, error) { return handler.service.ReadyMatch(message.SessionID, matchID) })
+	case "match.mode_action", "matches.mode_action":
+		matchID := fieldString(body, "match_id", "matchId")
+		return handler.call(func() (any, error) { return handler.service.SubmitModeAction(message.SessionID, matchID, body) })
 	case "match.disconnect", "matches.disconnect":
 		matchID := fieldString(body, "match_id", "matchId")
+		if strings.EqualFold(strings.TrimSpace(fieldString(body, "intent")), "abandon") {
+			return handler.call(func() (any, error) { return handler.service.AbandonMatch(message.SessionID, matchID) })
+		}
 		return handler.call(func() (any, error) { return handler.service.DisconnectMatch(message.SessionID, matchID) })
 	case "match.reconnect", "matches.reconnect":
 		matchID := fieldString(body, "match_id", "matchId")

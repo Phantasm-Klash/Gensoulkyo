@@ -7812,6 +7812,7 @@ func contractClientOperations() []string {
 		"business.event.settlement",
 		"business.contract",
 		"match.ready",
+		"match.mode_action",
 		"match.disconnect",
 		"match.reconnect",
 		"match.rematch",
@@ -7865,6 +7866,7 @@ func contractClientWSSOperations() []string {
 		"business.event.settlement",
 		"business.contract",
 		"match.ready",
+		"match.mode_action",
 		"match.disconnect",
 		"match.reconnect",
 		"match.rematch",
@@ -8020,6 +8022,8 @@ func clientOperationRequestFields(operation string) []string {
 		return businessNotificationClientRequestFields("settlement")
 	case "match.ready", "match.disconnect", "match.reconnect", "match.rematch", "battle.allocation", "battle.ticket":
 		return []string{"match_id"}
+	case "match.mode_action":
+		return []string{"match_id", "mode_id", "action_type", "payload"}
 	case "activity.claim":
 		return []string{"claim_kind", "claim_id"}
 	case "replay.get":
@@ -8062,6 +8066,8 @@ func clientOperationProjectionFields(operation string) []string {
 		fields := append(common, "user_id", "presence_status", "session_status", "ticket_id", "queue_status", "room_code", "room_status", "match_id", "match_status", "battle_allocation", "battle_ticket", "server_time")
 		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)
 		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("battle_ticket")...)
+	case "match.mode_action":
+		return append(common, "match_id", "mode_id", "user_id", "action_id", "action_type", "accepted", "reason", "status", "payload", "mode_state", "event", "server_time")
 	case "matchmaking.join", "matchmaking.ticket", "matchmaking.cancel", "rooms.create", "rooms.join", "rooms.leave":
 		fields := append(common, "queue_status", "ticket_id", "match_id", "mode_id", "loadout", "room_code", "room_status", "required_players", "current_players", "match_start", "battle_allocation", "battle_ticket")
 		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)
