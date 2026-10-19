@@ -26,7 +26,7 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 	if !catalog.OK || catalog.Status != 200 {
 		t.Fatalf("shop catalog RPC failed: %+v", catalog)
 	}
-	if payload, ok := catalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 6 {
+	if payload, ok := catalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 7 {
 		t.Fatalf("shop catalog RPC payload invalid: %+v", catalog.Payload)
 	}
 
@@ -39,7 +39,7 @@ func TestNakamaShopRPCDispatch(t *testing.T) {
 	if !legacyCatalog.OK || legacyCatalog.Status != 200 {
 		t.Fatalf("legacy shop.get RPC failed: %+v", legacyCatalog)
 	}
-	if payload, ok := legacyCatalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 6 {
+	if payload, ok := legacyCatalog.Payload.(*core.ShopCatalogResponse); !ok || len(payload.Products) != 7 {
 		t.Fatalf("legacy shop.get RPC payload invalid: %+v", legacyCatalog.Payload)
 	}
 

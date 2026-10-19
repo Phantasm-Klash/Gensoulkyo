@@ -20,7 +20,7 @@ func TestHTTPShopCatalogAndPurchaseRoutes(t *testing.T) {
 		"display_name": "Shop HTTP",
 	})
 	catalog := getJSON[core.ShopCatalogResponse](t, server.URL+"/v1/shop/catalog", alice.SessionToken)
-	if len(catalog.Products) != 6 || catalog.Wallet["gold"] != 2000 {
+	if len(catalog.Products) != 7 || catalog.Wallet["gold"] != 2000 {
 		t.Fatalf("shop catalog route invalid: %+v", catalog)
 	}
 	missingEnvelope := postRaw(t, server.URL+"/v1/shop/purchase", alice.SessionToken, map[string]any{

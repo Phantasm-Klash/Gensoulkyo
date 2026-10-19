@@ -129,6 +129,10 @@ var serverShopCatalog = []ServerShopProduct{
 	{ProductID: "card.density_surge.single", Kind: "card", CostKind: "gold", CostAmount: 1200, Payload: "density_surge", Quantity: 1, Rarity: "rare", Season: shopCatalogSeason, Purchasable: true},
 	{ProductID: "card.last_arc.single", Kind: "card", CostKind: "gems", CostAmount: 300, Payload: "last_arc", Quantity: 1, Rarity: "epic", Season: shopCatalogSeason, Purchasable: true},
 	{ProductID: "chest.standard.pull", Kind: "chest", CostKind: "gold", CostAmount: 800, Payload: defaultChestPoolID, Quantity: 1, Season: shopCatalogSeason, Purchasable: true},
+	// Gacha currency: gems have no other source, so the totems are priced
+	// through a gold bundle (1 gold = 1 gem) — the 雀魂 辉玉 model adapted to
+	// an economy whose only earnable currency is gold.
+	{ProductID: "gems.pack.600", Kind: "currency_bundle", CostKind: "gold", CostAmount: 600, Payload: "gems", Quantity: 600, Season: shopCatalogSeason, Purchasable: true},
 }
 
 type shopPurchaseRecord struct {

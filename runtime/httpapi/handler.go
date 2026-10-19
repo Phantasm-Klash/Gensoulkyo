@@ -187,7 +187,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.gachaRoster(w, r)
 		return
 	}
-	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "gacha" && segments[2] == "faith" && segments[3] == "exchange" && r.Method == http.MethodPost {
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "gacha" && segments[2] == "faith-exchange" && r.Method == http.MethodPost {
 		h.gachaFaithExchange(w, r)
 		return
 	}
@@ -539,6 +539,10 @@ func (h *Handler) gachaPull(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if status, code, message := h.requireBusinessEnvelopeHeaders(r); code != "" {
+		writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
+		return
+	}
 	resp, err := h.service.GachaPull(sessionToken(r), req)
 	if err != nil {
 		writeError(w, err)
@@ -559,6 +563,10 @@ func (h *Handler) gachaRoster(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) gachaFaithExchange(w http.ResponseWriter, r *http.Request) {
 	var req core.FaithExchangeRequest
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if status, code, message := h.requireBusinessEnvelopeHeaders(r); code != "" {
+		writeJSON(w, status, map[string]any{"ok": false, "error_code": code, "message": message})
 		return
 	}
 	resp, err := h.service.ExchangeFaith(sessionToken(r), req)
@@ -1520,6 +1528,12 @@ func routeUsesBusinessEnvelope(method string, segments []string) bool {
 		return false
 	}
 	if method == http.MethodPost && len(segments) == 3 && segments[1] == "shop" && segments[2] == "purchase" {
+		return false
+	}
+	// The two gacha mutations run the required-envelope check inside their
+	// handlers (like shop.purchase), so the optional global guard must skip
+	// them or the first validation would consume the seq as a replay.
+	if method == http.MethodPost && len(segments) == 3 && segments[1] == "gacha" && (segments[2] == "pull" || segments[2] == "faith-exchange") {
 		return false
 	}
 	return true
