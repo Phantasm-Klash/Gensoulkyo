@@ -83,8 +83,13 @@ func TestSpawnArgsDisableResultSubmit(t *testing.T) {
 }
 
 // 把 agent 真实产出的 signed_result 信封喂进大厅的 SubmitBattleResult：
-// 只要 shape / 版本 / hash 任何一项不合格，就会在 "match not found" 之前
-// 被拒。未知 match 是预期结果——它证明签名与版本已经通过大厅的校验门。
+// 只要 shape / 版本 / hash / 禁止字段任何一项不合格，就会在 "match not found"
+// 之前被拒。未知 match 是预期结果——它证明签名与版本已经通过大厅的校验门。
+//
+// players 必须带 damage_dealt：真实 RESULT 负载带着它，而大厅
+// firstForbiddenBattleResultProjectionField 曾因 mode projection 含该字段把
+// 整个提交 403 拒掉（对局不结算、客户端不出结算画面）。这条用例就是那次
+// 回归的复现：projection 不过滤 damage_dealt 就会在这里 forbidden_field 失败。
 func TestAgentSignedPayloadPassesLobbyShapeGate(t *testing.T) {
 	raw := rawResult{
 		MatchID:        "match_probe",
@@ -94,6 +99,14 @@ func TestAgentSignedPayloadPassesLobbyShapeGate(t *testing.T) {
 		WinnerPlayerID: "p-a",
 		WinnerTick:     10,
 		StateHash:      "sha256:" + strings.Repeat("a", 64),
+		Players: []struct {
+			PlayerID      string `json:"player_id"`
+			DamageDealt   int64  `json:"damage_dealt"`
+			BossCurrentHP int64  `json:"boss_current_hp"`
+		}{
+			{PlayerID: "p-a", DamageDealt: 300, BossCurrentHP: 0},
+			{PlayerID: "p-b", DamageDealt: 290, BossCurrentHP: 10},
+		},
 	}
 	body := signedResultPayload(
 		assignment{MatchID: "match_probe", ModeID: "mvp_boss_race", PlayerIDs: []string{"p-a", "p-b"}},
@@ -116,7 +129,77 @@ func TestAgentSignedPayloadPassesLobbyShapeGate(t *testing.T) {
 		t.Fatal("expected match-not-found for an unknown match")
 	} else if strings.Contains(err.Error(), "signature shape is invalid") {
 		t.Fatalf("lobby rejected the agent signature shape: %v", err)
+	} else if strings.Contains(err.Error(), "forbidden_field") {
+		t.Fatalf("mode projection carries a forbidden field: %v", err)
 	} else if !strings.Contains(err.Error(), "match not found") {
 		t.Fatalf("agent payload did not clear the lobby gates: %v", err)
+	}
+}
+
+// mode projection 只留识别字段：damage_dealt 是大厅的结算权威字段，出现在
+// mode_result_json 里会被 403 forbidden_field 拒。过滤后 winner/seed/state_hash
+// 与每玩家的 player_id/boss_current_hp 必须原样保留，result_hash 也不能变
+// （它只覆盖 match/mode/winner/tick/state_hash，与 projection 无关）。
+func TestModeProjectionDropsForbiddenDamageField(t *testing.T) {
+	raw := rawResult{
+		MatchID:        "match_probe",
+		ModeID:         "mvp_boss_race",
+		RulesetVersion: "ruleset-local-s0",
+		MatchSeed:      42,
+		WinnerPlayerID: "p-a",
+		WinnerTick:     10,
+		StateHash:      "sha256:" + strings.Repeat("a", 64),
+		Players: []struct {
+			PlayerID      string `json:"player_id"`
+			DamageDealt   int64  `json:"damage_dealt"`
+			BossCurrentHP int64  `json:"boss_current_hp"`
+		}{
+			{PlayerID: "p-a", DamageDealt: 300, BossCurrentHP: 0},
+			{PlayerID: "p-b", DamageDealt: 290, BossCurrentHP: 10},
+		},
+	}
+	body := signedResultPayload(
+		assignment{MatchID: "match_probe", ModeID: "mvp_boss_race", PlayerIDs: []string{"p-a", "p-b"}},
+		raw,
+		"bs-104-1",
+		time.Now().UTC().UnixMilli(),
+	)
+
+	result, ok := body["signed_result"].(map[string]any)["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("signed result envelope shape changed: %+v", body)
+	}
+	if got := result["result_hash"]; got != resultHashOf(raw) {
+		t.Fatalf("result_hash = %v, want %v (hash must stay independent of the projection)", got, resultHashOf(raw))
+	}
+
+	var projection struct {
+		WinnerPlayerID string `json:"winner_player_id"`
+		WinnerTick     int64  `json:"winner_tick"`
+		MatchSeed      int64  `json:"match_seed"`
+		StateHash      string `json:"state_hash"`
+		Players        []struct {
+			PlayerID      string `json:"player_id"`
+			BossCurrentHP int64  `json:"boss_current_hp"`
+			DamageDealt   *int64 `json:"damage_dealt"`
+		} `json:"players"`
+	}
+	if err := json.Unmarshal([]byte(result["mode_result_json"].(string)), &projection); err != nil {
+		t.Fatalf("decode mode projection: %v", err)
+	}
+	if projection.WinnerPlayerID != raw.WinnerPlayerID || projection.WinnerTick != raw.WinnerTick ||
+		projection.MatchSeed != raw.MatchSeed || projection.StateHash != raw.StateHash {
+		t.Fatalf("projection lost authoritative match fields: %+v", projection)
+	}
+	if len(projection.Players) != len(raw.Players) {
+		t.Fatalf("projection players = %d, want %d", len(projection.Players), len(raw.Players))
+	}
+	for index, player := range projection.Players {
+		if player.DamageDealt != nil {
+			t.Fatalf("projection player %d still carries damage_dealt=%d (lobby 403)", index, *player.DamageDealt)
+		}
+		if player.PlayerID != raw.Players[index].PlayerID || player.BossCurrentHP != raw.Players[index].BossCurrentHP {
+			t.Fatalf("projection player %d = %+v, want id %q boss_current_hp %d", index, player, raw.Players[index].PlayerID, raw.Players[index].BossCurrentHP)
+		}
 	}
 }

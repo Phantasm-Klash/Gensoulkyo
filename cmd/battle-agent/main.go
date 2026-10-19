@@ -918,6 +918,32 @@ func (a *agent) submitResult(ctx context.Context, item assignment, line battleRe
 	return a.callRPCDecoded(ctx, "battle.result.submit", body, nil)
 }
 
+// resultProjectionPlayer is one player entry of the mode projection sent as
+// mode_result_json. It deliberately omits damage_dealt: the lobby deep-scans
+// the projection against forbiddenClientFields (runtime/core/service.go) and
+// rejects the whole battle.result.submit with 403 forbidden_field when it
+// finds it, so a real match would never settle. Damage is a settlement
+// authority field the lobby computes itself; the projection only carries the
+// identifying fields. The raw RESULT payload (and with it the dem header and
+// result_hash input) keeps the damage values untouched.
+type resultProjectionPlayer struct {
+	PlayerID      string `json:"player_id"`
+	BossCurrentHP int64  `json:"boss_current_hp"`
+}
+
+// resultProjectionPlayers maps the binary's RESULT players into the projection
+// shape the lobby accepts.
+func resultProjectionPlayers(raw rawResult) []resultProjectionPlayer {
+	players := make([]resultProjectionPlayer, 0, len(raw.Players))
+	for _, p := range raw.Players {
+		players = append(players, resultProjectionPlayer{
+			PlayerID:      p.PlayerID,
+			BossCurrentHP: p.BossCurrentHP,
+		})
+	}
+	return players
+}
+
 // signedResultPayload is the exact JSON envelope the lobby decodes into
 // core.BattleResultSubmitRequest. Kept separate so a test can feed the real
 // payload through the lobby's validation without an HTTP round trip.
@@ -935,7 +961,7 @@ func signedResultPayload(item assignment, raw rawResult, keyID string, settledAt
 		"winner_tick":      raw.WinnerTick,
 		"match_seed":       raw.MatchSeed,
 		"state_hash":       raw.StateHash,
-		"players":          raw.Players,
+		"players":          resultProjectionPlayers(raw),
 	})
 
 	result := map[string]any{
