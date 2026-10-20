@@ -101,6 +101,7 @@ type config struct {
 	KillGrace          time.Duration
 	DefaultBossHP      int
 	DefaultMaxTicks    int
+	SnapshotEvery      int
 	TickRate           int
 	TickScale          string
 	HTTPTimeout        time.Duration
@@ -130,6 +131,7 @@ func parseConfig() config {
 	flag.DurationVar(&cfg.KillGrace, "kill-grace", 3*time.Second, "grace period between SIGTERM and SIGKILL")
 	flag.IntVar(&cfg.DefaultBossHP, "boss-hp", envIntOr("GENSOULKYO_BATTLE_BOSS_HP", 0), "boss max hp override (0 = binary default)")
 	flag.IntVar(&cfg.DefaultMaxTicks, "max-ticks", envIntOr("GENSOULKYO_BATTLE_MAX_TICKS", defaultMaxTicks), "tick cap (0 = unlimited)")
+	flag.IntVar(&cfg.SnapshotEvery, "snapshot-every", envIntOr("GENSOULKYO_BATTLE_SNAPSHOT_EVERY", 0), "broadcast a snapshot every N ticks (0 = binary default)")
 	flag.IntVar(&cfg.TickRate, "tick-rate", envIntOr("GENSOULKYO_BATTLE_TICK_RATE", 0), "server tick rate in Hz (60, 64, 128; 0 = binary default)")
 	flag.StringVar(&cfg.TickScale, "tick-scale", os.Getenv("GENSOULKYO_BATTLE_TICK_SCALE"), "test pacing: scales the wall-clock tick interval (1 = real time, 0 = unpaced)")
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 10*time.Second, "per-request HTTP timeout")
@@ -602,6 +604,9 @@ func (a *agent) spawnArgs(item assignment, port int) []string {
 	}
 	if a.cfg.DefaultMaxTicks > 0 {
 		args = append(args, "--max-ticks", strconv.Itoa(a.cfg.DefaultMaxTicks))
+	}
+	if a.cfg.SnapshotEvery > 0 {
+		args = append(args, "--snapshot-every", strconv.Itoa(a.cfg.SnapshotEvery))
 	}
 	if a.cfg.TickRate > 0 {
 		args = append(args, "--tick-rate", strconv.Itoa(a.cfg.TickRate))
