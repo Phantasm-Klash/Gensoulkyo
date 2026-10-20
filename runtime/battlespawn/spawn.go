@@ -69,8 +69,11 @@ const (
 
 // SpawnRequest describes a per-match battle server process.
 type SpawnRequest struct {
-	MatchID       string
-	Seed          uint64
+	MatchID string
+	Seed    uint64
+	// ModeID 传给对局服进程（--mode）：空 = 不传（对局服用默认 mvp_boss_race，
+	// 既有 race 路径逐字节不变）；coop_boss 时对局服切到合作模式模拟。
+	ModeID        string
 	PlayerIDs     []string
 	LobbyEndpoint string // host:port of the lobby HTTP server; empty disables the result POST
 	Ruleset       string
@@ -300,6 +303,9 @@ func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) (*Process, error)
 		"--seed", strconv.FormatUint(req.Seed, 10),
 		"--players", strings.Join(req.PlayerIDs, ","),
 		"--ruleset", ruleset,
+	}
+	if modeID := strings.TrimSpace(req.ModeID); modeID != "" {
+		args = append(args, "--mode", modeID)
 	}
 	lobby := strings.TrimSpace(req.LobbyEndpoint)
 	if lobby == "" {

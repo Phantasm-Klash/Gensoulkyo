@@ -667,7 +667,9 @@ func (s *Server) startMatch(roomCode string, matchID string) {
 				PlayerIDs:     playerIDs,
 				LobbyEndpoint: s.lobbyEndpoint,
 				Ruleset:       ruleset,
-				TTL:           s.matchTTL,
+				// 模式透传：coop_boss 的对局服进程要跑合作模拟（race 为默认，不传）。
+				ModeID: allocation.ModeID,
+				TTL:    s.matchTTL,
 			})
 			cancel()
 			if err != nil {
