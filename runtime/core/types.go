@@ -100,6 +100,13 @@ var ModeConfigs = map[string]ModeConfig{
 		ModeRulesetVersion: "mvp-boss-race-s0",
 		RewardTableID:      "mvp_boss_race_s0_rewards",
 	},
+	"coop_boss": {
+		ModeID:             "coop_boss",
+		MinPlayers:         2,
+		MaxPlayers:         4,
+		ModeRulesetVersion: "coop-boss-s0",
+		RewardTableID:      "coop_boss_s0_rewards",
+	},
 }
 
 type Clock func() time.Time

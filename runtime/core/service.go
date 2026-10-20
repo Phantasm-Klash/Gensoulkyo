@@ -262,6 +262,9 @@ type queueTicket struct {
 	RoomCode     string
 	RoomStatus   string
 	LastSeenAt   time.Time
+	// CoopPlayers: 房主在建房时选择的合作人数（coop_boss 专属，2 或 4）；
+	// 0 = 非 coop 房，按 mode.MinPlayers 成局。
+	CoopPlayers int
 }
 
 type roomState struct {
@@ -275,7 +278,10 @@ type roomState struct {
 	BossID     string
 	StageID    string
 	ModeParams map[string]any
-	Messages   []LobbyMessage
+	// CoopPlayers: 房主选择的合作人数（coop_boss 专属，2 或 4），JoinRoom 继承、
+	// guest 无权更改（JoinRoomRequest 不含该字段，语义同 BossID）。
+	CoopPlayers int
+	Messages    []LobbyMessage
 }
 
 type matchParticipantSpec struct {
@@ -1246,6 +1252,13 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 	if err := validateLoadoutOwnershipLocked(user, loadout, s.clock()); err != nil {
 		return nil, err
 	}
+	if err := validateCoopPlayers(modeID, req.ModeParams); err != nil {
+		return nil, err
+	}
+	coopPlayers := 0
+	if modeID == "coop_boss" {
+		coopPlayers = coopPlayersFromModeParams(req.ModeParams)
+	}
 	if err := s.validateModeEntryLocked(user, modeID); err != nil {
 		return nil, err
 	}
@@ -1260,18 +1273,90 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 		Loadout:      loadout,
 		CreatedAt:    s.clock(),
 		Status:       "queued",
+		CoopPlayers:  coopPlayers,
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	s.tickets[ticketID] = ticket
 	s.queues[queueKey] = append(s.queues[queueKey], ticketID)
 
-	if len(s.queues[queueKey]) >= mode.MinPlayers {
-		groupIDs := append([]string{}, s.queues[queueKey][:mode.MinPlayers]...)
-		s.queues[queueKey] = s.queues[queueKey][mode.MinPlayers:]
+	// coop_boss 队列：成局人数取队首票的房主选择（2/4）；其他模式 = MinPlayers。
+	queueRequired := mode.MinPlayers
+	if len(s.queues[queueKey]) > 0 {
+		if head := s.tickets[s.queues[queueKey][0]]; head != nil && head.CoopPlayers > 0 {
+			queueRequired = head.CoopPlayers
+		}
+	}
+	if len(s.queues[queueKey]) >= queueRequired {
+		groupIDs := append([]string{}, s.queues[queueKey][:queueRequired]...)
+		s.queues[queueKey] = s.queues[queueKey][queueRequired:]
 		match := s.createMatchLocked(mode, groupIDs)
 		return s.queueResponseLocked(ticket, mode, len(s.queues[queueKey]), match), nil
 	}
 	return s.queueResponseLocked(ticket, mode, len(s.queues[queueKey]), nil), nil
+}
+
+// coopPlayersFromModeParams 读取房主选择的合作人数（coop_boss 专属，
+// mode_params.coop_players = "2"|"4"）。缺失/不可解析 = 0（回落 MinPlayers）。
+func coopPlayersFromModeParams(params map[string]any) int {
+	if params == nil {
+		return 0
+	}
+	raw, ok := params["coop_players"]
+	if !ok {
+		return 0
+	}
+	switch v := raw.(type) {
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return 0
+		}
+		return n
+	case float64:
+		return int(v)
+	case int:
+		return v
+	}
+	return 0
+}
+
+// validateCoopPlayers 拒绝 coop_boss 房的非法人数（仅 2 或 4）；其他模式忽略。
+func validateCoopPlayers(modeID string, params map[string]any) error {
+	if modeID != "coop_boss" {
+		return nil
+	}
+	if _, ok := params["coop_players"]; !ok {
+		return nil // 缺省 = 2（mode.MinPlayers）
+	}
+	n := coopPlayersFromModeParams(params)
+	if n != 2 && n != 4 {
+		return newError(codeInvalidRequest, "coop_players must be 2 or 4, got %v", params["coop_players"])
+	}
+	return nil
+}
+
+// requiredPlayersForRoomLocked：coop_boss 房满「房主选择人数」成局，
+// 其他模式保持 mode.MinPlayers（现状逐字节不变）。
+func (s *Service) requiredPlayersForRoomLocked(mode ModeConfig, room *roomState) int {
+	if room != nil && room.CoopPlayers > 0 {
+		return room.CoopPlayers
+	}
+	return mode.MinPlayers
+}
+
+// requiredPlayersForTicketLocked：按票据所属房间解析成局人数；
+// 队列票（无房间）落在票面 CoopPlayers 上。
+func (s *Service) requiredPlayersForTicketLocked(mode ModeConfig, ticket *queueTicket) int {
+	if ticket == nil {
+		return mode.MinPlayers
+	}
+	if room := s.rooms[normalizeRoomCode(ticket.RoomCode)]; room != nil && room.CoopPlayers > 0 {
+		return room.CoopPlayers
+	}
+	if ticket.CoopPlayers > 0 {
+		return ticket.CoopPlayers
+	}
+	return mode.MinPlayers
 }
 
 func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*QueueResponse, error) {
@@ -1310,6 +1395,13 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	if err != nil {
 		return nil, err
 	}
+	if err := validateCoopPlayers(modeID, req.ModeParams); err != nil {
+		return nil, err
+	}
+	coopPlayers := 0
+	if modeID == "coop_boss" {
+		coopPlayers = coopPlayersFromModeParams(req.ModeParams)
+	}
 	if err := s.validateModeEntryLocked(user, modeID); err != nil {
 		return nil, err
 	}
@@ -1332,6 +1424,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		Status:       "queued",
 		RoomCode:     roomCode,
 		RoomStatus:   "waiting",
+		CoopPlayers:  coopPlayers,
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	room := &roomState{
@@ -1344,6 +1437,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		BossID:     bossID,
 		StageID:    loadout.StageID,
 		ModeParams: copyAnyMap(req.ModeParams),
+		CoopPlayers: coopPlayers,
 	}
 	s.tickets[ticketID] = ticket
 	s.rooms[roomCode] = room
@@ -1434,12 +1528,14 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		Status:       "queued",
 		RoomCode:     normalizedRoomCode,
 		RoomStatus:   "waiting",
+		CoopPlayers:  room.CoopPlayers,
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	s.tickets[ticketID] = ticket
 	room.TicketIDs = append(room.TicketIDs, ticketID)
-	if len(room.TicketIDs) >= mode.MinPlayers {
-		groupIDs := append([]string{}, room.TicketIDs[:mode.MinPlayers]...)
+	required := s.requiredPlayersForRoomLocked(mode, room)
+	if len(room.TicketIDs) >= required {
+		groupIDs := append([]string{}, room.TicketIDs[:required]...)
 		match := s.createMatchLocked(mode, groupIDs)
 		room.MatchID = match.MatchID
 		room.Status = "found"
@@ -3045,12 +3141,12 @@ func (s *Service) queueResponseLocked(ticket *queueTicket, mode ModeConfig, queu
 		BossID:          ticket.BossID,
 		RoomCode:        ticket.RoomCode,
 		RoomStatus:      ticket.RoomStatus,
-		RequiredPlayers: mode.MinPlayers,
+		RequiredPlayers: s.requiredPlayersForTicketLocked(mode, ticket),
 		CurrentPlayers:  queueDepth,
 	}
 	if ticket.MatchID != "" {
 		resp.MatchID = ticket.MatchID
-		resp.CurrentPlayers = mode.MinPlayers
+		resp.CurrentPlayers = s.requiredPlayersForTicketLocked(mode, ticket)
 	}
 	if match != nil {
 		alloc := s.ensureBattleAllocationLocked(match)
@@ -3089,7 +3185,7 @@ func (s *Service) heartbeatTicketResponseLocked(user *userState, ticket *queueTi
 		QueueStatus:         ticket.Status,
 		RoomCode:            ticket.RoomCode,
 		RoomStatus:          ticket.RoomStatus,
-		RequiredPlayers:     mode.MinPlayers,
+		RequiredPlayers:     s.requiredPlayersForTicketLocked(mode, ticket),
 		CurrentPlayers:      s.ticketDepthLocked(ticket),
 		ModeID:              ticket.ModeID,
 		Loadout:             ticket.Loadout,
@@ -3116,7 +3212,7 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 		roomCode = ticket.RoomCode
 		roomStatus = ticket.RoomStatus
 		if mode, ok := ModeConfigs[ticket.ModeID]; ok {
-			requiredPlayers = mode.MinPlayers
+			requiredPlayers = s.requiredPlayersForTicketLocked(mode, ticket)
 		}
 	}
 	oldestCursor, latestCursor := eventCursorBounds(match)
@@ -3237,11 +3333,11 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 		event.RoomCode = ticket.RoomCode
 		event.QueueStatus = ticket.Status
 		event.RoomStatus = ticket.RoomStatus
-		event.RequiredPlayers = mode.MinPlayers
+		event.RequiredPlayers = s.requiredPlayersForTicketLocked(mode, ticket)
 		event.CurrentPlayers = depth
 		if ticket.MatchID != "" {
 			event.MatchID = ticket.MatchID
-			event.CurrentPlayers = mode.MinPlayers
+			event.CurrentPlayers = s.requiredPlayersForTicketLocked(mode, ticket)
 		}
 		if kind != "settlement" {
 			event.Queue = cloneQueueResponse(s.queueResponseLocked(ticket, mode, depth, match))
@@ -3424,7 +3520,7 @@ func (s *Service) roomSnapshotLocked(room *roomState, now time.Time) RoomSnapsho
 		RoomStatus:          room.Status,
 		ModeID:              room.ModeID,
 		HostUserID:          room.HostUserID,
-		RequiredPlayers:     mode.MinPlayers,
+		RequiredPlayers:     s.requiredPlayersForRoomLocked(mode, room),
 		MaxPlayers:          mode.MaxPlayers,
 		CurrentPlayers:      len(participants),
 		MatchID:             room.MatchID,
