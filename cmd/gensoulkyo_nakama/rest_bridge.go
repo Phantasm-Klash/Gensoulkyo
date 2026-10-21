@@ -94,6 +94,9 @@ var restRoutes = []restRoute{
 	{http.MethodPost, "/v1/battle/servers/offline"},
 	{http.MethodPost, "/v1/battle/tickets/consume"},
 	{http.MethodPost, "/v1/battle/results/submit"},
+	// The battle server's own settled-result callback. Not under /v1 because the
+	// path is fixed inside the battle server binary; see internalBattleResult.
+	{http.MethodPost, "/internal/battle/result"},
 	{http.MethodPost, "/v1/battle/events"},
 	{http.MethodPost, "/v1/battle/replays/dem"},
 }

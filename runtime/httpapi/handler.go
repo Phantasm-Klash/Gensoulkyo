@@ -97,6 +97,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "server_version": core.ServerVersion})
 		return
 	}
+	// The settled-result callback a battle server posts. The path is baked into
+	// the battle server binary (result_path in match_lifecycle.hpp), so it is not
+	// negotiable -- the lobby has to answer it exactly here.
+	if len(segments) == 3 && segments[0] == "internal" && segments[1] == "battle" && segments[2] == "result" && r.Method == http.MethodPost {
+		h.internalBattleResult(w, r)
+		return
+	}
 	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "auth" && r.Method == http.MethodPost {
 		switch segments[2] {
 		case "anonymous":
@@ -1206,6 +1213,67 @@ func (h *Handler) submitBattleResult(w http.ResponseWriter, r *http.Request) {
 // submitBattleResult: no player session, no business envelope, service-callback
 // headers required, plus the HMAC callback signature (see
 // verifyBattleCallbackSignature).
+// internalBattleResult receives the settled result a battle server posts when a
+// match ends.
+//
+// The remote battle host points its processes at this lobby (GENSOULKYO_LOBBY_
+// ENDPOINT) and the binary posts to a fixed path, so this route is the only
+// place a settled match can arrive. Before it existed the callbacks hit a 404
+// and every settled match was lost -- the match stayed running in the lobby's
+// eyes and its .dem never landed.
+//
+// The body is a BattleResultCallback, a different shape from the signed
+// submission /v1/battle/results/submit accepts: that route takes a result the
+// client path produced and verifies a signed ticket, this one takes the match
+// the lobby itself spawned. Authentication is the same per-server HMAC, and an
+// unknown match is left to the business layer so its not_found semantics stay
+// intact instead of being turned into a signature error here.
+func (h *Handler) internalBattleResult(w http.ResponseWriter, r *http.Request) {
+	if rejectPlayerContextForServiceRoute(w, r) {
+		return
+	}
+	raw, ok := readServiceCallbackBody(w, r)
+	if !ok {
+		return
+	}
+	var callback core.BattleResultCallback
+	if !decodeServiceJSONRaw(w, raw, &callback) {
+		return
+	}
+	if matchID := strings.TrimSpace(callback.MatchID); matchID != "" {
+		if allocation, found := h.service.BattleAllocationForMatch(matchID); found {
+			code, verified := h.service.VerifyBattleCallback(
+				allocation.BattleServerID,
+				raw,
+				r.Header.Get("X-PhK-Battle-Timestamp"),
+				r.Header.Get("X-PhK-Battle-Nonce"),
+				r.Header.Get("X-PhK-Battle-Signature"),
+			)
+			if !verified {
+				writeJSON(w, http.StatusForbidden, map[string]any{
+					"ok":         false,
+					"error_code": code,
+					"message":    "battle result callback rejected: " + code,
+				})
+				return
+			}
+		}
+	}
+	resp, err := h.service.ApplyBattleResultCallback(callback)
+	if err != nil {
+		status := http.StatusBadRequest
+		switch core.ErrorCode(err) {
+		case "not_found":
+			status = http.StatusNotFound
+		case "match_state_invalid":
+			status = http.StatusConflict
+		}
+		writeJSON(w, status, map[string]any{"ok": false, "error_code": core.ErrorCode(err), "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) battleEvents(w http.ResponseWriter, r *http.Request) {
 	if rejectPlayerContextForServiceRoute(w, r) {
 		return
