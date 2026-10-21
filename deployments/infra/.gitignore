@@ -1,0 +1,5 @@
+# Real credentials and runtime data must never reach git.
+.env
+.env.*
+!.env.example
+data/

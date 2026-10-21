@@ -152,7 +152,9 @@ func (s *Service) SubmitBattleEvents(req BattleEventsSubmitRequest) (*BattleEven
 	for _, row := range req.Events {
 		if row.Type == "all_players_disconnected" {
 			if hasUnresolvedDropLocked(match) {
-				s.settleFleeLocked(match, "", true)
+				if err := s.settleFleeLocked(match, "", true); err != nil {
+					return nil, err
+				}
 			}
 			break
 		}

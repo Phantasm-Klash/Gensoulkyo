@@ -1963,7 +1963,10 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	}
 	defer db.Close()
 
-	handler, err := NewWithDatabase(db)
+	handler, err := NewWithDatabaseStores(db,
+		core.NewMemoryRoomStore(),
+		core.NewMemoryMatchStore(),
+		core.NewMemoryBattleTicketStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2562,7 +2565,10 @@ func TestNakamaEnvelopeAuditStatusReportsSQLSinkFailures(t *testing.T) {
 	}
 	defer db.Close()
 
-	handler, err := NewWithDatabase(db)
+	handler, err := NewWithDatabaseStores(db,
+		core.NewMemoryRoomStore(),
+		core.NewMemoryMatchStore(),
+		core.NewMemoryBattleTicketStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2610,7 +2616,10 @@ func TestNakamaHandlerDatabaseWiringReportsLifecycleAuditFailures(t *testing.T) 
 	}
 	defer db.Close()
 
-	handler, err := NewWithDatabase(db)
+	handler, err := NewWithDatabaseStores(db,
+		core.NewMemoryRoomStore(),
+		core.NewMemoryMatchStore(),
+		core.NewMemoryBattleTicketStore())
 	if err != nil {
 		t.Fatal(err)
 	}

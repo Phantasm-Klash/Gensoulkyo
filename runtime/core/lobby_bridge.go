@@ -57,7 +57,12 @@ func (s *Service) BindBattleServerAllocation(matchID string, battleServerID stri
 	allocation.AllocatedAt = s.clock()
 	s.battleAllocations[matchID] = allocation
 	match.BattleAllocation = allocation
-	s.invalidateBattleTicketsLocked(matchID)
+	if err := s.invalidateBattleTicketsLocked(matchID); err != nil {
+		return nil, err
+	}
+	if err := s.persistMatchLocked(match); err != nil {
+		return nil, err
+	}
 
 	copy := copyBattleAllocation(allocation)
 	return &copy, nil
@@ -97,6 +102,16 @@ func (s *Service) ReportBattleAgentEndpoint(req BattleAgentEndpointReport) (*Bat
 
 	allocation := s.battleAllocations[matchID]
 	if allocation == nil {
+		// The lobby may have restarted between spawning the agent and the
+		// report arriving. The durable row carries the allocation the builder
+		// handed out, so the report still lands instead of 404-ing into an
+		// unbound-port dead end.
+		if record, ok, err := s.loadMatchRecordLocked(matchID); err == nil && ok && record.BattleAllocation != nil {
+			allocation = record.BattleAllocation
+			s.battleAllocations[matchID] = allocation
+		}
+	}
+	if allocation == nil {
 		return nil, newError(codeNotFound, "battle allocation for match %q not found", matchID)
 	}
 	if battleServerID != "" && battleServerID != allocation.BattleServerID {
@@ -123,8 +138,22 @@ func (s *Service) ReportBattleAgentEndpoint(req BattleAgentEndpointReport) (*Bat
 		// Tickets embed the endpoint, so the ones already issued now point at
 		// the stale port. Drop them: consumed tickets stay recorded, so a
 		// re-issued ticket still replays as a duplicate instead of failing.
-		s.invalidateBattleTicketsLocked(matchID)
+		if err := s.invalidateBattleTicketsLocked(matchID); err != nil {
+			return nil, err
+		}
+		if err := s.persistMatchLocked(s.matches[matchID]); err != nil {
+			return nil, err
+		}
 		s.recordMatchAllocationAuditLocked(allocation, s.battleServers[allocation.BattleServerID])
+	}
+	// EndpointReported is the flag clients wait on before dialing, so it must
+	// reach durable storage even when the call reports the same endpoint again.
+	if match := s.matches[matchID]; match != nil {
+		if err := s.persistMatchLocked(match); err != nil {
+			return nil, err
+		}
+	} else if err := s.setMatchAllocationRecordLocked(matchID, allocation); err != nil {
+		return nil, err
 	}
 
 	return &BattleAgentEndpointReportResponse{
@@ -140,18 +169,36 @@ func (s *Service) ReportBattleAgentEndpoint(req BattleAgentEndpointReport) (*Bat
 	}, nil
 }
 
-func (s *Service) invalidateBattleTicketsLocked(matchID string) {
+// invalidateBattleTicketsLocked retires every ticket still issued for a match.
+// Tickets embed the endpoint, so the ones already handed out point at a port
+// that is about to change: they must not be usable afterwards. The durable rows
+// are what stop them — consumed tickets stay recorded as consumed, so a
+// duplicate consume still replays as a duplicate rather than failing.
+//
+// Rows are never deleted: the pair (revoke audit, revoked status) is what makes
+// a late callback explainable after the fact.
+func (s *Service) invalidateBattleTicketsLocked(matchID string) error {
 	revokedAt := s.clock()
-	for key, signed := range s.battleTickets {
-		if signed == nil || signed.Ticket.MatchID != matchID {
+	records, err := s.listBattleTicketsForMatchLocked(matchID)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if record.Status == TicketStatusConsumed {
 			continue
 		}
-		if _, consumed := s.consumedBattleTickets[signed.Ticket.TicketID]; !consumed {
-			s.recordBattleTicketRevokedAuditLocked(signed, revokedAt)
+		signed, err := s.signedBattleTicketFromRecord(record)
+		if err != nil {
+			continue
 		}
-		delete(s.battleTickets, key)
-		delete(s.battleTicketsByID, signed.Ticket.TicketID)
+		s.recordBattleTicketRevokedAuditLocked(signed, revokedAt)
+		if err := s.battleTicketStore.Revoke(record.TicketID, "allocation_changed", revokedAt); err != nil {
+			s.recordStoreOutcomeLocked("battle_ticket_revoke", false, err)
+			return err
+		}
+		s.recordStoreOutcomeLocked("battle_ticket_revoke", false, nil)
 	}
+	return nil
 }
 
 // MatchStart returns the match start payload and a fresh signed battle ticket

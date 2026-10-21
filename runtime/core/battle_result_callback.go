@@ -147,7 +147,9 @@ func (s *Service) ApplyBattleResultCallback(req BattleResultCallback) (*BattleRe
 	}
 	appendMatchEventLocked(match, MatchEvent{Type: "battle_result_verified", Tick: match.Tick, Status: "accepted"})
 
-	s.settleMatchFromWinnerLocked(match, winnerUserID)
+	if err := s.settleMatchFromWinnerLocked(match, winnerUserID); err != nil {
+		return nil, err
+	}
 	s.recordBattleResultCallbackAuditLocked(match, allocation, req, "accepted", "", now)
 	return s.battleResultCallbackResponseLocked(match, req, false, now), nil
 }
@@ -255,9 +257,12 @@ func (s *Service) recordBattleResultCallbackAuditLocked(match *matchState, alloc
 // settleMatchFromWinnerLocked mirrors settleMatchLocked but picks the winner
 // from an explicit player instead of the lobby-side score, which is what a boss
 // race requires (the first boss defeat wins).
-func (s *Service) settleMatchFromWinnerLocked(match *matchState, winnerUserID string) {
-	match.Status = "ended"
+func (s *Service) settleMatchFromWinnerLocked(match *matchState, winnerUserID string) error {
+	match.Status = MatchStatusEnded
 	match.EndedAt = s.clock()
+	if err := s.settleMatchRecordLocked(match, match.EndedAt); err != nil {
+		return err
+	}
 	appendMatchEventLocked(match, MatchEvent{Type: "match_ended", Tick: match.Tick})
 	draw := winnerUserID == ""
 	for _, userID := range match.PlayerIDs {
@@ -280,6 +285,7 @@ func (s *Service) settleMatchFromWinnerLocked(match *matchState, winnerUserID st
 		s.applyRewardsLocked(user, match.MatchID, settlement.RewardJSON)
 		s.applyProgressLocked(user, settlement)
 	}
+	return nil
 }
 
 func (s *Service) matchPlayerIDMapLocked(match *matchState) map[string]string {

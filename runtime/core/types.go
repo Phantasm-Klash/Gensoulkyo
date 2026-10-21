@@ -120,6 +120,19 @@ type Config struct {
 	// When nil the Service falls back to an in-memory store, mirroring the
 	// optional-injection style of the audit repositories above.
 	DemRepository DemRepository
+	// Rooms / Matches / BattleTickets are the persistence seams for lobby
+	// rooms, matches and signed battle tickets. They are optional: when nil
+	// the Service builds the process-local implementations, which behave
+	// exactly like the pre-persistence maps but expose the same interface so
+	// a deployment can point the seam at Postgres (see NewRoomStore and
+	// friends, which pick the SQL store when a *sql.DB is configured).
+	//
+	// The stores are the system of record for room membership, room status,
+	// match lifecycle transitions and battle-ticket state. Only the live
+	// per-tick battle simulation stays in the process.
+	Rooms         RoomStore
+	Matches       MatchStore
+	BattleTickets BattleTicketStore
 	// OnSessionRevoked is invoked when a sign-in supersedes an existing session
 	// token for the same identity (single sign-on). The second argument is the
 	// *superseded* token, not the freshly issued one.

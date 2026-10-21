@@ -63,6 +63,16 @@ services:
       # X-Gensoulkyo-Service-Key header or service_key query parameter) to act
       # with service-to-service authority. Override in production.
       GENSOULKYO_SERVICE_CALLBACK_KEY: ${GENSOULKYO_SERVICE_CALLBACK_KEY:-defaulthttpkey}
+      # Durable stores (goal 2): rooms / matches / tickets live in Postgres and
+      # Redis instead of the process-local maps.
+      GENSOULKYO_ENV: ${GENSOULKYO_ENV:-prod}
+      GENSOULKYO_DATABASE_HOST: ${GENSOULKYO_DATABASE_HOST:-postgres}
+      GENSOULKYO_DATABASE_PORT: ${GENSOULKYO_DATABASE_PORT:-5432}
+      GENSOULKYO_DATABASE_USER_PROD: ${GENSOULKYO_DATABASE_USER_PROD:-postgres}
+      GENSOULKYO_DATABASE_PASSWORD_PROD: ${GENSOULKYO_DATABASE_PASSWORD_PROD:-localdb}
+      GENSOULKYO_REDIS_ADDR: ${GENSOULKYO_REDIS_ADDR:-redis:6379}
+      GENSOULKYO_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      GENSOULKYO_REDIS_DB_PROD: ${GENSOULKYO_REDIS_DB_PROD:-0}
     volumes:
       - ./modules:/nakama/data/modules:ro
       - ./local.yml:/nakama/data/local.yml:ro
