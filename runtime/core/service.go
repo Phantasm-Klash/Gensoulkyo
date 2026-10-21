@@ -21,16 +21,11 @@ import (
 )
 
 const (
-	codeUnauthorized   = "unauthorized"
-	codeNotFound       = "not_found"
-	codeInvalidRequest = "invalid_request"
-	codeInvalidDeck    = "deck_invalid"
-	codeInvalidMode    = "mode_invalid"
-	// codeModeUnavailable is for a mode that exists in ModeConfigs but cannot
-	// finish a match. It is a different failure from codeInvalidMode ("no such
-	// mode") so the client can tell the player "not built yet" instead of
-	// "unknown mode".
-	codeModeUnavailable   = "mode_unavailable"
+	codeUnauthorized      = "unauthorized"
+	codeNotFound          = "not_found"
+	codeInvalidRequest    = "invalid_request"
+	codeInvalidDeck       = "deck_invalid"
+	codeInvalidMode       = "mode_invalid"
 	codeForbiddenField    = "forbidden_field"
 	codeInvalidInput      = "input_invalid"
 	codeMatchState        = "match_state_invalid"
@@ -1260,9 +1255,6 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
 	}
-	if err := RequirePlayableMode(modeID); err != nil {
-		return nil, err
-	}
 	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
 		return nil, err
 	}
@@ -1414,12 +1406,6 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	if err := s.checkRoomCreationLimitLocked(user.UserID); err != nil {
 		return nil, err
 	}
-	// A mode the battle server cannot finish is refused here rather than at
-	// allocation, where the player would see "battle allocation unavailable"
-	// for a room that should never have existed.
-	if !ModePlayable(req.ModeID) {
-		return nil, newError(codeModeUnavailable, "%s", ModeUnavailableDetail(req.ModeID))
-	}
 	modeID := strings.TrimSpace(req.ModeID)
 	if modeID == "" {
 		modeID = "certification"
@@ -1427,9 +1413,6 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	mode, ok := ModeConfigs[modeID]
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
-	}
-	if err := RequirePlayableMode(modeID); err != nil {
-		return nil, err
 	}
 	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
 		return nil, err
@@ -6317,7 +6300,7 @@ func (s *Service) registerDefaultBattleServerLocked() {
 		ActiveMatches:  0,
 		Load:           0,
 		Status:         "online",
-		SupportedModes: PlayableModeIDs(),
+		SupportedModes: modeConfigKeys(),
 	})
 }
 
