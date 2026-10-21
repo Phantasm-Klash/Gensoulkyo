@@ -596,6 +596,12 @@ func (a *agent) spawnArgs(item assignment, port int) []string {
 	if ruleset != "" {
 		args = append(args, "--ruleset", ruleset)
 	}
+	// 对局模式必须随 assignment 下传：合作房（coop_boss）等非默认模式若不带
+	// --mode，对局服按默认 mvp_boss_race 跑——4 人合作 add_player_failed 秒退
+	// （agent 重试 3 次后放弃），2 人合作跑成 race（机制/胜负/快照 payload 全错）。
+	if modeID := strings.TrimSpace(item.ModeID); modeID != "" {
+		args = append(args, "--mode", modeID)
+	}
 	if a.cfg.LobbyEndpoint != "" {
 		args = append(args, "--lobby", a.cfg.LobbyEndpoint)
 	}

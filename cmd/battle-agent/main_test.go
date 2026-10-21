@@ -82,6 +82,42 @@ func TestSpawnArgsDisableResultSubmit(t *testing.T) {
 	}
 }
 
+// assignment 带 mode_id 时必须原样传给对局服（--mode）。缺了它，合作房会被
+// 按默认 mvp_boss_race spawn：4 人局 add_player_failed 秒退（agent 重试 3 次
+// 放弃），2 人局跑成 race——机制时间表、胜负判定、快照 payload 类型全不对。
+// mode_id 为空时不加 flag，保持对局服侧默认值（兼容历史 assignment）。
+func TestSpawnArgsPassesModeID(t *testing.T) {
+	a := &agent{cfg: config{
+		LobbyEndpoint:   "lobby.example:7350",
+		BattleServerID:  "bs-104-1",
+		DefaultBossHP:   1200,
+		DefaultMaxTicks: 7200,
+	}}
+	args := a.spawnArgs(assignment{
+		MatchID:       "match_coop",
+		ModeID:        "coop_boss",
+		Ruleset:       "coop-boss-s0",
+		ServerSeedHex: "0a0b",
+		PlayerIDs:     []string{"p-a", "p-b"},
+	}, 7401)
+
+	if !strings.Contains(strings.Join(args, " "), "--mode coop_boss") {
+		t.Fatalf("spawn args lost the assignment mode_id: %v", args)
+	}
+
+	blank := a.spawnArgs(assignment{
+		MatchID:       "match_race",
+		Ruleset:       "mvp-boss-race-s0",
+		ServerSeedHex: "0a0b",
+		PlayerIDs:     []string{"p-a", "p-b"},
+	}, 7402)
+	for _, arg := range blank {
+		if arg == "--mode" {
+			t.Fatalf("spawn args carry --mode without an assignment mode_id: %v", blank)
+		}
+	}
+}
+
 // 把 agent 真实产出的 signed_result 信封喂进大厅的 SubmitBattleResult：
 // 只要 shape / 版本 / hash / 禁止字段任何一项不合格，就会在 "match not found"
 // 之前被拒。未知 match 是预期结果——它证明签名与版本已经通过大厅的校验门。
