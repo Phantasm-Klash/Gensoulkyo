@@ -27,16 +27,23 @@ func NewWithDatabaseStores(
 	rooms core.RoomStore,
 	matches core.MatchStore,
 	tickets core.BattleTicketStore,
+	queueTickets core.QueueTicketStore,
 	options ...Option,
 ) (*Handler, error) {
-	return newWithDatabase(db, &storeSeams{rooms: rooms, matches: matches, tickets: tickets}, options...)
+	return newWithDatabase(db, &storeSeams{
+		rooms:        rooms,
+		matches:      matches,
+		tickets:      tickets,
+		queueTickets: queueTickets,
+	}, options...)
 }
 
 // storeSeams carries an explicit set of persistence seams.
 type storeSeams struct {
-	rooms   core.RoomStore
-	matches core.MatchStore
-	tickets core.BattleTicketStore
+	rooms        core.RoomStore
+	matches      core.MatchStore
+	tickets      core.BattleTicketStore
+	queueTickets core.QueueTicketStore
 }
 
 func newWithDatabase(db *sql.DB, override *storeSeams, options ...Option) (*Handler, error) {
@@ -63,10 +70,12 @@ func newWithDatabase(db *sql.DB, override *storeSeams, options ...Option) (*Hand
 	var roomStore core.RoomStore
 	var matchStore core.MatchStore
 	var ticketStore core.BattleTicketStore
+	var queueTicketStore core.QueueTicketStore
 	if override != nil {
 		roomStore = override.rooms
 		matchStore = override.matches
 		ticketStore = override.tickets
+		queueTicketStore = override.queueTickets
 	} else {
 		roomStore, err = core.NewRoomStore(db)
 		if err != nil {
@@ -80,6 +89,10 @@ func newWithDatabase(db *sql.DB, override *storeSeams, options ...Option) (*Hand
 		if err != nil {
 			return nil, err
 		}
+		queueTicketStore, err = core.NewQueueTicketStore(db)
+		if err != nil {
+			return nil, err
+		}
 	}
 	guard := security.NewBusinessEnvelopeGuard(security.WithBusinessEnvelopeAuditSink(sink))
 	service := core.NewService(core.Config{
@@ -89,6 +102,7 @@ func newWithDatabase(db *sql.DB, override *storeSeams, options ...Option) (*Hand
 		Rooms:                    roomStore,
 		Matches:                  matchStore,
 		BattleTickets:            ticketStore,
+		QueueTickets:             queueTicketStore,
 	})
 	handlerOptions := []Option{WithBusinessEnvelopeGuard(guard)}
 	handlerOptions = append(handlerOptions, options...)

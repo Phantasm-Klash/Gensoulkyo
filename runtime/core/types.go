@@ -133,6 +133,12 @@ type Config struct {
 	Rooms         RoomStore
 	Matches       MatchStore
 	BattleTickets BattleTicketStore
+	// QueueTickets persists the lobby's own ticket: the seat a player holds
+	// while waiting, with its deck, loadout and room binding. It is a different
+	// object from BattleTickets, which is the signed ticket a battle server
+	// consumes once. Without this seam a restart kept the seat (see RoomStore)
+	// but lost the ticket, so a rejoin could not tell it was the same player.
+	QueueTickets QueueTicketStore
 	// OnSessionRevoked is invoked when a sign-in supersedes an existing session
 	// token for the same identity (single sign-on). The second argument is the
 	// *superseded* token, not the freshly issued one.

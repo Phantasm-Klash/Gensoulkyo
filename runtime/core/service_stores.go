@@ -93,6 +93,13 @@ func battleTicketStoreOrDefault(store BattleTicketStore) BattleTicketStore {
 	return NewMemoryBattleTicketStore()
 }
 
+func queueTicketStoreOrDefault(store QueueTicketStore) QueueTicketStore {
+	if store != nil {
+		return store
+	}
+	return NewMemoryQueueTicketStore()
+}
+
 // RuntimeStoreStatus reports which seams are wired to durable storage.
 //
 // Configured is true when any seam was injected; OK additionally requires that
@@ -178,6 +185,75 @@ func (s *Service) saveRoomLocked(record RoomRecord) error {
 	}
 	err := s.roomStore.SaveRoom(record)
 	s.recordStoreOutcomeLocked("room_save", false, err)
+	return err
+}
+
+// queueTicketLocked resolves a ticket by id, falling back to the store once.
+//
+// The in-process map stays the hot path: a lookup that hits it costs nothing.
+// A miss consults the store, because after a restart the map is empty while the
+// tickets are still durable -- that is the case this fallback exists for. A miss
+// on an id that truly does not exist is remembered, so a caller polling a stale
+// ticket does not open a database round trip on every tick. Callers must hold
+// s.mu.
+func (s *Service) queueTicketLocked(ticketID string) *queueTicket {
+	if ticketID == "" {
+		return nil
+	}
+	if ticket := s.tickets[ticketID]; ticket != nil {
+		return ticket
+	}
+	if s.missingQueueTickets[ticketID] {
+		return nil
+	}
+	record, ok, err := s.queueTicketStore.Load(ticketID)
+	s.recordStoreOutcomeLocked("queue_ticket_load", true, err)
+	if err != nil || !ok {
+		// A read failure is treated like an absent ticket here: every caller
+		// already has to handle "no such ticket", and a transient database
+		// error must not take a whole request path down. The outcome recorder
+		// above is what surfaces the failure.
+		s.missingQueueTickets[ticketID] = true
+		return nil
+	}
+	ticket := record.toQueueTicket()
+	s.tickets[ticketID] = &ticket
+	delete(s.missingQueueTickets, ticketID)
+	return &ticket
+}
+
+// queueTicketByIDLocked is queueTicketLocked with the map-lookup signature the
+// call sites already use. Callers must hold s.mu.
+func (s *Service) queueTicketByIDLocked(ticketID string) (*queueTicket, bool) {
+	ticket := s.queueTicketLocked(ticketID)
+	return ticket, ticket != nil
+}
+
+// saveQueueTicketLocked writes a ticket through to the store. Callers must hold
+// s.mu.
+//
+// The write is not best-effort: a ticket the lobby handed out but did not
+// persist would vanish on the next restart while the client still holds it, so
+// the failure is returned to the operation that caused it.
+func (s *Service) saveQueueTicketLocked(ticket *queueTicket) error {
+	if ticket == nil {
+		return nil
+	}
+	err := s.queueTicketStore.Save(queueTicketRecordFromTicket(ticket))
+	s.recordStoreOutcomeLocked("queue_ticket_save", false, err)
+	if err == nil {
+		delete(s.missingQueueTickets, ticket.TicketID)
+	}
+	return err
+}
+
+// deleteQueueTicketLocked drops a ticket from memory and from the store.
+// Callers must hold s.mu.
+func (s *Service) deleteQueueTicketLocked(ticketID string) error {
+	delete(s.tickets, ticketID)
+	delete(s.missingQueueTickets, ticketID)
+	err := s.queueTicketStore.Delete(ticketID)
+	s.recordStoreOutcomeLocked("queue_ticket_delete", false, err)
 	return err
 }
 

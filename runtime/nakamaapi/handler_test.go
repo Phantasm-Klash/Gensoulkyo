@@ -1966,7 +1966,8 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 	handler, err := NewWithDatabaseStores(db,
 		core.NewMemoryRoomStore(),
 		core.NewMemoryMatchStore(),
-		core.NewMemoryBattleTicketStore())
+		core.NewMemoryBattleTicketStore(),
+		core.NewMemoryQueueTicketStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2568,7 +2569,8 @@ func TestNakamaEnvelopeAuditStatusReportsSQLSinkFailures(t *testing.T) {
 	handler, err := NewWithDatabaseStores(db,
 		core.NewMemoryRoomStore(),
 		core.NewMemoryMatchStore(),
-		core.NewMemoryBattleTicketStore())
+		core.NewMemoryBattleTicketStore(),
+		core.NewMemoryQueueTicketStore())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2619,7 +2621,8 @@ func TestNakamaHandlerDatabaseWiringReportsLifecycleAuditFailures(t *testing.T) 
 	handler, err := NewWithDatabaseStores(db,
 		core.NewMemoryRoomStore(),
 		core.NewMemoryMatchStore(),
-		core.NewMemoryBattleTicketStore())
+		core.NewMemoryBattleTicketStore(),
+		core.NewMemoryQueueTicketStore())
 	if err != nil {
 		t.Fatal(err)
 	}

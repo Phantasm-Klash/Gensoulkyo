@@ -172,6 +172,11 @@ type Service struct {
 	roomStore         RoomStore
 	matchStore        MatchStore
 	battleTicketStore BattleTicketStore
+	queueTicketStore  QueueTicketStore
+	// missingQueueTickets remembers ticket ids the store confirmed absent, so a
+	// caller polling a stale id does not turn into a database round trip every
+	// tick. Entries are dropped the moment a ticket with that id is written.
+	missingQueueTickets map[string]bool
 	// storeStatus records the last persistence failure. Every durable write
 	// either succeeds or fails the operation it belongs to, so this counter
 	// exists for observability rather than correctness.
@@ -681,11 +686,13 @@ func NewService(config Config) *Service {
 			Configured:          config.LobbyLifecycleAuditRepo != nil,
 			ServerAuthoritative: true,
 		},
-		demRepo:           demRepositoryOrDefault(config.DemRepository),
-		demUploads:        map[string]*demUploadStaging{},
-		roomStore:         roomStoreOrDefault(config.Rooms),
-		matchStore:        matchStoreOrDefault(config.Matches),
-		battleTicketStore: battleTicketStoreOrDefault(config.BattleTickets),
+		demRepo:             demRepositoryOrDefault(config.DemRepository),
+		demUploads:          map[string]*demUploadStaging{},
+		roomStore:           roomStoreOrDefault(config.Rooms),
+		matchStore:          matchStoreOrDefault(config.Matches),
+		battleTicketStore:   battleTicketStoreOrDefault(config.BattleTickets),
+		queueTicketStore:    queueTicketStoreOrDefault(config.QueueTickets),
+		missingQueueTickets: map[string]bool{},
 		storeStatus: StoreStatus{
 			OK:         true,
 			Configured: config.Rooms != nil || config.Matches != nil || config.BattleTickets != nil,
@@ -1277,12 +1284,16 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	s.tickets[ticketID] = ticket
+	if err := s.saveQueueTicketLocked(ticket); err != nil {
+		_ = s.deleteQueueTicketLocked(ticketID)
+		return nil, err
+	}
 	s.queues[queueKey] = append(s.queues[queueKey], ticketID)
 
 	// coop_boss 队列：成局人数取队首票的房主选择（2/4）；其他模式 = MinPlayers。
 	queueRequired := mode.MinPlayers
 	if len(s.queues[queueKey]) > 0 {
-		if head := s.tickets[s.queues[queueKey][0]]; head != nil && head.CoopPlayers > 0 {
+		if head := s.queueTicketLocked(s.queues[queueKey][0]); head != nil && head.CoopPlayers > 0 {
 			queueRequired = head.CoopPlayers
 		}
 	}
@@ -1319,6 +1330,16 @@ func coopPlayersFromModeParams(params map[string]any) int {
 		return int(v)
 	case int:
 		return v
+	case json.Number:
+		// The HTTP surface decodes bodies with decoder.UseNumber(), so a numeric
+		// coop_players arrives as json.Number rather than float64. Without this
+		// arm a client sending the number 4 was rejected as if it had sent
+		// something unparseable, while the same value as the string "4" worked.
+		n, err := strconv.Atoi(strings.TrimSpace(v.String()))
+		if err != nil {
+			return 0
+		}
+		return n
 	}
 	return 0
 }
@@ -1447,10 +1468,16 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		CoopPlayers: coopPlayers,
 	}
 	s.tickets[ticketID] = ticket
+	// Persist the ticket before the room it points at: a room row naming a
+	// ticket nobody can resolve is what made a restarted lobby look broken.
+	if err := s.saveQueueTicketLocked(ticket); err != nil {
+		_ = s.deleteQueueTicketLocked(ticketID)
+		return nil, err
+	}
 	if err := s.saveRoomLocked(*room); err != nil {
 		// Do not leave a ticket pointing at a room that does not exist: the
 		// caller gets an error and nothing can join the phantom.
-		delete(s.tickets, ticketID)
+		_ = s.deleteQueueTicketLocked(ticketID)
 		return nil, err
 	}
 	// The host occupies seat 0. The seat is written in the same critical
@@ -1459,7 +1486,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	// restart, when the ticket map is empty. A room that could not seat its
 	// host is closed rather than advertised as joinable.
 	if err := s.saveMemberLocked(roomMemberFromTicket(*room, *ticket, 0, true)); err != nil {
-		delete(s.tickets, ticketID)
+		_ = s.deleteQueueTicketLocked(ticketID)
 		_ = s.closeRoomRecordLocked(roomCode, RoomStatusClosed, s.clock())
 		return nil, err
 	}
@@ -1497,7 +1524,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 	}
 	if room.Status != "waiting" {
 		for _, ticketID := range room.TicketIDs {
-			ticket := s.tickets[ticketID]
+			ticket := s.queueTicketLocked(ticketID)
 			if ticket != nil && ticket.UserID == user.UserID {
 				var match *matchState
 				if ticket.MatchID != "" {
@@ -1509,7 +1536,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		return nil, newError(codeRoomUnavailable, "room is %s", room.Status)
 	}
 	for _, ticketID := range room.TicketIDs {
-		ticket := s.tickets[ticketID]
+		ticket := s.queueTicketLocked(ticketID)
 		if ticket != nil && ticket.UserID == user.UserID {
 			s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "join_retry", s.clock())
 			return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
@@ -1562,6 +1589,10 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	s.tickets[ticketID] = ticket
+	if err := s.saveQueueTicketLocked(ticket); err != nil {
+		_ = s.deleteQueueTicketLocked(ticketID)
+		return nil, err
+	}
 	room.TicketIDs = append(room.TicketIDs, ticketID)
 	required := s.requiredPlayersForRoomLocked(mode, room)
 	if len(room.TicketIDs) >= required {
@@ -1583,7 +1614,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 			return nil, err
 		}
 		for _, matchedTicketID := range groupIDs {
-			matchedTicket := s.tickets[matchedTicketID]
+			matchedTicket := s.queueTicketLocked(matchedTicketID)
 			if matchedTicket == nil {
 				continue
 			}
@@ -1592,11 +1623,11 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), match), nil
 	}
 	if err := s.saveRoomLocked(*room); err != nil {
-		delete(s.tickets, ticketID)
+		_ = s.deleteQueueTicketLocked(ticketID)
 		return nil, err
 	}
 	if err := s.saveMemberLocked(roomMemberFromTicket(*room, *ticket, len(room.TicketIDs)-1, false)); err != nil {
-		delete(s.tickets, ticketID)
+		_ = s.deleteQueueTicketLocked(ticketID)
 		return nil, err
 	}
 	s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "joined", ticket.CreatedAt)
@@ -1793,7 +1824,7 @@ func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueRespons
 	mode := ModeConfigs[room.ModeID]
 	var ticket *queueTicket
 	for _, ticketID := range room.TicketIDs {
-		candidate := s.tickets[ticketID]
+		candidate := s.queueTicketLocked(ticketID)
 		if candidate != nil && candidate.UserID == user.UserID {
 			ticket = candidate
 			break
@@ -1911,7 +1942,7 @@ func (s *Service) QueueTicket(sessionToken string, ticketID string) (*QueueRespo
 	if err != nil {
 		return nil, err
 	}
-	ticket, ok := s.tickets[ticketID]
+	ticket, ok := s.queueTicketByIDLocked(ticketID)
 	if !ok || ticket.UserID != user.UserID {
 		return nil, newError(codeNotFound, "ticket not found")
 	}
@@ -1943,7 +1974,7 @@ func (s *Service) CancelTicket(sessionToken string, ticketID string) (*QueueResp
 	if err != nil {
 		return nil, err
 	}
-	ticket, ok := s.tickets[ticketID]
+	ticket, ok := s.queueTicketByIDLocked(ticketID)
 	if !ok || ticket.UserID != user.UserID {
 		return nil, newError(codeNotFound, "ticket not found")
 	}
@@ -1979,6 +2010,9 @@ func (s *Service) CancelTicket(sessionToken string, ticketID string) (*QueueResp
 		s.queues[ticket.QueueKey] = removeString(s.queues[ticket.QueueKey], ticket.TicketID)
 		ticket.Status = "cancelled"
 		ticket.RoomStatus = "none"
+		if err := s.saveQueueTicketLocked(ticket); err != nil {
+			return nil, err
+		}
 	}
 	return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), nil), nil
 }
@@ -1996,11 +2030,15 @@ func (s *Service) Heartbeat(sessionToken string, req PresenceHeartbeatRequest) (
 	ticketID := strings.TrimSpace(req.TicketID)
 	matchID := strings.TrimSpace(req.MatchID)
 	if matchID == "" && ticketID != "" {
-		ticket, ok := s.tickets[ticketID]
+		ticket, ok := s.queueTicketByIDLocked(ticketID)
 		if !ok || ticket.UserID != user.UserID {
 			return nil, newError(codeNotFound, "ticket not found")
 		}
 		ticket.LastSeenAt = now
+		// Best effort on purpose: the heartbeat is what keeps the client in the
+		// match, so a failed last-seen write must not fail the beat itself. The
+		// store outcome counter still records the failure.
+		_ = s.saveQueueTicketLocked(ticket)
 		matchID = ticket.MatchID
 		if matchID == "" {
 			s.recordLobbyHeartbeatAuditLocked(user.UserID, ticket, nil, now)
@@ -2016,7 +2054,7 @@ func (s *Service) Heartbeat(sessionToken string, req PresenceHeartbeatRequest) (
 		if player.Connected {
 			player.DisconnectedAt = time.Time{}
 		}
-		s.recordLobbyHeartbeatAuditLocked(user.UserID, s.tickets[ticketID], match, now)
+		s.recordLobbyHeartbeatAuditLocked(user.UserID, s.queueTicketLocked(ticketID), match, now)
 		return s.heartbeatMatchResponseLocked(user, match, player, ticketID, req, now), nil
 	}
 	return &PresenceHeartbeatResponse{
@@ -3146,7 +3184,7 @@ func (s *Service) SubmitBattleResult(req BattleResultSubmitRequest) (*BattleResu
 func (s *Service) createMatchLocked(mode ModeConfig, ticketIDs []string) (*matchState, error) {
 	participants := make([]matchParticipantSpec, 0, len(ticketIDs))
 	for _, ticketID := range ticketIDs {
-		ticket := s.tickets[ticketID]
+		ticket := s.queueTicketLocked(ticketID)
 		if ticket == nil {
 			continue
 		}
@@ -3162,7 +3200,7 @@ func (s *Service) createMatchLocked(mode ModeConfig, ticketIDs []string) (*match
 		return nil, err
 	}
 	for _, ticketID := range ticketIDs {
-		ticket := s.tickets[ticketID]
+		ticket := s.queueTicketLocked(ticketID)
 		if ticket == nil {
 			continue
 		}
@@ -3170,6 +3208,12 @@ func (s *Service) createMatchLocked(mode ModeConfig, ticketIDs []string) (*match
 		ticket.Status = "found"
 		if ticket.RoomCode != "" {
 			ticket.RoomStatus = "found"
+		}
+		// The match assignment is the ticket's most important transition: a
+		// ticket that still reads "queued" after a restart would let the player
+		// queue a second time while their first match is running.
+		if err := s.saveQueueTicketLocked(ticket); err != nil {
+			return nil, err
 		}
 	}
 	return match, nil
@@ -3356,7 +3400,7 @@ func (s *Service) heartbeatMatchResponseLocked(user *userState, match *matchStat
 	roomStatus := ""
 	requiredPlayers := len(match.PlayerIDs)
 	currentPlayers := connectedPlayerCount(match)
-	if ticket := s.tickets[ticketID]; ticket != nil {
+	if ticket := s.queueTicketLocked(ticketID); ticket != nil {
 		queueStatus = ticket.Status
 		roomCode = ticket.RoomCode
 		roomStatus = ticket.RoomStatus
@@ -3471,7 +3515,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 			return nil, err
 		}
 		if ticket == nil {
-			ticket = s.tickets[s.ticketIDForMatchUserLocked(match.MatchID, user.UserID)]
+			ticket = s.queueTicketLocked(s.ticketIDForMatchUserLocked(match.MatchID, user.UserID))
 		}
 	}
 	if ticket != nil {
@@ -3525,7 +3569,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 					return nil, newError(codeUnauthorized, "user is not in match")
 				}
 				if ticket == nil {
-					ticket = s.tickets[s.ticketIDForMatchUserLocked(match.MatchID, user.UserID)]
+					ticket = s.queueTicketLocked(s.ticketIDForMatchUserLocked(match.MatchID, user.UserID))
 				}
 			}
 		}
@@ -3609,7 +3653,7 @@ func (s *Service) businessEventLocked(user *userState, kind string, req Business
 
 func (s *Service) businessEventTicketLocked(userID string, req BusinessEventRequest) *queueTicket {
 	if ticketID := strings.TrimSpace(req.TicketID); ticketID != "" {
-		if ticket := s.tickets[ticketID]; ticket != nil && ticket.UserID == userID {
+		if ticket := s.queueTicketLocked(ticketID); ticket != nil && ticket.UserID == userID {
 			return ticket
 		}
 		return nil
@@ -3619,7 +3663,7 @@ func (s *Service) businessEventTicketLocked(userID string, req BusinessEventRequ
 	}
 	if matchID := strings.TrimSpace(req.MatchID); matchID != "" {
 		if ticketID := s.ticketIDForMatchUserLocked(matchID, userID); ticketID != "" {
-			return s.tickets[ticketID]
+			return s.queueTicketLocked(ticketID)
 		}
 	}
 	return nil
@@ -3660,7 +3704,7 @@ func (s *Service) roomSnapshotLocked(room *RoomRecord, now time.Time) RoomSnapsh
 	}
 	participants := make([]RoomParticipantSnapshot, 0, len(room.TicketIDs))
 	for _, ticketID := range room.TicketIDs {
-		if ticket := s.tickets[ticketID]; ticket != nil {
+		if ticket := s.queueTicketLocked(ticketID); ticket != nil {
 			if !ticketBelongsToRoomSnapshot(ticket, room) {
 				continue
 			}
@@ -3742,7 +3786,7 @@ func (s *Service) roomHasUserLocked(room *RoomRecord, userID string) bool {
 		return false
 	}
 	for _, ticketID := range room.TicketIDs {
-		ticket := s.tickets[ticketID]
+		ticket := s.queueTicketLocked(ticketID)
 		if ticket != nil && ticket.UserID == userID && ticket.Status == "queued" {
 			return true
 		}
@@ -3761,7 +3805,7 @@ func (s *Service) waitingRoomTicketForUserLocked(userID string) (*queueTicket, *
 	for index := range records {
 		room := &records[index]
 		for _, ticketID := range room.TicketIDs {
-			ticket := s.tickets[ticketID]
+			ticket := s.queueTicketLocked(ticketID)
 			if ticket != nil && ticket.UserID == userID && ticket.Status == "queued" && ticket.MatchID == "" {
 				return ticket, room, nil
 			}
@@ -3778,6 +3822,16 @@ func (s *Service) roomTicketForUserLocked(roomCode string, userID string) *queue
 	for _, ticket := range s.tickets {
 		if ticket != nil && ticket.RoomCode == roomCode && ticket.UserID == userID {
 			return ticket
+		}
+	}
+	// Cache miss. After a restart the cache is empty while the room row and its
+	// tickets are durable, so ask the store before concluding there is none --
+	// otherwise LeaveRoom cannot find the seat it is supposed to release.
+	if records, err := s.queueTicketStore.ListByRoom(roomCode); err == nil {
+		for _, record := range records {
+			if record.UserID == userID && record.Status != QueueTicketStatusCancelled {
+				return s.queueTicketLocked(record.TicketID)
+			}
 		}
 	}
 	return nil
@@ -3806,7 +3860,7 @@ func (s *Service) ticketDepthLocked(ticket *queueTicket) int {
 		}
 		count := 0
 		for _, ticketID := range room.TicketIDs {
-			if candidate := s.tickets[ticketID]; candidate != nil && candidate.Status == "queued" {
+			if candidate := s.queueTicketLocked(ticketID); candidate != nil && candidate.Status == "queued" {
 				count++
 			}
 		}
@@ -3821,6 +3875,15 @@ func (s *Service) ticketIDForMatchUserLocked(matchID string, userID string) stri
 			return ticket.TicketID
 		}
 	}
+	// Same reason as roomTicketForUserLocked: the cache dies with the process,
+	// the tickets do not.
+	if records, err := s.queueTicketStore.ListByMatch(matchID); err == nil {
+		for _, record := range records {
+			if record.UserID == userID {
+				return record.TicketID
+			}
+		}
+	}
 	return ""
 }
 
@@ -3831,6 +3894,9 @@ func (s *Service) ticketIDForMatchUserLocked(matchID string, userID string) stri
 func (s *Service) cancelRoomTicketLocked(ticket *queueTicket, userID string) error {
 	ticket.Status = "cancelled"
 	ticket.RoomStatus = "cancelled"
+	if err := s.saveQueueTicketLocked(ticket); err != nil {
+		return err
+	}
 	record, ok, err := s.loadLiveRoomRecordLocked(ticket.RoomCode)
 	if err != nil || !ok {
 		return err
@@ -3843,11 +3909,14 @@ func (s *Service) cancelRoomTicketLocked(ticket *queueTicket, userID string) err
 		return s.saveRoomLocked(record)
 	}
 	for _, ticketID := range record.TicketIDs {
-		if remaining := s.tickets[ticketID]; remaining != nil && remaining.Status == "queued" {
+		if remaining := s.queueTicketLocked(ticketID); remaining != nil && remaining.Status == "queued" {
 			if record.HostUserID == userID {
 				record.HostUserID = remaining.UserID
 			}
 			remaining.RoomStatus = record.Status
+			if err := s.saveQueueTicketLocked(remaining); err != nil {
+				return err
+			}
 		}
 	}
 	return s.saveRoomLocked(record)
@@ -4711,7 +4780,7 @@ func (s *Service) recordLobbyReadyAuditLocked(match *matchState, userID string) 
 	if ticketID == "" {
 		return
 	}
-	ticket := s.tickets[ticketID]
+	ticket := s.queueTicketLocked(ticketID)
 	if ticket == nil || ticket.RoomCode == "" {
 		return
 	}
@@ -4734,7 +4803,7 @@ func (s *Service) recordLobbyConnectionAuditLocked(match *matchState, userID str
 	if ticketID == "" {
 		return
 	}
-	ticket := s.tickets[ticketID]
+	ticket := s.queueTicketLocked(ticketID)
 	if ticket == nil || ticket.RoomCode == "" {
 		return
 	}
@@ -6922,7 +6991,7 @@ func (s *Service) recordLobbyMessageAuditLocked(message LobbyMessage) {
 func (s *Service) recordLobbyHeartbeatAuditLocked(userID string, ticket *queueTicket, match *matchState, occurredAt time.Time) {
 	if ticket == nil && match != nil {
 		if ticketID := s.ticketIDForMatchUserLocked(match.MatchID, userID); ticketID != "" {
-			ticket = s.tickets[ticketID]
+			ticket = s.queueTicketLocked(ticketID)
 		}
 	}
 	if ticket == nil || ticket.RoomCode == "" {
