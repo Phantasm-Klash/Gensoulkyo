@@ -79,6 +79,14 @@ func (s *Service) dispatchNotificationLocked(userIDs []string, subject string, p
 	}
 	notifier := s.notifier
 	go func() {
+		// A panic inside the notifier would otherwise take the whole lobby down:
+		// this goroutine is detached, so nothing would recover it. A failed push
+		// is a degraded lobby, a crashed one is an outage.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				atomic.AddInt64(&s.pushFailed, 1)
+			}
+		}()
 		if err := notifier.Notify(recipients, subject, payload); err != nil {
 			atomic.AddInt64(&s.pushFailed, 1)
 			return

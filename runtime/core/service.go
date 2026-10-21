@@ -177,7 +177,10 @@ type Service struct {
 	// Push counters are updated from the delivery goroutines, so they are
 	// read and written atomically rather than under s.mu.
 	pushDelivered int64
-	pushFailed    int64
+	// roomCreationLimiter bounds room churn. A limiter that errors is
+	// treated as "allowed", so it is never the reason a request fails.
+	roomCreationLimiter RoomCreationLimiter
+	pushFailed          int64
 	// missingQueueTickets remembers ticket ids the store confirmed absent, so a
 	// caller polling a stale id does not turn into a database round trip every
 	// tick. Entries are dropped the moment a ticket with that id is written.
@@ -698,6 +701,7 @@ func NewService(config Config) *Service {
 		battleTicketStore:   battleTicketStoreOrDefault(config.BattleTickets),
 		queueTicketStore:    queueTicketStoreOrDefault(config.QueueTickets),
 		notifier:            config.Notifier,
+		roomCreationLimiter: roomCreationLimiterOrDefault(config.RoomCreationLimiter),
 		missingQueueTickets: map[string]bool{},
 		storeStatus: StoreStatus{
 			OK:         true,
@@ -1395,6 +1399,11 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 
 	user, err := s.userBySessionLocked(sessionToken)
 	if err != nil {
+		return nil, err
+	}
+	// Before any validation or writes: a client creating rooms in a loop is
+	// turned away before the lobby spends work on it.
+	if err := s.checkRoomCreationLimitLocked(user.UserID); err != nil {
 		return nil, err
 	}
 	modeID := strings.TrimSpace(req.ModeID)

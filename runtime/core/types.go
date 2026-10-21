@@ -143,6 +143,11 @@ type Config struct {
 	// result). Optional: without it the lobby simply never pushes, and clients
 	// fall back to the polling endpoints they already use.
 	Notifier LobbyNotifier
+	// RoomCreationLimiter bounds how often one player may create rooms. Nil
+	// means no limit (the pre-limiter behaviour); the deployments that care
+	// inject the Redis-backed one, and a single-node one gets the in-process
+	// fallback built by NewMemoryRoomCreationLimiter.
+	RoomCreationLimiter RoomCreationLimiter
 	// OnSessionRevoked is invoked when a sign-in supersedes an existing session
 	// token for the same identity (single sign-on). The second argument is the
 	// *superseded* token, not the freshly issued one.

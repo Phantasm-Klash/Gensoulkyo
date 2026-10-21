@@ -5,11 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 
 	"gensoulkyo/runtime/core"
 )
+
+// notificationTimeout bounds one delivery attempt.
+//
+// Notify is called from a goroutine the lobby spawns per push, with no bound on
+// how many are in flight. A notifier that blocks forever would therefore pile up
+// goroutines for the life of the process, one per push, and each one would be
+// waiting on a runtime call nobody is going to cancel. A timeout turns that into
+// a failed push, which the lobby counts and the client recovers from by
+// re-reading the REST endpoints.
+const notificationTimeout = 5 * time.Second
 
 // notificationCodes gives each push subject a stable numeric code.
 //
@@ -84,5 +95,7 @@ func (n *NakamaNotifier) Notify(userIDs []string, subject string, payload map[st
 	if len(notifications) == 0 {
 		return nil
 	}
-	return n.nk.NotificationsSend(context.Background(), notifications)
+	ctx, cancel := context.WithTimeout(context.Background(), notificationTimeout)
+	defer cancel()
+	return n.nk.NotificationsSend(ctx, notifications)
 }
