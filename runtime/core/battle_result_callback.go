@@ -293,6 +293,9 @@ func (s *Service) settleMatchFromWinnerLocked(match *matchState, winnerUserID st
 		s.applyRewardsLocked(user, match.MatchID, settlement.RewardJSON)
 		s.applyProgressLocked(user, settlement)
 	}
+	// The same push the score-based settle sends, so a match settled from a
+	// battle-server callback reaches the players the same way a local one does.
+	s.notifyMatchResultLocked(match)
 	return nil
 }
 

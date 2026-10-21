@@ -46,7 +46,10 @@ const (
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
 	handler := nakamaapi.New(nil)
 	if db != nil {
-		dbHandler, err := nakamaapi.NewWithDatabase(db)
+		// Pushes travel as Nakama notifications: the realtime protocol is a
+		// closed enum, so this is the only server-initiated channel the socket
+		// carries. Without it the lobby still works, clients just poll.
+		dbHandler, err := nakamaapi.NewWithDatabaseWithNotifier(db, nakamaapi.NewNakamaNotifier(nk, logger))
 		if err != nil {
 			return err
 		}

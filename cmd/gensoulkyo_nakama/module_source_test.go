@@ -172,8 +172,12 @@ func TestNakamaBindingKeepsServiceOriginRPCsFailClosed(t *testing.T) {
 			t.Fatalf("Nakama binding service-origin gate missing %q", expected)
 		}
 	}
-	if !strings.Contains(text, "NewWithDatabase(db)") {
-		t.Fatalf("Nakama binding must wire Nakama *sql.DB through NewWithDatabase")
+	// The handler has to be built from the runtime's *sql.DB. There are two
+	// constructors now -- the plain one and the one that also takes a notifier --
+	// so this matches the family rather than a single exact call, while still
+	// requiring that db is what gets passed in.
+	if !strings.Contains(text, "NewWithDatabaseWithNotifier(db,") && !strings.Contains(text, "NewWithDatabase(db)") {
+		t.Fatalf("Nakama binding must wire Nakama *sql.DB through a NewWithDatabase* constructor")
 	}
 	if !strings.Contains(text, "PayloadError: payloadError(payload)") || !strings.Contains(text, "json.Unmarshal([]byte(payload), &out)") {
 		t.Fatalf("Nakama binding must reject malformed JSON payloads before runtime dispatch")

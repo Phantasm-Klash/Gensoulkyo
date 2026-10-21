@@ -139,6 +139,10 @@ type Config struct {
 	// consumes once. Without this seam a restart kept the seat (see RoomStore)
 	// but lost the ticket, so a rejoin could not tell it was the same player.
 	QueueTickets QueueTicketStore
+	// Notifier delivers server-initiated pushes (room state, match start, match
+	// result). Optional: without it the lobby simply never pushes, and clients
+	// fall back to the polling endpoints they already use.
+	Notifier LobbyNotifier
 	// OnSessionRevoked is invoked when a sign-in supersedes an existing session
 	// token for the same identity (single sign-on). The second argument is the
 	// *superseded* token, not the freshly issued one.

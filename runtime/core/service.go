@@ -173,6 +173,11 @@ type Service struct {
 	matchStore        MatchStore
 	battleTicketStore BattleTicketStore
 	queueTicketStore  QueueTicketStore
+	notifier          LobbyNotifier
+	// Push counters are updated from the delivery goroutines, so they are
+	// read and written atomically rather than under s.mu.
+	pushDelivered int64
+	pushFailed    int64
 	// missingQueueTickets remembers ticket ids the store confirmed absent, so a
 	// caller polling a stale id does not turn into a database round trip every
 	// tick. Entries are dropped the moment a ticket with that id is written.
@@ -692,6 +697,7 @@ func NewService(config Config) *Service {
 		matchStore:          matchStoreOrDefault(config.Matches),
 		battleTicketStore:   battleTicketStoreOrDefault(config.BattleTickets),
 		queueTicketStore:    queueTicketStoreOrDefault(config.QueueTickets),
+		notifier:            config.Notifier,
 		missingQueueTickets: map[string]bool{},
 		storeStatus: StoreStatus{
 			OK:         true,
@@ -1490,6 +1496,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		_ = s.closeRoomRecordLocked(roomCode, RoomStatusClosed, s.clock())
 		return nil, err
 	}
+	s.notifyRoomStateLocked(room)
 	s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "created", ticket.CreatedAt)
 	return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
 }
@@ -1620,6 +1627,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 			}
 			s.recordLobbyRoomAuditLocked(room, matchedTicket, matchedTicket.UserID, "matched", now)
 		}
+		s.notifyRoomStateLocked(room)
 		return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), match), nil
 	}
 	if err := s.saveRoomLocked(*room); err != nil {
@@ -1630,6 +1638,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		_ = s.deleteQueueTicketLocked(ticketID)
 		return nil, err
 	}
+	s.notifyRoomStateLocked(room)
 	s.recordLobbyRoomAuditLocked(room, ticket, user.UserID, "joined", ticket.CreatedAt)
 	return s.queueResponseLocked(ticket, mode, len(room.TicketIDs), nil), nil
 }
@@ -1859,6 +1868,15 @@ func (s *Service) LeaveRoom(sessionToken string, roomCode string) (*QueueRespons
 		roomAudit.CurrentPlayers = len(updated.TicketIDs)
 	}
 	s.recordLobbyRoomAuditRecordLocked(roomAudit)
+	// The remaining seats learn the room changed, and the departing player gets
+	// a final room_state that shows the seat released. A room that just closed
+	// has no participants left, which is why notifyRoomStateLocked also reaches
+	// the host when the participant list is empty.
+	if remaining, ok, _ := s.loadLiveRoomRecordLocked(room.RoomCode); ok {
+		s.notifyRoomStateLocked(&remaining)
+	} else {
+		s.notifyRoomStateLocked(room)
+	}
 	return s.queueResponseLocked(ticket, mode, s.ticketDepthLocked(ticket), nil), nil
 }
 
@@ -2120,6 +2138,11 @@ func (s *Service) ReadyMatch(sessionToken string, matchID string) (*ReadyRespons
 			return nil, err
 		}
 		ticket = signed
+	}
+	// Only the transition pushes: every later ready on an already-running match
+	// would otherwise re-notify the whole room.
+	if started && start != nil {
+		s.notifyMatchStartLocked(match, *start, ticket)
 	}
 	return &ReadyResponse{
 		OK:              true,
@@ -4307,6 +4330,8 @@ func (s *Service) settleMatchLocked(match *matchState) error {
 			EndedAt:       match.EndedAt,
 		})
 	}
+	// Every settlement record is written by now, so the push can carry them.
+	s.notifyMatchResultLocked(match)
 	return nil
 }
 
