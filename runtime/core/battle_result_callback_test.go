@@ -424,3 +424,64 @@ func TestMatchStartReadOnly(t *testing.T) {
 		t.Fatalf("unexpected ticket: %+v", ticket)
 	}
 }
+
+// TestApplyBattleResultCallbackSettlesATimedOutMatchAsADraw pins the settlement
+// a match that ran out of time produces.
+//
+// The battle server has no time limit of its own: it stops when the boss dies or
+// when its process backstop fires, and on the backstop it reports no winner. That
+// used to be rejected as an invalid winner, so a match nobody finished never
+// settled -- no replay, no rewards, and the match stayed running in the lobby's
+// eyes until the reaper collected it. An empty winner is now a draw, while a
+// winner that is not in the allocation is still refused.
+func TestApplyBattleResultCallbackSettlesATimedOutMatchAsADraw(t *testing.T) {
+	now := time.Date(2026, 10, 22, 1, 0, 0, 0, time.UTC)
+	service := NewService(Config{Clock: func() time.Time { return now }})
+	alice := mustLogin(t, service, "Timeout Alice")
+	bob := mustLogin(t, service, "Timeout Bob")
+	matchID := runningMatch(t, service, alice, bob)
+	allocation, ok := service.BattleAllocationForMatch(matchID)
+	if !ok {
+		t.Fatalf("allocation for match %s not found", matchID)
+	}
+	ids := playerIDsByUser(t, service, matchID, alice.UserID, bob.UserID)
+	alicePlayer, bobPlayer := ids[alice.UserID], ids[bob.UserID]
+
+	req := BattleResultCallback{
+		MatchID:        matchID,
+		ModeID:         allocation.ModeID,
+		RulesetVersion: allocation.Version.RulesetVersion,
+		MatchSeed:      uint64(allocation.ServerSeed),
+		WinnerPlayerID: "",
+		WinnerTick:     0,
+		StateHash:      "sha256:timeout-state",
+		Players: []BattleResultPlayer{
+			{PlayerID: alicePlayer, DamageDealt: 640, BossCurrentHP: 9100},
+			{PlayerID: bobPlayer, DamageDealt: 720, BossCurrentHP: 9100},
+		},
+	}
+	resp, err := service.ApplyBattleResultCallback(req)
+	if err != nil {
+		t.Fatalf("a timed-out match must settle, got %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("response not ok: %+v", resp)
+	}
+	if resp.WinnerPlayerID != "" || resp.WinnerUserID != "" {
+		t.Fatalf("timed-out match named a winner: %+v", resp)
+	}
+	if resp.ReplayID == "" {
+		t.Fatalf("timed-out match produced no replay id: %+v", resp)
+	}
+	if resp.Points[alicePlayer] != resp.Points[bobPlayer] {
+		t.Fatalf("draw points differ: %+v", resp.Points)
+	}
+
+	// The tamper guard must survive: an empty winner is a draw, but a winner id
+	// nobody in the allocation owns is still refused.
+	tampered := req
+	tampered.WinnerPlayerID = "player-not-in-match"
+	if _, err := service.ApplyBattleResultCallback(tampered); ErrorCode(err) != codeInvalidRequest {
+		t.Fatalf("tampered winner must stay invalid_request, got %v", err)
+	}
+}

@@ -199,7 +199,15 @@ func validateBattleResultCallback(req BattleResultCallback, match *matchState, a
 	if !sameStringSet(battleResultCallbackPlayerIDs(req), allocationPlayerIDs(allocation)) {
 		return newError(codeInvalidRequest, "battle result players do not match allocation")
 	}
-	if req.WinnerPlayerID == "" || !stringSliceContains(allocationPlayerIDs(allocation), req.WinnerPlayerID) {
+	// An empty winner is legal: it is what a match that ran out of time
+	// reports. The battle server has no time limit of its own -- it only stops
+	// when the boss dies or its process backstop fires -- so a match nobody
+	// finishes would otherwise be rejected here and never settle, leaving the
+	// replay unwritten and the players' rewards unapplied. An empty winner
+	// settles as a draw (see settleMatchFromWinnerLocked). A non-empty winner
+	// still has to be one of the players the allocation named, so a battle
+	// server cannot award the match to somebody who was not in it.
+	if winner := strings.TrimSpace(req.WinnerPlayerID); winner != "" && !stringSliceContains(allocationPlayerIDs(allocation), winner) {
 		return newError(codeInvalidRequest, "winner_player_id must belong to allocation")
 	}
 	return nil
