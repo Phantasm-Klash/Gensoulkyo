@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"gensoulkyo/runtime/core"
+	"gensoulkyo/runtime/httpapi"
 	"gensoulkyo/runtime/security"
 )
 
@@ -22,6 +23,10 @@ type Handler struct {
 	service         *core.Service
 	envelopeGuard   *security.BusinessEnvelopeGuard
 	requireEnvelope bool
+	// restHandler is the `/v1` REST surface bound to the same service and
+	// envelope guard as HandleRPC. Exposed through HTTPHandler so the Nakama
+	// module can mount it with initializer.RegisterHttp.
+	restHandler http.Handler
 }
 
 type Option func(*Handler)
@@ -67,6 +72,7 @@ func New(service *core.Service, options ...Option) *Handler {
 	if handler.envelopeGuard == nil {
 		handler.envelopeGuard = security.NewBusinessEnvelopeGuard()
 	}
+	handler.restHandler = httpapi.NewWithOptions(handler.service, httpapi.WithBusinessEnvelopeGuard(handler.envelopeGuard))
 	return handler
 }
 
@@ -354,6 +360,18 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.SubmitBattleResult(req) })
+	case "battle.events.submit":
+		var req core.BattleEventsSubmitRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.SubmitBattleEvents(req) })
+	case "battle.replay.upload":
+		var req core.DemReplayUploadRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.SubmitDemReplayChunk(req) })
 	default:
 		return errorResponse(http.StatusNotFound, "not_found", fmt.Sprintf("rpc %q is not registered", request.ID))
 	}

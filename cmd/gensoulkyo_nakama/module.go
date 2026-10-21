@@ -8,7 +8,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"gensoulkyo/runtime/core"
@@ -67,6 +69,22 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 			return fmt.Errorf("register rpc %s: %w", rpcID, err)
 		}
 	}
+	// The `/v1` business surface the client and the battle servers call. Nakama
+	// answers every other `/v1/*` path with 404, so the routes are mounted one
+	// by one and bridged onto the Gensoulkyo service (see rest_bridge.go).
+	if err := newRESTBridge(handler, logger).register(initializer); err != nil {
+		return err
+	}
+	// The lobby health route is mounted on the Nakama client API so that
+	// operators can probe the unified business server on one port.
+	if err := initializer.RegisterHttp("/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true,"service":"gensoulkyo-nakama","rpc_count":` + strconv.Itoa(len(rpcIDs)) + `}`))
+	}); err != nil {
+		return fmt.Errorf("register http health: %w", err)
+	}
+
 	if logger != nil {
 		logger.Info("Gensoulkyo Nakama runtime registered %d RPC handlers", len(rpcIDs))
 	}
