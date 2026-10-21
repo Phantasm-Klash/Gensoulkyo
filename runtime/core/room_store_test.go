@@ -195,15 +195,15 @@ func valuesToAny(args []driver.Value) []any {
 
 func roomRowValues() []driver.Value {
 	return []driver.Value{
-		"ABCD",               // room_code
-		"pvp",                // mode_id
-		"u-host",             // host_user_id
-		"waiting",            // status
-		"boss-1",             // boss_id
-		"stage-1",            // stage_id
-		int64(2),             // coop_players
-		"",                   // match_id
-		[]byte(`{"seed":7}`), // mode_params_json
+		"ABCD",                           // room_code
+		"pvp",                            // mode_id
+		"u-host",                         // host_user_id
+		"waiting",                        // status
+		"boss-1",                         // boss_id
+		"stage-1",                        // stage_id
+		int64(2),                         // coop_players
+		"",                               // match_id
+		[]byte(`{"seed":7}`),             // mode_params_json
 		[]byte(`[{"user_id":"u-host"}]`), // messages_json
 		[]byte(`["t-1","t-2"]`),          // ticket_ids_json
 		time.Unix(1700000000, 0).UTC(),   // created_at
@@ -390,11 +390,11 @@ func TestMemoryRoomStoreRoundTrip(t *testing.T) {
 	store := NewMemoryRoomStore()
 	now := time.Now().UTC()
 	room := RoomRecord{
-		RoomCode:  "ABCD",
-		ModeID:    "coop_boss",
+		RoomCode:   "ABCD",
+		ModeID:     "coop_boss",
 		HostUserID: "u-host",
-		Status:    RoomStatusWaiting,
-		ExpiresAt: now.Add(-time.Minute),
+		Status:     RoomStatusWaiting,
+		ExpiresAt:  now.Add(-time.Minute),
 	}
 	if err := store.SaveRoom(room); err != nil {
 		t.Fatalf("save: %v", err)
@@ -462,4 +462,41 @@ func TestNewRoomStoreUsesSQLWithDatabase(t *testing.T) {
 func TestRoomStoreImplementationsSatisfyTheInterface(t *testing.T) {
 	var _ RoomStore = (*SQLRoomStore)(nil)
 	var _ RoomStore = (*MemoryRoomStore)(nil)
+}
+
+// TestStatusListForSQLRendersArrayLiteralElements pins the shape of the status
+// filter that ListRoomsByStatus and ListMatchesByStatus send as a query
+// argument.
+//
+// The elements must be double-quoted. The value travels as one string, so single
+// quotes inside it are SQL string delimiters rather than part of an array
+// literal: `{'waiting'}` parses into something that matches no row, which turns
+// every status query into an empty result without raising an error. That exact
+// mistake shipped once and took the room list and the duplicate-room check down
+// with it, silently.
+func TestStatusListForSQLRendersArrayLiteralElements(t *testing.T) {
+	cases := []struct {
+		name     string
+		statuses []string
+		want     string
+	}{
+		{"two statuses", []string{"waiting", "found"}, `{"waiting","found"}`},
+		{"one status", []string{"waiting"}, `{"waiting"}`},
+		{"blank entries dropped", []string{" ", "waiting", ""}, `{"waiting"}`},
+		{"empty filter", nil, `{}`},
+		{"double quote escaped", []string{`a"b`}, `{"a\"b"}`},
+		{"backslash escaped", []string{`c\d`}, `{"c\\d"}`},
+		{"single quote is not special", []string{"it's"}, `{"it's"}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, ok := statusListForSQL(testCase.statuses).(string)
+			if !ok {
+				t.Fatalf("statusListForSQL returned %T, want string", statusListForSQL(testCase.statuses))
+			}
+			if got != testCase.want {
+				t.Fatalf("statusListForSQL(%v) = %s, want %s", testCase.statuses, got, testCase.want)
+			}
+		})
+	}
 }

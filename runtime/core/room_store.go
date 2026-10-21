@@ -574,9 +574,19 @@ func statusListForSQL(statuses []string) any {
 	// unknown type, so the server infers text[] from `= ANY($1)` on a text
 	// column and parses the literal itself. An empty filter yields an empty
 	// array, which matches no row.
+	//
+	// Elements are double-quoted on purpose. The value crosses the wire as one
+	// string, so single quotes inside it are SQL string delimiters rather than
+	// part of an array literal: `{'waiting'}` parses as something that matches
+	// no row at all, which silently turns every status query into an empty
+	// result. `{"waiting"}` is the array-literal form Postgres expects.
+	// Backslashes and double quotes inside an element are escaped so a status
+	// containing either cannot break out of the literal.
 	parts := make([]string, 0, len(filtered))
 	for _, status := range filtered {
-		parts = append(parts, "'"+strings.ReplaceAll(status, "'", "''")+"'")
+		escaped := strings.ReplaceAll(status, "\\", "\\\\")
+		escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+		parts = append(parts, "\""+escaped+"\"")
 	}
 	return "{" + strings.Join(parts, ",") + "}"
 }
