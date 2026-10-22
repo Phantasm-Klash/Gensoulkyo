@@ -298,3 +298,32 @@ func allocationMaxTicks(match *matchState) int {
 	}
 	return 0
 }
+
+// userInMatchByTicketsLocked answers "is this player in this match" from the
+// queue tickets.
+//
+// It exists because MatchRecord only stores a player count, not a roster: after
+// a restart there is no durable list of who was in a match except the tickets
+// themselves, which carry user_id and match_id. Anything that serves match data
+// from a persisted match record has to check membership this way, or it would
+// hand one match's allocation to anybody who asks for it.
+func (s *Service) userInMatchByTicketsLocked(matchID string, userID string) (bool, error) {
+	if matchID == "" || userID == "" {
+		return false, nil
+	}
+	for _, ticket := range s.tickets {
+		if ticket != nil && ticket.MatchID == matchID && ticket.UserID == userID {
+			return true, nil
+		}
+	}
+	records, err := s.queueTicketStore.ListByMatch(matchID)
+	if err != nil {
+		return false, err
+	}
+	for _, record := range records {
+		if record.UserID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
+}

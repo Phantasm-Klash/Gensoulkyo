@@ -2846,11 +2846,33 @@ func (s *Service) BattleAllocation(sessionToken string, matchID string) (*Battle
 		return nil, err
 	}
 	match, _, err := s.matchPlayerLocked(user.UserID, matchID)
-	if err != nil {
-		return nil, err
+	if err == nil && match != nil {
+		alloc := s.ensureBattleAllocationLocked(match)
+		copy := copyBattleAllocation(alloc)
+		return &copy, nil
 	}
-	alloc := s.ensureBattleAllocationLocked(match)
-	copy := copyBattleAllocation(alloc)
+	// The live match is gone from memory (the process restarted). The allocation
+	// is not: it is persisted on the match row, and the battle server running it
+	// is on another host and still alive. Without this the player cannot rejoin a
+	// match that is still going, which strands it.
+	//
+	// Membership is checked against the tickets, because the persisted match
+	// record carries a player count but no roster.
+	record, found, loadErr := s.loadMatchRecordLocked(matchID)
+	if loadErr != nil || !found || record.BattleAllocation == nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, newError(codeNotFound, "match not found")
+	}
+	inMatch, checkErr := s.userInMatchByTicketsLocked(matchID, user.UserID)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	if !inMatch {
+		return nil, newError(codeUnauthorized, "user is not in match")
+	}
+	copy := copyBattleAllocation(record.BattleAllocation)
 	return &copy, nil
 }
 
@@ -2863,14 +2885,26 @@ func (s *Service) BattleTicket(sessionToken string, matchID string) (*SignedBatt
 		return nil, err
 	}
 	match, _, err := s.matchPlayerLocked(user.UserID, matchID)
+	if err == nil && match != nil {
+		ticket, err := s.signedBattleTicketLocked(match, user)
+		if err != nil {
+			return nil, err
+		}
+		copy := copySignedBattleTicket(ticket)
+		return &copy, nil
+	}
+	// Same restart case as BattleAllocation. A ticket this lobby already signed is
+	// durable, and looking it up needs only the match and player ids -- not the
+	// in-memory match -- so a player who was handed one can be handed it again
+	// after a restart rather than being told the match does not exist.
+	existing, ok, err := s.liveBattleTicketForPlayerLocked(matchID, user.UserID, s.clock())
 	if err != nil {
 		return nil, err
 	}
-	ticket, err := s.signedBattleTicketLocked(match, user)
-	if err != nil {
-		return nil, err
+	if !ok {
+		return nil, newError(codeNotFound, "match not found")
 	}
-	copy := copySignedBattleTicket(ticket)
+	copy := copySignedBattleTicket(existing)
 	return &copy, nil
 }
 
