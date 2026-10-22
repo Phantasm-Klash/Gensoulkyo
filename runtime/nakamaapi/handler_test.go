@@ -111,7 +111,7 @@ func TestNakamaRPCMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
 		SessionID: aliceSession,
 		UserID:    aliceUser,
 		Payload: envelopePayload(1, "nonce-version-queue", "matchmaking_join", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "nakama_version_a_deck",
 			"deck_snapshot":  deckPayload("nakama_version_a_deck"),
 			"client_version": map[string]any{"protocol_version": core.ProtocolVersion + 1},
@@ -125,7 +125,7 @@ func TestNakamaRPCMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
 		SessionID: aliceSession,
 		UserID:    aliceUser,
 		Payload: envelopePayload(2, "nonce-version-queue-partial", "matchmaking_join", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "nakama_version_a_deck",
 			"deck_snapshot":  deckPayload("nakama_version_a_deck"),
 			"client_version": map[string]any{"protocol_version": core.ProtocolVersion},
@@ -140,7 +140,7 @@ func TestNakamaRPCMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
 		SessionID: hostSession,
 		UserID:    hostUser,
 		Payload: envelopePayload(1, "nonce-version-room-create", "rooms_create", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "nakama_version_host_deck",
 			"deck_snapshot":  deckPayload("nakama_version_host_deck"),
 			"client_version": map[string]any{
@@ -162,7 +162,7 @@ func TestNakamaRPCMatchEntryRejectsIncompatibleClientVersion(t *testing.T) {
 		UserID:    guestUser,
 		Payload: envelopePayload(1, "nonce-version-room-join", "rooms_join", map[string]any{
 			"room_code":      room.RoomCode,
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "nakama_version_guest_deck",
 			"deck_snapshot":  deckPayload("nakama_version_guest_deck"),
 			"client_version": map[string]any{"ruleset_version": "ruleset-old"},
@@ -556,7 +556,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		UserID:      hostUser,
 		DisplayName: "External Host",
 		Payload: envelopePayload(1, "nonce-external-room-create", "rooms_create", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "external_host_deck",
 			"deck_snapshot":  deckPayload("external_host_deck"),
 			"mode_params":    map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
@@ -590,7 +590,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		DisplayName: "External Guest",
 		Payload: envelopePayload(2, "nonce-external-room-join", "rooms_join", map[string]any{
 			"room_code":      room.RoomCode,
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "external_guest_deck",
 			"deck_snapshot":  deckPayload("external_guest_deck"),
 		}),
@@ -599,7 +599,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("external room join failed: %+v", joined)
 	}
 	found := joined.Payload.(*core.QueueResponse)
-	if found.MatchID == "" || found.ModeID != "pvp_duel" || found.RoomStatus != "found" {
+	if found.MatchID == "" || found.ModeID != "mvp_boss_race" || found.RoomStatus != "found" {
 		t.Fatalf("joined room should bind pvp duel match: %+v", found)
 	}
 
@@ -803,7 +803,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("guest ready should start match: %+v", guestReady)
 	}
 	start := guestReady.Payload.(*core.ReadyResponse).MatchStart
-	if start.ModeID != "pvp_duel" || start.ModeRulesetVersion != "pvp-duel-s0" || start.BattleAllocation == nil {
+	if start.ModeID != "mvp_boss_race" || start.ModeRulesetVersion != "mvp-boss-race-s0" || start.BattleAllocation == nil {
 		t.Fatalf("ready dispatch missing mode-bound allocation: %+v", start)
 	}
 
@@ -826,7 +826,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 			"match_id": found.MatchID,
 		}),
 	})
-	if !heartbeat.OK || heartbeat.Payload.(*core.PresenceHeartbeatResponse).PresenceStatus != "in_match" || heartbeat.Payload.(*core.PresenceHeartbeatResponse).ModeID != "pvp_duel" {
+	if !heartbeat.OK || heartbeat.Payload.(*core.PresenceHeartbeatResponse).PresenceStatus != "in_match" || heartbeat.Payload.(*core.PresenceHeartbeatResponse).ModeID != "mvp_boss_race" {
 		t.Fatalf("heartbeat should report authoritative running room match: %+v", heartbeat)
 	}
 	heartbeatPayload := heartbeat.Payload.(*core.PresenceHeartbeatResponse)
@@ -846,7 +846,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("battle allocation WSS read failed: %+v", wssAllocation)
 	}
 	allocation := wssAllocation.Payload.(*core.BattleServerAllocation)
-	if allocation.MatchID != found.MatchID || allocation.ModeID != "pvp_duel" || !allocation.ServerAuthoritative {
+	if allocation.MatchID != found.MatchID || allocation.ModeID != "mvp_boss_race" || !allocation.ServerAuthoritative {
 		t.Fatalf("battle allocation WSS payload should stay match-bound and authoritative: %+v", allocation)
 	}
 
@@ -862,7 +862,7 @@ func TestNakamaExternalRoomModeBindingAndReadyDispatch(t *testing.T) {
 		t.Fatalf("battle ticket WSS read failed: %+v", wssTicket)
 	}
 	ticket := wssTicket.Payload.(*core.SignedBattleTicket)
-	if ticket.Ticket.MatchID != found.MatchID || ticket.Ticket.UserID != hostUser || ticket.Ticket.ModeID != "pvp_duel" || !ticket.Ticket.ServerAuthoritative || ticket.SignatureHex == "" {
+	if ticket.Ticket.MatchID != found.MatchID || ticket.Ticket.UserID != hostUser || ticket.Ticket.ModeID != "mvp_boss_race" || !ticket.Ticket.ServerAuthoritative || ticket.SignatureHex == "" {
 		t.Fatalf("battle ticket WSS payload should be signed and user-bound: %+v", ticket)
 	}
 
@@ -923,7 +923,7 @@ func TestNakamaRematchRPCAndWSSRequireVerifiedSettlement(t *testing.T) {
 		UserID:      hostUser,
 		DisplayName: "Rematch Host",
 		Payload: envelopePayload(1, "nonce-rematch-room-create", "rooms_create", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "rematch_host_deck",
 			"deck_snapshot":  deckPayload("rematch_host_deck"),
 			"mode_params":    map[string]any{"stage_id": "clockwork_bloom", "character_id": "precision"},
@@ -940,7 +940,7 @@ func TestNakamaRematchRPCAndWSSRequireVerifiedSettlement(t *testing.T) {
 		DisplayName: "Rematch Guest",
 		Payload: envelopePayload(1, "nonce-rematch-room-join", "rooms_join", map[string]any{
 			"room_code":      room.RoomCode,
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "rematch_guest_deck",
 			"deck_snapshot":  deckPayload("rematch_guest_deck"),
 		}),
@@ -1084,7 +1084,7 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		UserID:      hostUser,
 		DisplayName: "Replay Host",
 		Payload: envelopePayload(1, "nonce-replay-room-create", "rooms_create", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "replay_host_deck",
 			"deck_snapshot":  deckPayload("replay_host_deck"),
 		}),
@@ -1101,7 +1101,7 @@ func TestNakamaReplayReadRequiresEnvelopeAndOwner(t *testing.T) {
 		DisplayName: "Replay Guest",
 		Payload: envelopePayload(1, "nonce-replay-room-join", "rooms_join", map[string]any{
 			"room_code":      room.RoomCode,
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "replay_guest_deck",
 			"deck_snapshot":  deckPayload("replay_guest_deck"),
 		}),
@@ -2052,7 +2052,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
 		Payload: envelopePayload(1, "nonce-sql-room-create", "rooms_create", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "sql_host_deck",
 			"deck_snapshot":  deckPayload("sql_host_deck"),
 			"mode_params":    map[string]any{"stage_id": "starlit_lanes", "character_id": "balanced"},
@@ -2111,7 +2111,7 @@ func TestNakamaHandlerDatabaseWiringRecordsEnvelopeLobbyAndBattleAudits(t *testi
 		UserID:    guest.UserID,
 		Payload: envelopePayload(3, "nonce-sql-room-join", "rooms_join", map[string]any{
 			"room_code":      room.RoomCode,
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "sql_guest_deck",
 			"deck_snapshot":  deckPayload("sql_guest_deck"),
 		}),
@@ -2648,7 +2648,7 @@ func TestNakamaHandlerDatabaseWiringReportsLifecycleAuditFailures(t *testing.T) 
 		SessionID: host.SessionToken,
 		UserID:    host.UserID,
 		Payload: envelopePayload(1, "nonce-sql-fail-room-create", "rooms_create", map[string]any{
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "sql_fail_host_deck",
 			"deck_snapshot":  deckPayload("sql_fail_host_deck"),
 		}),
@@ -2664,7 +2664,7 @@ func TestNakamaHandlerDatabaseWiringReportsLifecycleAuditFailures(t *testing.T) 
 		UserID:    guest.UserID,
 		Payload: envelopePayload(1, "nonce-sql-fail-room-join", "rooms_join", map[string]any{
 			"room_code":      room.RoomCode,
-			"mode_id":        "pvp_duel",
+			"mode_id":        "mvp_boss_race",
 			"active_deck_id": "sql_fail_guest_deck",
 			"deck_snapshot":  deckPayload("sql_fail_guest_deck"),
 		}),

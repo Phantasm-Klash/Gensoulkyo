@@ -148,6 +148,11 @@ type Config struct {
 	// inject the Redis-backed one, and a single-node one gets the in-process
 	// fallback built by NewMemoryRoomCreationLimiter.
 	RoomCreationLimiter RoomCreationLimiter
+	// PlayableModes is the capability gate for modes. Empty (the default) means
+	// every declared mode is accepted, which keeps existing callers and tests on
+	// their current behaviour; the player-facing deployment injects
+	// PlayableModeIDs(). See mode_capability.go.
+	PlayableModes []string
 	// OnSessionRevoked is invoked when a sign-in supersedes an existing session
 	// token for the same identity (single sign-on). The second argument is the
 	// *superseded* token, not the freshly issued one.

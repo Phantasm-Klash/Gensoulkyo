@@ -21,11 +21,15 @@ import (
 )
 
 const (
-	codeUnauthorized      = "unauthorized"
-	codeNotFound          = "not_found"
-	codeInvalidRequest    = "invalid_request"
-	codeInvalidDeck       = "deck_invalid"
-	codeInvalidMode       = "mode_invalid"
+	codeUnauthorized   = "unauthorized"
+	codeNotFound       = "not_found"
+	codeInvalidRequest = "invalid_request"
+	codeInvalidDeck    = "deck_invalid"
+	codeInvalidMode    = "mode_invalid"
+	// codeModeUnavailable is for a mode that exists in ModeConfigs but cannot
+	// finish a match. It is a different failure from codeInvalidMode ("no such
+	// mode") so the client can say "not built yet" instead of "unknown mode".
+	codeModeUnavailable   = "mode_unavailable"
 	codeForbiddenField    = "forbidden_field"
 	codeInvalidInput      = "input_invalid"
 	codeMatchState        = "match_state_invalid"
@@ -180,7 +184,10 @@ type Service struct {
 	// roomCreationLimiter bounds room churn. A limiter that errors is
 	// treated as "allowed", so it is never the reason a request fails.
 	roomCreationLimiter RoomCreationLimiter
-	pushFailed          int64
+	// playableModes is the injected capability gate. Empty means "no gate"; see
+	// mode_capability.go for why it is injected rather than defaulted on.
+	playableModes map[string]struct{}
+	pushFailed    int64
 	// missingQueueTickets remembers ticket ids the store confirmed absent, so a
 	// caller polling a stale id does not turn into a database round trip every
 	// tick. Entries are dropped the moment a ticket with that id is written.
@@ -702,6 +709,7 @@ func NewService(config Config) *Service {
 		queueTicketStore:    queueTicketStoreOrDefault(config.QueueTickets),
 		notifier:            config.Notifier,
 		roomCreationLimiter: roomCreationLimiterOrDefault(config.RoomCreationLimiter),
+		playableModes:       playableModeSet(config.PlayableModes),
 		missingQueueTickets: map[string]bool{},
 		storeStatus: StoreStatus{
 			OK:         true,
@@ -1255,6 +1263,9 @@ func (s *Service) JoinQueue(sessionToken string, req JoinQueueRequest) (*QueueRe
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
 	}
+	if err := s.checkModePlayableLocked(modeID); err != nil {
+		return nil, err
+	}
 	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
 		return nil, err
 	}
@@ -1406,6 +1417,12 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	if err := s.checkRoomCreationLimitLocked(user.UserID); err != nil {
 		return nil, err
 	}
+	// A mode the battle server cannot finish is refused here rather than at
+	// allocation, where the player would see "battle allocation unavailable"
+	// for a room that should never have existed.
+	if err := s.checkModePlayableLocked(req.ModeID); err != nil {
+		return nil, err
+	}
 	modeID := strings.TrimSpace(req.ModeID)
 	if modeID == "" {
 		modeID = "certification"
@@ -1413,6 +1430,9 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	mode, ok := ModeConfigs[modeID]
 	if !ok {
 		return nil, newError(codeInvalidMode, "unsupported mode %q", modeID)
+	}
+	if err := s.checkModePlayableLocked(modeID); err != nil {
+		return nil, err
 	}
 	if err := validateClientMatchVersion(req.ClientVersion); err != nil {
 		return nil, err
@@ -6300,7 +6320,7 @@ func (s *Service) registerDefaultBattleServerLocked() {
 		ActiveMatches:  0,
 		Load:           0,
 		Status:         "online",
-		SupportedModes: modeConfigKeys(),
+		SupportedModes: PlayableModeIDs(),
 	})
 }
 

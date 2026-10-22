@@ -113,6 +113,7 @@ func newWithDatabase(db *sql.DB, override *storeSeams, notifier core.LobbyNotifi
 		Matches:                  matchStore,
 		BattleTickets:            ticketStore,
 		QueueTickets:             queueTicketStore,
+		PlayableModes:            core.PlayableModeIDs(),
 		Notifier:                 notifier,
 	})
 	handlerOptions := []Option{WithBusinessEnvelopeGuard(guard)}
