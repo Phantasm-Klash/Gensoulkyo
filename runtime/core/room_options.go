@@ -129,6 +129,9 @@ func (s *Service) UpdateRoomOptions(sessionToken string, roomCode string, req Up
 		if _, err := maxTicksFromModeParams(room.ModeParams); err != nil {
 			return nil, err
 		}
+		if _, err := bossHPFromModeParams(room.ModeParams); err != nil {
+			return nil, err
+		}
 		// coop_players may have arrived through mode_params; mirror it onto the
 		// dedicated column so requiredPlayersForRoomLocked sees it.
 		if room.ModeID == "coop_boss" {
@@ -326,4 +329,96 @@ func (s *Service) userInMatchByTicketsLocked(matchID string, userID string) (boo
 		}
 	}
 	return false, nil
+}
+
+// MinRoomBossHP / MaxRoomBossHP bound the boss-health option.
+//
+// The low end keeps a boss from being a one-hit prop; the high end is above the
+// biggest entry in the boss catalog, so a room can make a fight longer but not
+// invent a boss that takes longer than the match length allows (see
+// MaxRoomMaxTicks -- the two options bound the same fight from opposite sides).
+const (
+	MinRoomBossHP = 1000
+	MaxRoomBossHP = 100000
+)
+
+// bossHPFromModeParams reads and validates the boss-health option, returning 0
+// when the room does not set one, which means "whatever the boss catalog says".
+//
+// The key is boss_health, not boss_hp, and that is not cosmetic: boss_hp is one
+// of the client-forbidden fields (see forbiddenClientFields), because a client
+// that can submit it can lie about how much of a boss is left. Room options
+// arrive as client-submitted mode_params, so an option named boss_hp would be
+// rejected outright by the forbidden-field sweep. Naming it boss_health keeps
+// the option available without opening that door.
+func bossHPFromModeParams(params map[string]any) (int, error) {
+	raw, ok := params["boss_health"]
+	if !ok || raw == nil {
+		return 0, nil
+	}
+	hp := intFromAnyValue(raw)
+	if hp <= 0 {
+		return 0, nil
+	}
+	if hp < MinRoomBossHP || hp > MaxRoomBossHP {
+		return 0, newError(codeInvalidRequest,
+			"boss_hp must be between %d and %d, got %d", MinRoomBossHP, MaxRoomBossHP, hp)
+	}
+	return hp, nil
+}
+
+// roomOptionDigest keeps only the options that change how the match runs, so the
+// mode config hash covers them.
+//
+// This is the fix for a hash that used to cover the ModeConfig constants alone:
+// two rooms in the same mode with different boss health or match length produced
+// the same hash, so the allocation's "expected configuration" did not actually
+// describe what the battle server was told to run. Keys are fixed and sorted so
+// the digest is stable; unknown keys are dropped, because a client adding a
+// decorative key must not change the hash.
+func roomOptionDigest(params map[string]any) map[string]any {
+	digest := map[string]any{}
+	if params == nil {
+		return digest
+	}
+	for _, key := range []string{"boss_id", "boss_health", "max_ticks", "stage_id", "coop_players"} {
+		raw, ok := params[key]
+		if !ok || raw == nil {
+			continue
+		}
+		digest[key] = raw
+	}
+	return digest
+}
+
+// matchOptionDigest rebuilds the room's option snapshot from a live match. The
+// match keeps these in ModeState because that is what survives alongside the
+// match row, but only the fixed option keys are used -- ModeState also carries
+// runtime bookkeeping that must never reach a hash.
+func matchOptionDigest(match *matchState) map[string]any {
+	if match == nil {
+		return map[string]any{}
+	}
+	params := map[string]any{
+		"boss_id":  match.BossID,
+		"stage_id": match.StageID,
+	}
+	if hp := intFromAnyValue(match.ModeState["boss_hp"]); hp > 0 {
+		params["boss_health"] = hp
+	}
+	if ticks := intFromAnyValue(match.ModeState["max_ticks"]); ticks > 0 {
+		params["max_ticks"] = ticks
+	}
+	if seats := intFromAnyValue(match.ModeState["coop_players"]); seats > 0 {
+		params["coop_players"] = seats
+	}
+	return roomOptionDigest(params)
+}
+
+// allocationBossHP reads the boss health the room chose, for the agent to pass on.
+func allocationBossHP(match *matchState) int {
+	if match == nil {
+		return 0
+	}
+	return intFromAnyValue(match.ModeState["boss_hp"])
 }

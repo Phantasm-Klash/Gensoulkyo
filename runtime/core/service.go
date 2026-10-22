@@ -302,8 +302,8 @@ type queueTicket struct {
 	// MaxTicks 是房主选的对局时长（tick）；0 = 用对局服默认。它是 ModeParams
 	// 里 max_ticks 的派生值，加载时从持久化的选项恢复（见 queue_ticket_store）。
 	MaxTicks int
-	// ModeParams 是房间选项快照（boss / stage / 人数 / 时长），房间级：同一房间
-	// 每个座位的票据都带同一份，因为成局快照是从票据拼出来的。
+	// ModeParams 是房间选项快照（boss / stage / 人数 / 时长 / boss 血量），房间级：
+	// 同一房间每个座位的票据都带同一份，因为成局快照是从票据拼出来的。
 	ModeParams map[string]any
 }
 
@@ -314,6 +314,8 @@ type matchParticipantSpec struct {
 	BossID       string
 	// MaxTicks 来自房主所在票据：房间级选项，成局时写进 ModeState。
 	MaxTicks int
+	// BossHP 是房间显式设置的 boss 血量；0 = 用 boss 目录的值。
+	BossHP int
 }
 
 type rematchState struct {
@@ -1467,6 +1469,9 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	}
 	maxTicks, err := maxTicksFromModeParams(req.ModeParams)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := bossHPFromModeParams(req.ModeParams); err != nil {
 		return nil, err
 	}
 	coopPlayers := 0
@@ -3015,6 +3020,7 @@ func (s *Service) BattleAgentAssignments(battleServerID string) (*BattleAgentAss
 			PlayerIDs:      playerIDs,
 			BossID:         alloc.BossID,
 			MaxTicks:       alloc.MaxTicks,
+			BossHP:         alloc.BossHP,
 			Loadouts:       loadouts,
 			Players:        players,
 			AllocatedAt:    alloc.AllocatedAt,
@@ -3296,6 +3302,7 @@ func (s *Service) createMatchLocked(mode ModeConfig, ticketIDs []string) (*match
 			Loadout:      ticket.Loadout,
 			BossID:       ticket.BossID,
 			MaxTicks:     ticket.MaxTicks,
+			BossHP:       intFromAnyValue(ticket.ModeParams["boss_health"]),
 		})
 	}
 	match, err := s.createMatchFromParticipantsLocked(mode, participants)
@@ -3384,6 +3391,14 @@ func (s *Service) createMatchFromParticipantsLocked(mode ModeConfig, participant
 	// process that runs it is per match, not per seat.
 	if len(participants) > 0 && participants[0].MaxTicks > 0 {
 		match.ModeState["max_ticks"] = participants[0].MaxTicks
+	}
+	// The room's boss health wins over the catalog entry: picking a boss and then
+	// an explicit health is the room asking for that fight, and the catalog value
+	// is only a default for rooms that did not say.
+	if len(participants) > 0 && participants[0].BossHP > 0 {
+		match.BossMaxHP = participants[0].BossHP
+		match.BossHP = match.BossMaxHP
+		match.ModeState["boss_hp"] = participants[0].BossHP
 	}
 	for _, participant := range participants {
 		user := s.users[participant.UserID]
@@ -3866,7 +3881,7 @@ func (s *Service) roomSnapshotLocked(room *RoomRecord, now time.Time) RoomSnapsh
 		StageID:             room.StageID,
 		ModeRulesetVersion:  mode.ModeRulesetVersion,
 		RulesetVersion:      RulesetVersion,
-		ModeConfigHash:      modeConfigHash(room.ModeID),
+		ModeConfigHash:      modeConfigHash(room.ModeID, room.ModeParams),
 		ModeParams:          copyAnyMap(room.ModeParams),
 		Participants:        participants,
 		Messages:            copyLobbyMessages(room.Messages),
@@ -6487,9 +6502,10 @@ func (s *Service) ensureBattleAllocationLocked(match *matchState) *BattleServerA
 		Endpoint:            server.Endpoint,
 		Players:             players,
 		MaxTicks:            allocationMaxTicks(match),
+		BossHP:              allocationBossHP(match),
 		ServerSeed:          match.ServerSeed,
 		ServerSeedHex:       seedHex(match.ServerSeed),
-		ModeConfigHash:      modeConfigHash(match.ModeID),
+		ModeConfigHash:      modeConfigHash(match.ModeID, matchOptionDigest(match)),
 		AllocatedAt:         s.clock(),
 		ServerAuthoritative: true,
 	}
@@ -7008,7 +7024,7 @@ func (s *Service) lobbyRoomAuditRecordLocked(room *RoomRecord, ticket *queueTick
 			requiredPlayers = mode.MinPlayers
 			modeRulesetVersion = mode.ModeRulesetVersion
 		}
-		modeConfigHashValue = modeConfigHash(room.ModeID)
+		modeConfigHashValue = modeConfigHash(room.ModeID, room.ModeParams)
 	}
 	ticketID := ""
 	deckHash := ""
@@ -7040,7 +7056,7 @@ func (s *Service) lobbyRoomAuditRecordLocked(room *RoomRecord, ticket *queueTick
 			}
 		}
 		if modeConfigHashValue == "" {
-			modeConfigHashValue = modeConfigHash(ticket.ModeID)
+			modeConfigHashValue = modeConfigHash(ticket.ModeID, ticket.ModeParams)
 		}
 	}
 	return LobbyRoomAuditRecord{
@@ -7545,9 +7561,12 @@ func deckSnapshotHash(deck DeckSnapshot) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func modeConfigHash(modeID string) string {
+func modeConfigHash(modeID string, options map[string]any) string {
 	mode := ModeConfigs[modeID]
-	payload, _ := json.Marshal(mode)
+	payload, _ := json.Marshal(map[string]any{
+		"mode":    mode,
+		"options": roomOptionDigest(options),
+	})
 	sum := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

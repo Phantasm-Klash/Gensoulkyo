@@ -272,3 +272,36 @@ func TestSpawnArgsPrefersTheRoomMatchLength(t *testing.T) {
 		t.Fatalf("spawn args lost the host backstop: %v", withoutRoom)
 	}
 }
+
+// TestSpawnArgsPrefersTheRoomBossHealth: the room's choice wins over the host
+// default, and a silent room keeps the host's value -- which is the only thing
+// that gives a boss a defined size when nobody asked for one.
+func TestSpawnArgsPrefersTheRoomBossHealth(t *testing.T) {
+	a := &agent{cfg: config{
+		LobbyEndpoint:  "lobby.example:7350",
+		BattleServerID: "bs-104-1",
+		DefaultBossHP:  1200,
+	}}
+	withRoom := a.spawnArgs(assignment{
+		MatchID:       "match_boss",
+		ModeID:        "mvp_boss_race",
+		Ruleset:       "ruleset-local-s0",
+		ServerSeedHex: "0a0b",
+		PlayerIDs:     []string{"p-a"},
+		BossHP:        12000,
+	}, 7404)
+	if !strings.Contains(strings.Join(withRoom, " "), "--boss-hp 12000") {
+		t.Fatalf("spawn args ignored the room boss health: %v", withRoom)
+	}
+
+	withoutRoom := a.spawnArgs(assignment{
+		MatchID:       "match_default_boss",
+		ModeID:        "mvp_boss_race",
+		Ruleset:       "ruleset-local-s0",
+		ServerSeedHex: "0a0b",
+		PlayerIDs:     []string{"p-a"},
+	}, 7405)
+	if !strings.Contains(strings.Join(withoutRoom, " "), "--boss-hp 1200") {
+		t.Fatalf("spawn args lost the host default boss health: %v", withoutRoom)
+	}
+}

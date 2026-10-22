@@ -424,7 +424,11 @@ type BattleServerAllocation struct {
 	// host's default". It travels with the allocation so the agent can pass it
 	// to the process; it does not affect simulation determinism, only when the
 	// process stops.
-	MaxTicks       int    `json:"max_ticks,omitempty"`
+	MaxTicks int `json:"max_ticks,omitempty"`
+	// BossHP overrides the boss catalog's health for this match (0 = the catalog
+	// value). Unlike max_ticks this changes what the simulation computes, so it
+	// belongs in the config hash and in the .dem header.
+	BossHP         int    `json:"boss_hp,omitempty"`
 	BattleServerID string `json:"battle_server_id"`
 	Endpoint       string `json:"endpoint"`
 	// EndpointReported marks an endpoint the out-of-process battle agent has
@@ -457,6 +461,9 @@ type BattleAgentAssignment struct {
 	// MaxTicks overrides the battle host's --max-ticks for this match (0 = the
 	// host's own default). It is the room's match-length option.
 	MaxTicks int `json:"max_ticks,omitempty"`
+	// BossHP overrides --boss-hp for this match (0 = the host's own default, then
+	// the boss catalog).
+	BossHP int `json:"boss_hp,omitempty"`
 	// Loadouts 是每名玩家的自机 loadout；battle-agent 逐条转成
 	// `--loadout <player_id>:<character_id>:<shot_type>:<bomb_type>`。
 	Loadouts []BattleAgentLoadout `json:"loadouts"`

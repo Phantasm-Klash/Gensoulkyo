@@ -394,6 +394,8 @@ type assignment struct {
 	// MaxTicks is the room's match length. 0 means the room did not pick one, so
 	// the host's own --max-ticks stands.
 	MaxTicks int `json:"max_ticks,omitempty"`
+	// BossHP is the room's boss health. 0 means the boss catalog decides.
+	BossHP int `json:"boss_hp,omitempty"`
 }
 
 // assignmentLoadout 与 core.BattleAgentLoadout 的 JSON 同名（player_id /
@@ -608,8 +610,14 @@ func (a *agent) spawnArgs(item assignment, port int) []string {
 	if a.cfg.LobbyEndpoint != "" {
 		args = append(args, "--lobby", a.cfg.LobbyEndpoint)
 	}
-	if a.cfg.DefaultBossHP > 0 {
-		args = append(args, "--boss-hp", strconv.Itoa(a.cfg.DefaultBossHP))
+	// Same precedence as the match length: the room's choice wins, and a room
+	// that made no choice falls back to the host default and then the catalog.
+	bossHP := item.BossHP
+	if bossHP <= 0 {
+		bossHP = a.cfg.DefaultBossHP
+	}
+	if bossHP > 0 {
+		args = append(args, "--boss-hp", strconv.Itoa(bossHP))
 	}
 	// The room may have picked its own match length. That wins over the host
 	// default, because it is the room expressing intent about this match -- but a
