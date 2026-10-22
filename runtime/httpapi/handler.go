@@ -254,6 +254,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.joinRoom(w, r, segments[2])
 		return
 	}
+	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "options" && r.Method == http.MethodPost {
+		h.updateRoomOptions(w, r, segments[2])
+		return
+	}
 	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "leave" && r.Method == http.MethodPost {
 		h.leaveRoom(w, r, segments[2])
 		return
@@ -839,6 +843,22 @@ func (h *Handler) joinRoom(w http.ResponseWriter, r *http.Request, roomCode stri
 		return
 	}
 	resp, err := h.service.JoinRoom(sessionToken(r), roomCode, req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// updateRoomOptions is the host-only door for changing room-level options while
+// the room is still waiting. The host check runs in the service, not here: this
+// handler only carries the session through.
+func (h *Handler) updateRoomOptions(w http.ResponseWriter, r *http.Request, roomCode string) {
+	var req core.UpdateRoomOptionsRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	resp, err := h.service.UpdateRoomOptions(sessionToken(r), roomCode, req)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -60,6 +60,7 @@ var restRoutes = []restRoute{
 	{http.MethodGet, "/v1/rooms/{roomCode}"},
 	{http.MethodGet, "/v1/rooms/{roomCode}/rules"},
 	{http.MethodPost, "/v1/rooms/{roomCode}/join"},
+	{http.MethodPost, "/v1/rooms/{roomCode}/options"},
 	{http.MethodPost, "/v1/rooms/{roomCode}/leave"},
 	{http.MethodPost, "/v1/rooms/{roomCode}/messages"},
 	// --- matchmaking ---

@@ -270,6 +270,13 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.JoinRoom(request.SessionID, roomCode, req) })
+	case "rooms.update":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		var req core.UpdateRoomOptionsRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.UpdateRoomOptions(request.SessionID, roomCode, req) })
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(request.SessionID, roomCode) })
@@ -449,6 +456,13 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.JoinRoom(message.SessionID, roomCode, req) })
+	case "rooms.update":
+		roomCode := fieldString(body, "room_code", "roomCode")
+		var req core.UpdateRoomOptionsRequest
+		if err := decodeBody(body, &req); err != nil {
+			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		}
+		return handler.call(func() (any, error) { return handler.service.UpdateRoomOptions(message.SessionID, roomCode, req) })
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(message.SessionID, roomCode) })

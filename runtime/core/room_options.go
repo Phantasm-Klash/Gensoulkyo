@@ -1,0 +1,249 @@
+package core
+
+import (
+	"strings"
+)
+
+// UpdateRoomOptionsRequest changes the room-level options a host picked when
+// creating the room.
+//
+// Every field is a pointer so "not provided" and "explicitly set to the empty
+// value" stay distinguishable -- clearing boss_id back to the default timeline is
+// a real edit, not an omission.
+type UpdateRoomOptionsRequest struct {
+	BossID      *string        `json:"boss_id,omitempty"`
+	CoopPlayers *int           `json:"coop_players,omitempty"`
+	StageID     *string        `json:"stage_id,omitempty"`
+	ModeParams  map[string]any `json:"mode_params,omitempty"`
+}
+
+// UpdateRoomOptions rewrites the room-level options while the room is still
+// waiting for players.
+//
+// This replaces the "leave the room and create it again" workaround: the host
+// keeps the room code, the guests that already joined keep their seats, and the
+// audit trail records one edit instead of a churn of create/leave pairs.
+//
+// Three rules shape it:
+//
+//   - Only the host, and only on the server. The client sends its session; the
+//     host check runs here. A guest that calls this is refused regardless of what
+//     its UI enabled.
+//   - Only while waiting. Once the match is found the options are already baked
+//     into the tickets, the allocation and the spawned process; accepting an edit
+//     then would leave those three disagreeing with the room record.
+//   - The seats that are already taken must be written through to the tickets,
+//     because the match snapshot is built from the tickets, not from the room.
+//     Changing the boss or the stage on the room alone is the easiest way to make
+//     a room that looks right and a match that is not.
+func (s *Service) UpdateRoomOptions(sessionToken string, roomCode string, req UpdateRoomOptionsRequest) (*QueueResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, err := s.userBySessionLocked(sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	code := strings.TrimSpace(roomCode)
+	if code == "" {
+		return nil, newError(codeInvalidRequest, "room_code is required")
+	}
+	room, ok, err := s.loadLiveRoomRecordLocked(code)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, newError(codeNotFound, "room %q not found", code)
+	}
+	if room.HostUserID != user.UserID {
+		return nil, newError(codeUnauthorized, "only the host can change room options")
+	}
+	if room.Status != RoomStatusWaiting {
+		return nil, newError(codeRoomUnavailable, "room is %s; options are locked once a match is found", room.Status)
+	}
+	mode, ok := ModeConfigs[room.ModeID]
+	if !ok {
+		return nil, newError(codeInvalidMode, "unsupported mode %q", room.ModeID)
+	}
+
+	changed := false
+
+	if req.BossID != nil {
+		bossID, err := validateBossID(*req.BossID)
+		if err != nil {
+			return nil, err
+		}
+		if room.BossID != bossID {
+			room.BossID = bossID
+			changed = true
+		}
+	}
+
+	if req.StageID != nil {
+		stage := strings.TrimSpace(*req.StageID)
+		if stage != "" {
+			if _, ok := allowedStageIDs[stage]; !ok {
+				return nil, newError(codeInvalidRequest, "unknown stage %q", stage)
+			}
+		}
+		if room.StageID != stage {
+			room.StageID = stage
+			changed = true
+		}
+	}
+
+	if req.CoopPlayers != nil {
+		if room.ModeID != "coop_boss" {
+			return nil, newError(codeInvalidRequest, "coop_players only applies to coop_boss rooms")
+		}
+		if err := validateCoopPlayers(room.ModeID, map[string]any{"coop_players": *req.CoopPlayers}); err != nil {
+			return nil, err
+		}
+		// Shrinking below the seats already taken would leave a room that can
+		// never fill; the host has to ask somebody to leave first.
+		if *req.CoopPlayers > 0 && len(room.TicketIDs) > *req.CoopPlayers {
+			return nil, newError(codeInvalidRequest,
+				"%d players are already seated, cannot shrink to %d", len(room.TicketIDs), *req.CoopPlayers)
+		}
+		if room.CoopPlayers != *req.CoopPlayers {
+			room.CoopPlayers = *req.CoopPlayers
+			changed = true
+		}
+	}
+
+	if len(req.ModeParams) > 0 {
+		if room.ModeParams == nil {
+			room.ModeParams = map[string]any{}
+		}
+		for key, value := range req.ModeParams {
+			trimmed := strings.TrimSpace(key)
+			if trimmed == "" {
+				continue
+			}
+			room.ModeParams[trimmed] = value
+			changed = true
+		}
+		if err := validateCoopPlayers(room.ModeID, room.ModeParams); err != nil {
+			return nil, err
+		}
+		// coop_players may have arrived through mode_params; mirror it onto the
+		// dedicated column so requiredPlayersForRoomLocked sees it.
+		if room.ModeID == "coop_boss" {
+			if seats := coopPlayersFromModeParams(room.ModeParams); seats > 0 && seats != room.CoopPlayers {
+				if len(room.TicketIDs) > seats {
+					return nil, newError(codeInvalidRequest,
+						"%d players are already seated, cannot shrink to %d", len(room.TicketIDs), seats)
+				}
+				room.CoopPlayers = seats
+				changed = true
+			}
+		}
+	}
+
+	if !changed {
+		// Nothing to write: answer with the room as it stands, so a client that
+		// re-sends the same options is idempotent rather than an error.
+		return s.hostQueueResponseLocked(room, mode, nil), nil
+	}
+
+	// Write the room's decision through to every ticket already in it. The match
+	// snapshot is assembled from the tickets, so a room-only edit would produce a
+	// match that disagrees with the room the players are looking at.
+	for _, ticketID := range room.TicketIDs {
+		ticket := s.queueTicketLocked(ticketID)
+		if ticket == nil {
+			continue
+		}
+		ticket.BossID = room.BossID
+		ticket.CoopPlayers = room.CoopPlayers
+		if room.StageID != "" {
+			ticket.Loadout.StageID = room.StageID
+		}
+		if err := s.saveQueueTicketLocked(ticket); err != nil {
+			return nil, err
+		}
+	}
+
+	room.UpdatedAt = s.clock()
+	if err := s.saveRoomLocked(room); err != nil {
+		return nil, err
+	}
+	// A shrink can fill the room. Form the match here rather than waiting for a
+	// join that will never come.
+	match, err := s.formMatchIfRoomFullLocked(&room, mode)
+	if err != nil {
+		return nil, err
+	}
+	s.notifyRoomStateLocked(&room)
+	return s.hostQueueResponseLocked(room, mode, match), nil
+}
+
+// hostQueueResponseLocked builds the room response from the host's ticket, which
+// is the one the caller asked with.
+func (s *Service) hostQueueResponseLocked(room RoomRecord, mode ModeConfig, match *matchState) *QueueResponse {
+	var hostTicket *queueTicket
+	for _, ticketID := range room.TicketIDs {
+		ticket := s.queueTicketLocked(ticketID)
+		if ticket == nil {
+			continue
+		}
+		if ticket.UserID == room.HostUserID {
+			hostTicket = ticket
+			break
+		}
+	}
+	if hostTicket == nil {
+		// The host's ticket is missing (it was reaped, or the room record is
+		// stale). Report the room without inventing a ticket response.
+		return &QueueResponse{
+			OK:              true,
+			QueueStatus:     room.Status,
+			ModeID:          room.ModeID,
+			RoomCode:        room.RoomCode,
+			RoomStatus:      room.Status,
+			RequiredPlayers: s.requiredPlayersForRoomLocked(mode, &room),
+			CurrentPlayers:  len(room.TicketIDs),
+		}
+	}
+	return s.queueResponseLocked(hostTicket, mode, len(room.TicketIDs), match)
+}
+
+// formMatchIfRoomFullLocked creates the match once the room has enough seats.
+//
+// It exists because "the room is full" is no longer only a consequence of
+// somebody joining: dropping a four-seat room to two seats fills it too, and at
+// that moment nobody is going to join and trigger the check. Without this the
+// room would sit at waiting forever with every seat taken.
+//
+// It does only the shared part -- create the match, flip the room to found, audit
+// the matched seats. Callers still do their own member write and room-state push,
+// because JoinRoom records the arriving seat and UpdateRoomOptions does not have
+// one to record.
+func (s *Service) formMatchIfRoomFullLocked(room *RoomRecord, mode ModeConfig) (*matchState, error) {
+	if room == nil || room.Status != RoomStatusWaiting {
+		return nil, nil
+	}
+	required := s.requiredPlayersForRoomLocked(mode, room)
+	if required <= 0 || len(room.TicketIDs) < required {
+		return nil, nil
+	}
+	groupIDs := append([]string{}, room.TicketIDs[:required]...)
+	match, err := s.createMatchLocked(mode, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	room.MatchID = match.MatchID
+	room.Status = RoomStatusFound
+	if err := s.saveRoomLocked(*room); err != nil {
+		return nil, err
+	}
+	now := s.clock()
+	for _, matchedTicketID := range groupIDs {
+		matchedTicket := s.queueTicketLocked(matchedTicketID)
+		if matchedTicket == nil {
+			continue
+		}
+		s.recordLobbyRoomAuditLocked(room, matchedTicket, matchedTicket.UserID, "matched", now)
+	}
+	return match, nil
+}

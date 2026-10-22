@@ -8283,6 +8283,7 @@ func contractClientOperations() []string {
 		"rooms.get",
 		"rooms.rules",
 		"rooms.join",
+		"rooms.update",
 		"rooms.leave",
 		"rooms.message",
 		"rooms.chat",
@@ -8337,6 +8338,7 @@ func contractClientWSSOperations() []string {
 		"rooms.get",
 		"rooms.rules",
 		"rooms.join",
+		"rooms.update",
 		"rooms.leave",
 		"rooms.message",
 		"rooms.chat",
@@ -8487,6 +8489,10 @@ func clientOperationRequestFields(operation string) []string {
 		return []string{"ticket_id", "match_id", "client_tick", "last_event_cursor"}
 	case "matchmaking.join", "rooms.create", "rooms.join":
 		return []string{"mode_id", "active_deck_id", "deck_snapshot", "mode_params", "client_version"}
+	case "rooms.update":
+		// Only the room-level options a host may change after creation. The deck
+		// and the loadout stay with their owners.
+		return []string{"room_code", "boss_id", "coop_players", "stage_id", "mode_params"}
 	case "matchmaking.ticket", "matchmaking.cancel":
 		return []string{"ticket_id"}
 	case "rooms.list", "business.contract":
@@ -8547,7 +8553,7 @@ func clientOperationProjectionFields(operation string) []string {
 		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("battle_ticket")...)
 	case "match.mode_action":
 		return append(common, "match_id", "mode_id", "user_id", "action_id", "action_type", "accepted", "reason", "status", "payload", "mode_state", "event", "server_time")
-	case "matchmaking.join", "matchmaking.ticket", "matchmaking.cancel", "rooms.create", "rooms.join", "rooms.leave":
+	case "matchmaking.join", "matchmaking.ticket", "matchmaking.cancel", "rooms.create", "rooms.join", "rooms.update", "rooms.leave":
 		fields := append(common, "queue_status", "ticket_id", "match_id", "mode_id", "loadout", "room_code", "room_status", "required_players", "current_players", "match_start", "battle_allocation", "battle_ticket")
 		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)
 		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("battle_ticket")...)
