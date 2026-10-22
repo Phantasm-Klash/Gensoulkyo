@@ -29,8 +29,13 @@ type QueueTicketRecord struct {
 	CoopPlayers  int
 	DeckSnapshot DeckSnapshot
 	Loadout      PlayerLoadout
-	CreatedAt    time.Time
-	LastSeenAt   time.Time
+	// ModeParams is the room's option snapshot (boss, stage, seats, match
+	// length). Room-level, so it rides on every ticket in the room: the match
+	// snapshot is assembled from tickets, and a ticket without the options
+	// produces a match that disagrees with the room it came from.
+	ModeParams map[string]any
+	CreatedAt  time.Time
+	LastSeenAt time.Time
 }
 
 // Queue ticket status values accepted by the queue_tickets check constraint.
@@ -65,10 +70,11 @@ const insertQueueTicketSQL = `
 INSERT INTO queue_tickets (
     ticket_id, user_id, mode_id, queue_key, room_code, room_status,
     match_id, status, boss_id, coop_players,
-    deck_snapshot_json, loadout_json, created_at, last_seen_at, updated_at
+    deck_snapshot_json, loadout_json, created_at, last_seen_at,
+    mode_params, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-    $11::jsonb, $12::jsonb, $13, $14, now()
+    $11::jsonb, $12::jsonb, $13, $14, $15::jsonb, now()
 ) ON CONFLICT (ticket_id) DO UPDATE SET
     mode_id = EXCLUDED.mode_id,
     queue_key = EXCLUDED.queue_key,
@@ -80,20 +86,21 @@ INSERT INTO queue_tickets (
     coop_players = EXCLUDED.coop_players,
     deck_snapshot_json = EXCLUDED.deck_snapshot_json,
     loadout_json = EXCLUDED.loadout_json,
+    mode_params = EXCLUDED.mode_params,
     last_seen_at = EXCLUDED.last_seen_at,
     updated_at = now()`
 
 const selectQueueTicketSQL = `
 SELECT ticket_id, user_id, mode_id, queue_key, room_code, room_status,
        match_id, status, boss_id, coop_players,
-       deck_snapshot_json, loadout_json, created_at, last_seen_at
+       deck_snapshot_json, loadout_json, created_at, last_seen_at, mode_params
   FROM queue_tickets
  WHERE ticket_id = $1`
 
 const queueTicketColumns = `
 SELECT ticket_id, user_id, mode_id, queue_key, room_code, room_status,
        match_id, status, boss_id, coop_players,
-       deck_snapshot_json, loadout_json, created_at, last_seen_at
+       deck_snapshot_json, loadout_json, created_at, last_seen_at, mode_params
   FROM queue_tickets`
 
 const listQueueTicketsByRoomSQL = queueTicketColumns + `
@@ -168,6 +175,10 @@ func (store *SQLQueueTicketStore) Save(record QueueTicketRecord) error {
 	if err != nil {
 		return err
 	}
+	modeParams, err := marshalRoomJSON(record.ModeParams)
+	if err != nil {
+		return err
+	}
 	createdAt := record.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -192,6 +203,7 @@ func (store *SQLQueueTicketStore) Save(record QueueTicketRecord) error {
 		loadout,
 		createdAt,
 		lastSeenAt,
+		modeParams,
 	)
 	return err
 }
@@ -277,6 +289,7 @@ func scanQueueTicket(scanner queueTicketScanner) (QueueTicketRecord, error) {
 	var record QueueTicketRecord
 	var deckJSON []byte
 	var loadoutJSON []byte
+	var modeJSON []byte
 	err := scanner.Scan(
 		&record.TicketID,
 		&record.UserID,
@@ -292,9 +305,17 @@ func scanQueueTicket(scanner queueTicketScanner) (QueueTicketRecord, error) {
 		&loadoutJSON,
 		&record.CreatedAt,
 		&record.LastSeenAt,
+		&modeJSON,
 	)
 	if err != nil {
 		return QueueTicketRecord{}, err
+	}
+	if len(modeJSON) > 0 {
+		var decoded map[string]any
+		if err := json.Unmarshal(modeJSON, &decoded); err != nil {
+			return QueueTicketRecord{}, err
+		}
+		record.ModeParams = decoded
 	}
 	if len(deckJSON) > 0 {
 		if err := json.Unmarshal(deckJSON, &record.DeckSnapshot); err != nil {
@@ -435,6 +456,7 @@ func queueTicketRecordFromTicket(ticket *queueTicket) QueueTicketRecord {
 		CoopPlayers:  ticket.CoopPlayers,
 		DeckSnapshot: ticket.DeckSnapshot,
 		Loadout:      ticket.Loadout,
+		ModeParams:   copyAnyMap(ticket.ModeParams),
 		CreatedAt:    ticket.CreatedAt,
 		LastSeenAt:   ticket.LastSeenAt,
 	}
@@ -454,7 +476,12 @@ func (record QueueTicketRecord) toQueueTicket() queueTicket {
 		CoopPlayers:  record.CoopPlayers,
 		DeckSnapshot: record.DeckSnapshot,
 		Loadout:      record.Loadout,
-		CreatedAt:    record.CreatedAt,
-		LastSeenAt:   record.LastSeenAt,
+		ModeParams:   copyAnyMap(record.ModeParams),
+		// Derived from the persisted options rather than stored separately, so
+		// a restart restores it. Two copies of the same fact is how options
+		// drift out of sync with the room they came from.
+		MaxTicks:   intFromAnyValue(record.ModeParams["max_ticks"]),
+		CreatedAt:  record.CreatedAt,
+		LastSeenAt: record.LastSeenAt,
 	}
 }

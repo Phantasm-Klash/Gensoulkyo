@@ -159,6 +159,7 @@ func (s *Service) UpdateRoomOptions(sessionToken string, roomCode string, req Up
 		}
 		ticket.BossID = room.BossID
 		ticket.CoopPlayers = room.CoopPlayers
+		ticket.ModeParams = copyAnyMap(room.ModeParams)
 		ticket.MaxTicks = intFromAnyValue(room.ModeParams["max_ticks"])
 		if room.StageID != "" {
 			ticket.Loadout.StageID = room.StageID

@@ -299,8 +299,12 @@ type queueTicket struct {
 	// CoopPlayers: 房主在建房时选择的合作人数（coop_boss 专属，2 或 4）；
 	// 0 = 非 coop 房，按 mode.MinPlayers 成局。
 	CoopPlayers int
-	// MaxTicks 是房主选的对局时长（tick）；0 = 用对局服默认。
+	// MaxTicks 是房主选的对局时长（tick）；0 = 用对局服默认。它是 ModeParams
+	// 里 max_ticks 的派生值，加载时从持久化的选项恢复（见 queue_ticket_store）。
 	MaxTicks int
+	// ModeParams 是房间选项快照（boss / stage / 人数 / 时长），房间级：同一房间
+	// 每个座位的票据都带同一份，因为成局快照是从票据拼出来的。
+	ModeParams map[string]any
 }
 
 type matchParticipantSpec struct {
@@ -1495,6 +1499,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		RoomStatus:   "waiting",
 		CoopPlayers:  coopPlayers,
 		MaxTicks:     maxTicks,
+		ModeParams:   copyAnyMap(req.ModeParams),
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	room := &RoomRecord{
@@ -1631,6 +1636,7 @@ func (s *Service) JoinRoom(sessionToken string, roomCode string, req JoinRoomReq
 		RoomCode:     normalizedRoomCode,
 		RoomStatus:   "waiting",
 		CoopPlayers:  room.CoopPlayers,
+		ModeParams:   copyAnyMap(room.ModeParams),
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	s.tickets[ticketID] = ticket
