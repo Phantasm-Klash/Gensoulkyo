@@ -126,6 +126,9 @@ func (s *Service) UpdateRoomOptions(sessionToken string, roomCode string, req Up
 		if err := validateCoopPlayers(room.ModeID, room.ModeParams); err != nil {
 			return nil, err
 		}
+		if _, err := maxTicksFromModeParams(room.ModeParams); err != nil {
+			return nil, err
+		}
 		// coop_players may have arrived through mode_params; mirror it onto the
 		// dedicated column so requiredPlayersForRoomLocked sees it.
 		if room.ModeID == "coop_boss" {
@@ -156,6 +159,7 @@ func (s *Service) UpdateRoomOptions(sessionToken string, roomCode string, req Up
 		}
 		ticket.BossID = room.BossID
 		ticket.CoopPlayers = room.CoopPlayers
+		ticket.MaxTicks = intFromAnyValue(room.ModeParams["max_ticks"])
 		if room.StageID != "" {
 			ticket.Loadout.StageID = room.StageID
 		}
@@ -246,4 +250,50 @@ func (s *Service) formMatchIfRoomFullLocked(room *RoomRecord, mode ModeConfig) (
 		s.recordLobbyRoomAuditLocked(room, matchedTicket, matchedTicket.UserID, "matched", now)
 	}
 	return match, nil
+}
+
+// MinRoomMaxTicks / MaxRoomMaxTicks bound the match-length option.
+//
+// 600 ticks is ten seconds at 60Hz -- short enough to be a real choice for a
+// quick duel, long enough that a match is not over before it starts. 7200 is the
+// battle host's own process backstop, so a room cannot ask for more than the
+// deployment would allow anyway. Steps are one second (60 ticks), which keeps the
+// value readable as "how long is this match" instead of an arbitrary tick count.
+const (
+	MinRoomMaxTicks  = 600
+	MaxRoomMaxTicks  = 7200
+	RoomMaxTicksStep = 60
+)
+
+// maxTicksFromModeParams reads and validates the match-length option, returning 0
+// when the room does not set one (meaning "use the battle host default").
+func maxTicksFromModeParams(params map[string]any) (int, error) {
+	raw, ok := params["max_ticks"]
+	if !ok || raw == nil {
+		return 0, nil
+	}
+	ticks := intFromAnyValue(raw)
+	if ticks <= 0 {
+		return 0, nil
+	}
+	if ticks < MinRoomMaxTicks || ticks > MaxRoomMaxTicks {
+		return 0, newError(codeInvalidRequest,
+			"max_ticks must be between %d and %d, got %d", MinRoomMaxTicks, MaxRoomMaxTicks, ticks)
+	}
+	if ticks%RoomMaxTicksStep != 0 {
+		return 0, newError(codeInvalidRequest,
+			"max_ticks must be a multiple of %d, got %d", RoomMaxTicksStep, ticks)
+	}
+	return ticks, nil
+}
+
+// allocationMaxTicks reads the budget the match was created with.
+func allocationMaxTicks(match *matchState) int {
+	if match == nil {
+		return 0
+	}
+	if ticks := intFromAnyValue(match.ModeState["max_ticks"]); ticks > 0 {
+		return ticks
+	}
+	return 0
 }

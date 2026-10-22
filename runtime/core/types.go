@@ -415,13 +415,18 @@ type BattleAllocationPlayer struct {
 }
 
 type BattleServerAllocation struct {
-	OK             bool         `json:"ok"`
-	Version        VersionStamp `json:"version"`
-	MatchID        string       `json:"match_id"`
-	ModeID         string       `json:"mode_id"`
-	BossID         string       `json:"boss_id,omitempty"`
-	BattleServerID string       `json:"battle_server_id"`
-	Endpoint       string       `json:"endpoint"`
+	OK      bool         `json:"ok"`
+	Version VersionStamp `json:"version"`
+	MatchID string       `json:"match_id"`
+	ModeID  string       `json:"mode_id"`
+	BossID  string       `json:"boss_id,omitempty"`
+	// MaxTicks is the room's match length in ticks, 0 meaning "use the battle
+	// host's default". It travels with the allocation so the agent can pass it
+	// to the process; it does not affect simulation determinism, only when the
+	// process stops.
+	MaxTicks       int    `json:"max_ticks,omitempty"`
+	BattleServerID string `json:"battle_server_id"`
+	Endpoint       string `json:"endpoint"`
 	// EndpointReported marks an endpoint the out-of-process battle agent has
 	// confirmed it actually bound. Until it is set the endpoint is only the
 	// registry handle, and a client-facing consumer (the battle relay) must not
@@ -449,6 +454,9 @@ type BattleAgentAssignment struct {
 	PlayerIDs      []string `json:"player_ids"`
 	// BossID 是本局 boss（房间级，仅房主可选）；空串 = 默认 timeline（现状）。
 	BossID string `json:"boss_id,omitempty"`
+	// MaxTicks overrides the battle host's --max-ticks for this match (0 = the
+	// host's own default). It is the room's match-length option.
+	MaxTicks int `json:"max_ticks,omitempty"`
 	// Loadouts 是每名玩家的自机 loadout；battle-agent 逐条转成
 	// `--loadout <player_id>:<character_id>:<shot_type>:<bomb_type>`。
 	Loadouts []BattleAgentLoadout `json:"loadouts"`

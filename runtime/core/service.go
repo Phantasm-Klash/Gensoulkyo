@@ -299,6 +299,8 @@ type queueTicket struct {
 	// CoopPlayers: 房主在建房时选择的合作人数（coop_boss 专属，2 或 4）；
 	// 0 = 非 coop 房，按 mode.MinPlayers 成局。
 	CoopPlayers int
+	// MaxTicks 是房主选的对局时长（tick）；0 = 用对局服默认。
+	MaxTicks int
 }
 
 type matchParticipantSpec struct {
@@ -306,6 +308,8 @@ type matchParticipantSpec struct {
 	DeckSnapshot DeckSnapshot
 	Loadout      PlayerLoadout
 	BossID       string
+	// MaxTicks 来自房主所在票据：房间级选项，成局时写进 ModeState。
+	MaxTicks int
 }
 
 type rematchState struct {
@@ -1457,6 +1461,10 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 	if err := validateCoopPlayers(modeID, req.ModeParams); err != nil {
 		return nil, err
 	}
+	maxTicks, err := maxTicksFromModeParams(req.ModeParams)
+	if err != nil {
+		return nil, err
+	}
 	coopPlayers := 0
 	if modeID == "coop_boss" {
 		coopPlayers = coopPlayersFromModeParams(req.ModeParams)
@@ -1486,6 +1494,7 @@ func (s *Service) CreateRoom(sessionToken string, req CreateRoomRequest) (*Queue
 		RoomCode:     roomCode,
 		RoomStatus:   "waiting",
 		CoopPlayers:  coopPlayers,
+		MaxTicks:     maxTicks,
 	}
 	ticket.LastSeenAt = ticket.CreatedAt
 	room := &RoomRecord{
@@ -2965,6 +2974,7 @@ func (s *Service) BattleAgentAssignments(battleServerID string) (*BattleAgentAss
 			ModeConfigHash: alloc.ModeConfigHash,
 			PlayerIDs:      playerIDs,
 			BossID:         alloc.BossID,
+			MaxTicks:       alloc.MaxTicks,
 			Loadouts:       loadouts,
 			Players:        players,
 			AllocatedAt:    alloc.AllocatedAt,
@@ -3245,6 +3255,7 @@ func (s *Service) createMatchLocked(mode ModeConfig, ticketIDs []string) (*match
 			DeckSnapshot: copyDeckSnapshot(ticket.DeckSnapshot),
 			Loadout:      ticket.Loadout,
 			BossID:       ticket.BossID,
+			MaxTicks:     ticket.MaxTicks,
 		})
 	}
 	match, err := s.createMatchFromParticipantsLocked(mode, participants)
@@ -3329,6 +3340,11 @@ func (s *Service) createMatchFromParticipantsLocked(mode ModeConfig, participant
 		match.BossHP = match.BossMaxHP
 	}
 	match.ModeState["stage_id"] = match.StageID
+	// The room's match length, if the host picked one. Host-level because the
+	// process that runs it is per match, not per seat.
+	if len(participants) > 0 && participants[0].MaxTicks > 0 {
+		match.ModeState["max_ticks"] = participants[0].MaxTicks
+	}
 	for _, participant := range participants {
 		user := s.users[participant.UserID]
 		if user == nil {
@@ -6430,6 +6446,7 @@ func (s *Service) ensureBattleAllocationLocked(match *matchState) *BattleServerA
 		BattleServerID:      server.BattleServerID,
 		Endpoint:            server.Endpoint,
 		Players:             players,
+		MaxTicks:            allocationMaxTicks(match),
 		ServerSeed:          match.ServerSeed,
 		ServerSeedHex:       seedHex(match.ServerSeed),
 		ModeConfigHash:      modeConfigHash(match.ModeID),

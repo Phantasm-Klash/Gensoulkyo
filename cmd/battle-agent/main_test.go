@@ -239,3 +239,36 @@ func TestModeProjectionDropsForbiddenDamageField(t *testing.T) {
 		}
 	}
 }
+
+// TestSpawnArgsPrefersTheRoomMatchLength: a room that picked a length wins over
+// the host default, and a room that did not keeps the host backstop -- both
+// matter, because the second is the only thing that kills an abandoned process.
+func TestSpawnArgsPrefersTheRoomMatchLength(t *testing.T) {
+	a := &agent{cfg: config{
+		LobbyEndpoint:   "lobby.example:7350",
+		BattleServerID:  "bs-104-1",
+		DefaultMaxTicks: 7200,
+	}}
+	withRoom := a.spawnArgs(assignment{
+		MatchID:       "match_short",
+		ModeID:        "mvp_boss_race",
+		Ruleset:       "ruleset-local-s0",
+		ServerSeedHex: "0a0b",
+		PlayerIDs:     []string{"p-a"},
+		MaxTicks:      1800,
+	}, 7402)
+	if !strings.Contains(strings.Join(withRoom, " "), "--max-ticks 1800") {
+		t.Fatalf("spawn args ignored the room match length: %v", withRoom)
+	}
+
+	withoutRoom := a.spawnArgs(assignment{
+		MatchID:       "match_default",
+		ModeID:        "mvp_boss_race",
+		Ruleset:       "ruleset-local-s0",
+		ServerSeedHex: "0a0b",
+		PlayerIDs:     []string{"p-a"},
+	}, 7403)
+	if !strings.Contains(strings.Join(withoutRoom, " "), "--max-ticks 7200") {
+		t.Fatalf("spawn args lost the host backstop: %v", withoutRoom)
+	}
+}

@@ -391,6 +391,9 @@ type assignment struct {
 	// 自机 loadout，逐条透传给 phk_battle_server 的 --boss-id / --loadout。
 	BossID   string              `json:"boss_id,omitempty"`
 	Loadouts []assignmentLoadout `json:"loadouts"`
+	// MaxTicks is the room's match length. 0 means the room did not pick one, so
+	// the host's own --max-ticks stands.
+	MaxTicks int `json:"max_ticks,omitempty"`
 }
 
 // assignmentLoadout 与 core.BattleAgentLoadout 的 JSON 同名（player_id /
@@ -608,8 +611,16 @@ func (a *agent) spawnArgs(item assignment, port int) []string {
 	if a.cfg.DefaultBossHP > 0 {
 		args = append(args, "--boss-hp", strconv.Itoa(a.cfg.DefaultBossHP))
 	}
-	if a.cfg.DefaultMaxTicks > 0 {
-		args = append(args, "--max-ticks", strconv.Itoa(a.cfg.DefaultMaxTicks))
+	// The room may have picked its own match length. That wins over the host
+	// default, because it is the room expressing intent about this match -- but a
+	// room that says nothing keeps the deployment's backstop, so an abandoned
+	// process still dies.
+	maxTicks := item.MaxTicks
+	if maxTicks <= 0 {
+		maxTicks = a.cfg.DefaultMaxTicks
+	}
+	if maxTicks > 0 {
+		args = append(args, "--max-ticks", strconv.Itoa(maxTicks))
 	}
 	if a.cfg.SnapshotEvery > 0 {
 		args = append(args, "--snapshot-every", strconv.Itoa(a.cfg.SnapshotEvery))
