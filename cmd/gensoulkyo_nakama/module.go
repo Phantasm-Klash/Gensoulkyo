@@ -15,6 +15,7 @@ import (
 
 	"gensoulkyo/runtime/core"
 	"gensoulkyo/runtime/nakamaapi"
+	"gensoulkyo/runtime/storage"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -49,7 +50,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		// Pushes travel as Nakama notifications: the realtime protocol is a
 		// closed enum, so this is the only server-initiated channel the socket
 		// carries. Without it the lobby still works, clients just poll.
-		dbHandler, err := nakamaapi.NewWithDatabaseWithNotifier(db, nakamaapi.NewNakamaNotifier(nk, logger))
+		dbHandler, err := nakamaapi.NewWithDatabaseWithNotifier(db, nakamaapi.NewNakamaNotifier(nk, logger), roomCreationLimiter(logger))
 		if err != nil {
 			return err
 		}
@@ -352,4 +353,36 @@ func runtimeCtxStringMap(ctx context.Context, key string) map[string]string {
 	default:
 		return map[string]string{}
 	}
+}
+
+// roomCreationLimiter prefers Redis so one player's budget is shared across every
+// lobby replica, and falls back to the in-process limiter when Redis is not
+// configured or not reachable.
+//
+// Falling back rather than failing is deliberate and matches what the limiter is
+// for: its own failure mode has to stay "allowed", so that a Redis outage costs
+// the abuse window reopening rather than people being unable to create rooms. The
+// client is never closed on purpose -- it holds the connection pool and lives as
+// long as the process.
+func roomCreationLimiter(logger runtime.Logger) core.RoomCreationLimiter {
+	fallback := core.NewMemoryRoomCreationLimiter(core.DefaultRoomCreationLimit, core.DefaultRoomCreationWindow)
+	config := storage.RedisConfigFromEnv()
+	if !config.Enabled() {
+		return fallback
+	}
+	client, err := storage.NewRedisClient(config)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("room creation limiter: falling back to in-process, redis client: %v", err)
+		}
+		return fallback
+	}
+	limiter, err := storage.NewRedisRoomCreationLimiter(client, core.DefaultRoomCreationLimit, core.DefaultRoomCreationWindow)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("room creation limiter: falling back to in-process, redis limiter: %v", err)
+		}
+		return fallback
+	}
+	return limiter
 }

@@ -11,7 +11,7 @@ import (
 // state both live in db: the rooms, matches and battle tickets are the system
 // of record, so a restarted lobby finds them again.
 func NewWithDatabase(db *sql.DB, options ...Option) (*Handler, error) {
-	return newWithDatabase(db, nil, nil, options...)
+	return newWithDatabase(db, nil, nil, nil, options...)
 }
 
 // NewWithDatabaseWithNotifier builds a durable handler whose lobby pushes go out
@@ -20,8 +20,8 @@ func NewWithDatabase(db *sql.DB, options ...Option) (*Handler, error) {
 // The notifier is a core interface rather than a runtime type so core stays free
 // of the runtime module; see NakamaNotifier for the implementation that turns a
 // push into a Nakama notification.
-func NewWithDatabaseWithNotifier(db *sql.DB, notifier core.LobbyNotifier, options ...Option) (*Handler, error) {
-	return newWithDatabase(db, nil, notifier, options...)
+func NewWithDatabaseWithNotifier(db *sql.DB, notifier core.LobbyNotifier, limiter core.RoomCreationLimiter, options ...Option) (*Handler, error) {
+	return newWithDatabase(db, nil, notifier, limiter, options...)
 }
 
 // NewWithDatabaseStores builds a handler whose audit repositories use db while
@@ -45,7 +45,7 @@ func NewWithDatabaseStores(
 		matches:      matches,
 		tickets:      tickets,
 		queueTickets: queueTickets,
-	}, nil, options...)
+	}, nil, nil, options...)
 }
 
 // storeSeams carries an explicit set of persistence seams.
@@ -56,7 +56,7 @@ type storeSeams struct {
 	queueTickets core.QueueTicketStore
 }
 
-func newWithDatabase(db *sql.DB, override *storeSeams, notifier core.LobbyNotifier, options ...Option) (*Handler, error) {
+func newWithDatabase(db *sql.DB, override *storeSeams, notifier core.LobbyNotifier, limiter core.RoomCreationLimiter, options ...Option) (*Handler, error) {
 	sink, err := security.NewSQLBusinessEnvelopeAuditSink(db)
 	if err != nil {
 		return nil, err
@@ -115,6 +115,7 @@ func newWithDatabase(db *sql.DB, override *storeSeams, notifier core.LobbyNotifi
 		QueueTickets:             queueTicketStore,
 		PlayableModes:            core.PlayableModeIDs(),
 		Notifier:                 notifier,
+		RoomCreationLimiter:      limiter,
 	})
 	handlerOptions := []Option{WithBusinessEnvelopeGuard(guard)}
 	handlerOptions = append(handlerOptions, options...)
