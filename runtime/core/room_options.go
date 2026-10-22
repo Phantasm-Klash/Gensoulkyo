@@ -1,7 +1,9 @@
 package core
 
 import (
+	"sort"
 	"strings"
+	"time"
 )
 
 // UpdateRoomOptionsRequest changes the room-level options a host picked when
@@ -421,4 +423,50 @@ func allocationBossHP(match *matchState) int {
 		return 0
 	}
 	return intFromAnyValue(match.ModeState["boss_hp"])
+}
+
+// PlayableModes reports the modes this deployment will actually run.
+//
+// It is served to clients so the room-building screen can grey out the modes that
+// have no battle server simulation, instead of letting a player build a room and
+// have the match fail when it starts. The alternative -- the client keeping its
+// own copy of the list -- is exactly the kind of duplication that drifts: the
+// server gains a mode, the client still hides it, and nobody notices until a
+// player reports a missing option.
+//
+// An empty result means "no gate is configured", which clients must read as "ask
+// the deployment", not as "nothing is playable". In practice the player-facing
+// deployment always injects a set.
+func (s *Service) PlayableModes() []string {
+	if len(s.playableModes) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(s.playableModes))
+	for id := range s.playableModes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// PlayableModesResponse is the client-facing answer.
+type PlayableModesResponse struct {
+	OK                  bool      `json:"ok"`
+	ModeIDs             []string  `json:"mode_ids"`
+	ServerAuthoritative bool      `json:"server_authoritative"`
+	ServerTime          time.Time `json:"server_time"`
+}
+
+func (s *Service) PlayableModesFor(sessionToken string) (*PlayableModesResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.userBySessionLocked(sessionToken); err != nil {
+		return nil, err
+	}
+	return &PlayableModesResponse{
+		OK:                  true,
+		ModeIDs:             s.PlayableModes(),
+		ServerAuthoritative: true,
+		ServerTime:          s.clock(),
+	}, nil
 }

@@ -8355,6 +8355,7 @@ func contractClientOperations() []string {
 		"matchmaking.ticket",
 		"matchmaking.cancel",
 		"rooms.create",
+		"rooms.playable-modes",
 		"rooms.list",
 		"rooms.get",
 		"rooms.rules",
@@ -8410,6 +8411,7 @@ func contractClientWSSOperations() []string {
 		"matchmaking.ticket",
 		"matchmaking.cancel",
 		"rooms.create",
+		"rooms.playable-modes",
 		"rooms.list",
 		"rooms.get",
 		"rooms.rules",
@@ -8571,7 +8573,7 @@ func clientOperationRequestFields(operation string) []string {
 		return []string{"room_code", "boss_id", "coop_players", "stage_id", "mode_params"}
 	case "matchmaking.ticket", "matchmaking.cancel":
 		return []string{"ticket_id"}
-	case "rooms.list", "business.contract":
+	case "rooms.list", "rooms.playable-modes", "business.contract":
 		return []string{}
 	case "rooms.get", "rooms.rules", "rooms.leave":
 		return []string{"room_code"}
@@ -8629,7 +8631,7 @@ func clientOperationProjectionFields(operation string) []string {
 		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("battle_ticket")...)
 	case "match.mode_action":
 		return append(common, "match_id", "mode_id", "user_id", "action_id", "action_type", "accepted", "reason", "status", "payload", "mode_state", "event", "server_time")
-	case "matchmaking.join", "matchmaking.ticket", "matchmaking.cancel", "rooms.create", "rooms.join", "rooms.update", "rooms.leave":
+	case "matchmaking.join", "matchmaking.ticket", "matchmaking.cancel", "rooms.create", "rooms.join", "rooms.update", "rooms.playable-modes", "rooms.leave":
 		fields := append(common, "queue_status", "ticket_id", "match_id", "mode_id", "loadout", "room_code", "room_status", "required_players", "current_players", "match_start", "battle_allocation", "battle_ticket")
 		fields = appendUniqueStrings(fields, battleAllocationProjectionFields("battle_allocation")...)
 		return appendUniqueStrings(fields, signedBattleTicketProjectionFields("battle_ticket")...)

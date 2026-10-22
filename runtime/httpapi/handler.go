@@ -258,6 +258,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.updateRoomOptions(w, r, segments[2])
 		return
 	}
+	if len(segments) == 3 && segments[0] == "v1" && segments[1] == "modes" && segments[2] == "playable" && r.Method == http.MethodGet {
+		h.playableModes(w, r)
+		return
+	}
 	if len(segments) == 4 && segments[0] == "v1" && segments[1] == "rooms" && segments[3] == "leave" && r.Method == http.MethodPost {
 		h.leaveRoom(w, r, segments[2])
 		return
@@ -859,6 +863,17 @@ func (h *Handler) updateRoomOptions(w http.ResponseWriter, r *http.Request, room
 		return
 	}
 	resp, err := h.service.UpdateRoomOptions(sessionToken(r), roomCode, req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// playableModes tells the client which modes this deployment will actually run, so
+// the room-building screen can grey out the ones that would fail on start.
+func (h *Handler) playableModes(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.service.PlayableModesFor(sessionToken(r))
 	if err != nil {
 		writeError(w, err)
 		return

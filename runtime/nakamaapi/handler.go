@@ -277,6 +277,8 @@ func (handler *Handler) HandleRPC(request RPCRequest) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.UpdateRoomOptions(request.SessionID, roomCode, req) })
+	case "rooms.playable-modes":
+		return handler.call(func() (any, error) { return handler.service.PlayableModesFor(request.SessionID) })
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(request.SessionID, roomCode) })
@@ -463,6 +465,8 @@ func (handler *Handler) HandleWSSMessage(message WSSMessage) Response {
 			return errorResponse(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 		}
 		return handler.call(func() (any, error) { return handler.service.UpdateRoomOptions(message.SessionID, roomCode, req) })
+	case "rooms.playable-modes":
+		return handler.call(func() (any, error) { return handler.service.PlayableModesFor(message.SessionID) })
 	case "rooms.leave":
 		roomCode := fieldString(body, "room_code", "roomCode")
 		return handler.call(func() (any, error) { return handler.service.LeaveRoom(message.SessionID, roomCode) })
