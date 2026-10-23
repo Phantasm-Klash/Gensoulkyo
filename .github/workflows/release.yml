@@ -1,0 +1,75 @@
+name: Release
+
+# Builds the lobby server binaries on a `v*` tag and publishes them as a
+# workflow artifact + GitHub Release asset. PhK-Protocol is checked out as a
+# sibling because go.mod replaces the module with a local path (same pattern
+# as the Server Protocol Audit workflow). Tags containing -rc*/-beta*/-alpha*
+# are published as prereleases.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: go build + publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Gensoulkyo
+        uses: actions/checkout@v4
+        with:
+          path: Gensoulkyo
+      - name: Checkout PhK-Protocol
+        uses: actions/checkout@v4
+        with:
+          repository: Phantasm-Klash/PhK-Protocol
+          path: PhK-Protocol
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: Gensoulkyo/go.mod
+          cache: true
+          cache-dependency-path: Gensoulkyo/go.sum
+      - name: Build
+        working-directory: Gensoulkyo
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          go build -o ../dist/gensoulkyo ./cmd/gensoulkyo
+          go build -o ../dist/gensoulkyo-account ./cmd/gensoulkyo-account
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum ./* > SHA256SUMS.txt )
+          ls -l dist
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gensoulkyo-${{ github.ref_name }}
+          path: dist/*
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Tags like v0.1.0-rc1 are prereleases, not full releases.
+          case "${GITHUB_REF_NAME}" in
+            *-rc*|*-beta*|*-alpha*)
+              gh release create "${GITHUB_REF_NAME}" dist/* \
+                --repo "${GITHUB_REPOSITORY}" \
+                --title "${GITHUB_REF_NAME}" \
+                --prerelease \
+                --generate-notes ;;
+            *)
+              gh release create "${GITHUB_REF_NAME}" dist/* \
+                --repo "${GITHUB_REPOSITORY}" \
+                --title "${GITHUB_REF_NAME}" \
+                --generate-notes ;;
+          esac
